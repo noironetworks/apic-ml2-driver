@@ -1,0 +1,7 @@
+[run]
+branch = True
+source = apic_ml2
+omit = apic_ml2/tests/*,apic_ml2/openstack/*
+
+[report]
+ignore-errors = True

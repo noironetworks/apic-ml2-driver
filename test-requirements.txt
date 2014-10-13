@@ -1,0 +1,22 @@
+# The order of packages is significant, because pip processes them in the order
+# of appearance. Changing the order has an impact on the overall integration
+# process, which may cause wedges in the gate later.
+
+-e git://github.com/openstack/neutron.git@stable/icehouse#egg=neutron_icehouse
+hacking>=0.8.0,<0.9
+
+cliff>=1.4.3
+coverage>=3.6
+discover
+fixtures>=0.3.14
+mock>=1.0
+python-subunit>=0.0.18
+ordereddict
+sphinx>=1.1.2,<1.1.999
+testrepository>=0.0.18
+testtools>=0.9.34
+WebTest>=2.0
+# Packages for the Cisco Plugin
+###############################
+configobj
+###############################
