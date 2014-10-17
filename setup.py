@@ -18,5 +18,6 @@
 import setuptools
 
 setuptools.setup(
+    version='1.0.0',
     setup_requires=['pbr'],
     pbr=True)
