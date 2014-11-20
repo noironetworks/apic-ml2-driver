@@ -12,8 +12,6 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import pbr.version
+import gettext
 
-
-__version__ = pbr.version.VersionInfo(
-    'apic-ml2-driver').version_string()
+gettext.install('neutron', unicode=1)
