@@ -147,12 +147,10 @@ class APICMechanismDriver(api.MechanismDriver):
         # Get port
         port = context.current
         # Check if a compute port
-        if port.get('device_owner', '').startswith('compute'):
+        if port.get(portbindings.HOST_ID):
             self._perform_path_port_operations(context, port)
-        elif port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
+        if port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
             self._perform_gw_port_operations(context, port)
-        elif port.get('device_owner') == n_constants.DEVICE_OWNER_DHCP:
-            self._perform_path_port_operations(context, port)
 
     def _delete_contract(self, context):
         port = context.current
@@ -201,28 +199,16 @@ class APICMechanismDriver(api.MechanismDriver):
     def create_port_postcommit(self, context):
         self._perform_port_operations(context)
 
-    def update_port_precommit(self, context):
-        orig = context.original
-        curr = context.current
-        if (orig['device_owner'] != curr['device_owner']
-                or orig['device_id'] != curr['device_id']):
-            raise exc.ApicOperationNotSupported(
-                resource='Port', msg='Port device owner and id cannot be '
-                                     'changed.')
-
     @sync_init
     def update_port_postcommit(self, context):
         self._perform_port_operations(context)
 
     def delete_port_postcommit(self, context):
         port = context.current
-        # Check if a compute port
-        if port.get('device_owner', '').startswith('compute'):
+        if port.get(portbindings.HOST_ID):
             self._delete_path_if_last(context)
         elif port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
             self._delete_contract(context)
-        elif port.get('device_owner') == n_constants.DEVICE_OWNER_DHCP:
-            self._delete_path_if_last(context)
 
     @sync_init
     def create_network_postcommit(self, context):
