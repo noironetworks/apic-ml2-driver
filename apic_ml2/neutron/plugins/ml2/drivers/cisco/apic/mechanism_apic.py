@@ -182,18 +182,20 @@ class APICMechanismDriver(api.MechanismDriver):
             self._delete_port_path(context, atenant_id, anetwork_id)
 
     def _get_subnet_info(self, context, subnet):
-        tenant_id = subnet['tenant_id']
-        network_id = subnet['network_id']
-        network = context._plugin.get_network(context._plugin_context,
-                                              network_id)
-        if not network.get('router:external'):
-            cidr = netaddr.IPNetwork(subnet['cidr'])
-            gateway_ip = '%s/%s' % (subnet['gateway_ip'], str(cidr.prefixlen))
+        if subnet['gateway_ip']:
+            tenant_id = subnet['tenant_id']
+            network_id = subnet['network_id']
+            network = context._plugin.get_network(context._plugin_context,
+                                                  network_id)
+            if not network.get('router:external'):
+                cidr = netaddr.IPNetwork(subnet['cidr'])
+                gateway_ip = '%s/%s' % (subnet['gateway_ip'],
+                                        str(cidr.prefixlen))
 
-            # Convert to APIC IDs
-            tenant_id = self.name_mapper.tenant(context, tenant_id)
-            network_id = self.name_mapper.network(context, network_id)
-            return tenant_id, network_id, gateway_ip
+                # Convert to APIC IDs
+                tenant_id = self.name_mapper.tenant(context, tenant_id)
+                network_id = self.name_mapper.network(context, network_id)
+                return tenant_id, network_id, gateway_ip
 
     @sync_init
     def create_port_postcommit(self, context):
