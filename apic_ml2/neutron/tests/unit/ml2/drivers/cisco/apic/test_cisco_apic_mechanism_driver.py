@@ -12,8 +12,6 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-#
-# @author: Henry Gessau, Cisco Systems
 
 import sys
 
@@ -26,8 +24,8 @@ from neutron.extensions import portbindings
 from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron.tests import base
 
-from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import mechanism_apic as \
-    md
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
+    mechanism_apic as md)
 from apic_ml2.neutron.tests.unit.ml2.drivers.cisco.apic import (
     test_cisco_apic_common as mocked)
 
@@ -83,12 +81,51 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
                                             TEST_SEGMENT1)
         port_ctx = self._get_port_context(mocked.APIC_TENANT,
                                           mocked.APIC_NETWORK,
-                                          'vm1', net_ctx, HOST_ID1)
+                                          'vm1', net_ctx, HOST_ID1,
+                                          device_owner='any')
         mgr = self.driver.apic_manager
         self.driver.update_port_postcommit(port_ctx)
         mgr.ensure_path_created_for_port.assert_called_once_with(
             mocked.APIC_TENANT, mocked.APIC_NETWORK, HOST_ID1,
             ENCAP, transaction='transaction')
+
+    def test_create_port_postcommit(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK,
+                                            TEST_SEGMENT1)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK,
+                                          'vm1', net_ctx, HOST_ID1,
+                                          device_owner='any')
+        mgr = self.driver.apic_manager
+        self.driver.create_port_postcommit(port_ctx)
+        mgr.ensure_path_created_for_port.assert_called_once_with(
+            mocked.APIC_TENANT, mocked.APIC_NETWORK, HOST_ID1,
+            ENCAP, transaction='transaction')
+
+    def test_update_port_nobound_postcommit(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK,
+                                            TEST_SEGMENT1)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK,
+                                          'vm1', net_ctx, None,
+                                          device_owner='any')
+        self.driver.update_port_postcommit(port_ctx)
+        mgr = self.driver.apic_manager
+        self.assertFalse(mgr.ensure_path_created_for_port.called)
+
+    def test_create_port_nobound_postcommit(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK,
+                                            TEST_SEGMENT1)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK,
+                                          'vm1', net_ctx, None,
+                                          device_owner='any')
+        self.driver.create_port_postcommit(port_ctx)
+        mgr = self.driver.apic_manager
+        self.assertFalse(mgr.ensure_path_created_for_port.called)
 
     def test_update_gw_port_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
@@ -187,6 +224,17 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             mocked.APIC_TENANT, mocked.APIC_NETWORK,
             '%s/%s' % (SUBNET_GATEWAY, SUBNET_NETMASK))
 
+    def test_create_subnet_nogw_postcommit(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK,
+                                            TEST_SEGMENT1)
+        subnet_ctx = self._get_subnet_context(None,
+                                              SUBNET_CIDR,
+                                              net_ctx)
+        mgr = self.driver.apic_manager
+        self.driver.create_subnet_postcommit(subnet_ctx)
+        self.assertFalse(mgr.ensure_subnet_created_on_apic.called)
+
     def _get_network_context(self, tenant_id, net_id, seg_id=None,
                              seg_type='vlan', external=False):
         network = {'id': net_id,
@@ -213,9 +261,9 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         return FakeSubnetContext(subnet, network)
 
     def _get_port_context(self, tenant_id, net_id, vm_id, network, host,
-                          gw=False):
+                          gw=False, device_owner='compute'):
         port = {'device_id': vm_id,
-                'device_owner': 'compute',
+                'device_owner': device_owner,
                 'binding:host_id': host,
                 'tenant_id': tenant_id,
                 'id': mocked.APIC_PORT,
