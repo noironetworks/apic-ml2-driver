@@ -18,6 +18,8 @@ import sys
 import mock
 
 sys.modules["apicapi"] = mock.Mock()
+sys.modules["opflexagent"] = mock.Mock()
+sys.modules["opflexagent"].constants.TYPE_OPFLEX = 'opflex'
 
 from neutron.common import constants as n_constants
 from neutron.extensions import portbindings
@@ -50,7 +52,6 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         super(TestCiscoApicMechDriver, self).setUp()
         mocked.ControllerMixin.set_up_mocks(self)
         mocked.ConfigMixin.set_up_mocks(self)
-
         self.mock_apic_manager_login_responses()
         self.driver = md.APICMechanismDriver()
         self.driver.synchronizer = None
@@ -68,6 +69,9 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             name_mapper=mock.Mock(), ext_net_dict=self.external_network_dict)
 
         self.driver.apic_manager.apic.transaction = self.fake_transaction
+        self.agent = {'configurations': {
+            'opflex_networks': None,
+            'bridge_mappings': {'physnet1': 'br-eth1'}}}
 
     def test_initialize(self):
         mgr = self.driver.apic_manager
@@ -98,10 +102,26 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
                                           'vm1', net_ctx, HOST_ID1,
                                           device_owner='any')
         mgr = self.driver.apic_manager
+        self.assertTrue(self.driver.check_segment_for_agent(
+            port_ctx._bound_segment, self.agent))
         self.driver.create_port_postcommit(port_ctx)
         mgr.ensure_path_created_for_port.assert_called_once_with(
             mocked.APIC_TENANT, mocked.APIC_NETWORK, HOST_ID1,
             ENCAP, transaction='transaction')
+
+    def test_create_port_postcommit_opflex(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK,
+                                            TEST_SEGMENT1, seg_type='opflex')
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK,
+                                          'vm1', net_ctx, HOST_ID1,
+                                          device_owner='any')
+        self.assertTrue(self.driver.check_segment_for_agent(
+            port_ctx._bound_segment, self.agent))
+        mgr = self.driver.apic_manager
+        self.driver.create_port_postcommit(port_ctx)
+        self.assertFalse(mgr.ensure_path_created_for_port.called)
 
     def test_update_port_nobound_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
@@ -240,7 +260,8 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         network = {'id': net_id,
                    'name': net_id + '-name',
                    'tenant_id': tenant_id,
-                   'provider:segmentation_id': seg_id}
+                   'provider:segmentation_id': seg_id,
+                   'provider:network_type': seg_type}
         if external:
             network['router:external'] = True
         if seg_id:
@@ -260,11 +281,12 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
                   'cidr': cidr}
         return FakeSubnetContext(subnet, network)
 
-    def _get_port_context(self, tenant_id, net_id, vm_id, network, host,
+    def _get_port_context(self, tenant_id, net_id, vm_id, network_ctx, host,
                           gw=False, device_owner='compute'):
         port = {'device_id': vm_id,
                 'device_owner': device_owner,
                 'binding:host_id': host,
+                'binding:vif_type': 'unbound' if not host else 'ovs',
                 'tenant_id': tenant_id,
                 'id': mocked.APIC_PORT,
                 'name': mocked.APIC_PORT,
@@ -272,7 +294,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         if gw:
             port['device_owner'] = n_constants.DEVICE_OWNER_ROUTER_GW
             port['device_id'] = mocked.APIC_ROUTER
-        return FakePortContext(port, network)
+        return FakePortContext(port, network_ctx)
 
 
 class FakeNetworkContext(object):

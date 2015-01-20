@@ -17,12 +17,15 @@ from apicapi import apic_manager
 from keystoneclient.v2_0 import client as keyclient
 import netaddr
 from neutron.common import constants as n_constants
+from neutron.extensions import portbindings
 from neutron.openstack.common import lockutils
 from neutron.openstack.common import log
 from neutron.plugins.common import constants
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers.cisco.apic import apic_model
+from neutron.plugins.ml2.drivers import mech_openvswitch
 from neutron.plugins.ml2 import models
+from opflexagent import constants as ofcst
 from oslo.config import cfg
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_sync
@@ -32,7 +35,7 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config
 LOG = log.getLogger(__name__)
 
 
-class APICMechanismDriver(api.MechanismDriver):
+class APICMechanismDriver(mech_openvswitch.OpenvswitchMechanismDriver):
 
     @staticmethod
     def get_apic_manager(client=True):
@@ -63,6 +66,33 @@ class APICMechanismDriver(api.MechanismDriver):
         apic_config = cfg.CONF.ml2_cisco_apic
         return apic_sync.ApicRouterSynchronizer(inst,
                                                 apic_config.apic_sync_interval)
+
+    def check_segment_for_agent(self, segment, agent):
+        network_type = segment[api.NETWORK_TYPE]
+        if network_type == ofcst.TYPE_OPFLEX:
+            opflex_mappings = agent['configurations'].get('opflex_networks',
+                                                          [])
+            LOG.debug(_("Checking segment: %(segment)s "
+                        "for physical network: %(mappings)s "),
+                      {'segment': segment, 'mappings': opflex_mappings})
+            return (opflex_mappings is None or
+                    segment[api.PHYSICAL_NETWORK] in opflex_mappings)
+        else:
+            mappings = agent['configurations'].get('bridge_mappings', {})
+            tunnel_types = agent['configurations'].get('tunnel_types', [])
+            LOG.debug(_("Checking segment: %(segment)s "
+                        "for mappings: %(mappings)s "
+                        "with tunnel_types: %(tunnel_types)s"),
+                      {'segment': segment, 'mappings': mappings,
+                       'tunnel_types': tunnel_types})
+            if network_type == 'local':
+                return True
+            elif network_type in tunnel_types:
+                return True
+            elif network_type in ['flat', 'vlan']:
+                return segment[api.PHYSICAL_NETWORK] in mappings
+            else:
+                return False
 
     def initialize(self):
         # initialize apic
@@ -142,7 +172,8 @@ class APICMechanismDriver(api.MechanismDriver):
         # Get port
         port = context.current
         # Check if a compute port
-        if context.host:
+        if self._is_port_bound(port) and not self._is_apic_network_type(
+                context):
             self._perform_path_port_operations(context, port)
         if port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
             self._perform_gw_port_operations(context, port)
@@ -203,7 +234,8 @@ class APICMechanismDriver(api.MechanismDriver):
     def delete_port_postcommit(self, context):
         port = context.current
         # Check if a compute port
-        if context.host:
+        if (not self._is_apic_network_type(context) and context.host and
+                context._binding.segment):
             self._delete_path_if_last(context)
         if port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
             self._delete_contract(context)
@@ -284,3 +316,12 @@ class APICMechanismDriver(api.MechanismDriver):
             tenant_id, network_id, gateway_ip = info
             self.apic_manager.ensure_subnet_deleted_on_apic(
                 tenant_id, network_id, gateway_ip)
+
+    def _is_port_bound(self, port):
+        return port[portbindings.VIF_TYPE] not in [
+            portbindings.VIF_TYPE_UNBOUND,
+            portbindings.VIF_TYPE_BINDING_FAILED]
+
+    def _is_apic_network_type(self, port_context):
+        return (port_context.network.current['provider:network_type'] ==
+                ofcst.TYPE_OPFLEX)
