@@ -16,16 +16,21 @@
 from apicapi import apic_manager
 from keystoneclient.v2_0 import client as keyclient
 import netaddr
+from neutron.agent import securitygroups_rpc
 from neutron.common import constants as n_constants
 from neutron.extensions import portbindings
 from neutron.openstack.common import lockutils
 from neutron.openstack.common import log
 from neutron.plugins.common import constants
+from neutron.common import rpc as n_rpc
+from neutron.common import topics
+from neutron import manager
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers.cisco.apic import apic_model
-from neutron.plugins.ml2.drivers import mech_openvswitch
+from neutron.plugins.ml2.drivers import mech_agent
 from neutron.plugins.ml2 import models
 from opflexagent import constants as ofcst
+from opflexagent import rpc
 from oslo.config import cfg
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_sync
@@ -35,7 +40,7 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config
 LOG = log.getLogger(__name__)
 
 
-class APICMechanismDriver(mech_openvswitch.OpenvswitchMechanismDriver):
+class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     @staticmethod
     def get_apic_manager(client=True):
@@ -67,6 +72,22 @@ class APICMechanismDriver(mech_openvswitch.OpenvswitchMechanismDriver):
         return apic_sync.ApicRouterSynchronizer(inst,
                                                 apic_config.apic_sync_interval)
 
+    def __init__(self):
+        sg_enabled = securitygroups_rpc.is_firewall_enabled()
+        self.vif_details = {portbindings.CAP_PORT_FILTER: sg_enabled,
+                            portbindings.OVS_HYBRID_PLUG: sg_enabled}
+        self.vif_type = portbindings.VIF_TYPE_OVS
+        super(APICMechanismDriver, self).__init__(
+            ofcst.AGENT_TYPE_OPFLEX_OVS)
+
+    def try_to_bind_segment_for_agent(self, context, segment, agent):
+        if self.check_segment_for_agent(segment, agent):
+            context.set_binding(
+                segment[api.ID], self.vif_type, self.vif_details)
+            return True
+        else:
+            return False
+
     def check_segment_for_agent(self, segment, agent):
         network_type = segment[api.NETWORK_TYPE]
         if network_type == ofcst.TYPE_OPFLEX:
@@ -97,10 +118,60 @@ class APICMechanismDriver(mech_openvswitch.OpenvswitchMechanismDriver):
     def initialize(self):
         # initialize apic
         self.apic_manager = APICMechanismDriver.get_apic_manager()
+        self._setup_rpc_listeners()
+        self._setup_rpc()
         self.name_mapper = self.apic_manager.apic_mapper
         self.synchronizer = None
         self.apic_manager.ensure_infra_created_on_apic()
         self.apic_manager.ensure_bgp_pod_policy_created_on_apic()
+
+    def _setup_rpc_listeners(self):
+        self.endpoints = [rpc.GBPServerRpcCallback(self)]
+        self.topic = rpc.TOPIC_OPFLEX
+        self.conn = n_rpc.create_connection(new=True)
+        self.conn.create_consumer(self.topic, self.endpoints,
+                                  fanout=False)
+        return self.conn.consume_in_threads()
+
+    def _setup_rpc(self):
+        self.notifier = rpc.AgentNotifierApi(topics.AGENT)
+
+    # RPC Method
+    def get_gbp_details(self, context, **kwargs):
+        _core_plugin = manager.NeutronManager.get_plugin()
+        port_id = _core_plugin._device_to_port_id(
+            kwargs['device'])
+        port_context = _core_plugin.get_bound_port_context(
+            context, port_id, kwargs['host'])
+        if not port_context:
+            LOG.warning(_("Device %(device)s requested by agent "
+                          "%(agent_id)s not found in database"),
+                        {'device': port_id,
+                         'agent_id': kwargs.get('agent_id')})
+            return
+        port = port_context.current
+
+        context._plugin = _core_plugin
+        context._plugin_context = context
+
+        def is_port_promiscuous(port):
+            return port['device_owner'] == n_constants.DEVICE_OWNER_DHCP
+
+        segment = port_context.bound_segment or {}
+        return {'device': kwargs.get('device'),
+                'port_id': port_id,
+                'mac_address': port['mac_address'],
+                'segment': segment,
+                'segmentation_id': segment.get('segmentation_id'),
+                'network_type': segment.get('network_type'),
+                'tenant_id': port['tenant_id'],
+                'host': port[portbindings.HOST_ID],
+                'ptg_tentant': str(self.name_mapper.tenant(
+                    context, port['tenant_id'])),
+                'endpoint_group_name': str(
+                    self.name_mapper.network(
+                        context, port['network_id'])),
+                'promiscuous_mode': is_port_promiscuous(port)}
 
     def sync_init(f):
         def inner(inst, *args, **kwargs):
