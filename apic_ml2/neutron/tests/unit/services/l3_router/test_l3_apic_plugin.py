@@ -12,8 +12,6 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-#
-# @author: Arvind Somya (asomya@cisco.com), Cisco Systems
 
 import sys
 
@@ -21,13 +19,12 @@ import mock
 
 sys.modules["apicapi"] = mock.Mock()
 
-from neutron.tests import base
-
-from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import mechanism_apic as \
-    md
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
+    mechanism_apic as md)
 from apic_ml2.neutron.services.l3_router import l3_apic
 from apic_ml2.neutron.tests.unit.ml2.drivers.cisco.apic import (
     test_cisco_apic_common as mocked)
+from neutron.tests.unit import testlib_api
 
 
 TENANT = 'tenant1'
@@ -66,12 +63,12 @@ class FakePort(object):
         self.subnet_id = SUBNET
 
 
-class TestCiscoApicL3Plugin(base.BaseTestCase,
+class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
                             mocked.ControllerMixin,
                             mocked.ConfigMixin):
     def setUp(self):
         super(TestCiscoApicL3Plugin, self).setUp()
-        mock.patch('apic_ml2.neutron.plugins.ml2.drivers.cisco.apic.'
+        mock.patch('neutron.plugins.ml2.drivers.cisco.apic.'
                    'apic_model.ApicDbModel').start()
         mocked.ControllerMixin.set_up_mocks(self)
         mocked.ConfigMixin.set_up_mocks(self)
@@ -103,11 +100,11 @@ class TestCiscoApicL3Plugin(base.BaseTestCase,
         self.plugin.get_subnet = mock.Mock(return_value=self.subnet)
         self.plugin.get_network = mock.Mock(return_value=self.interface_info)
         self.plugin.get_port = mock.Mock(return_value=self.port)
-        mock.patch('neutron.db.l3_gwmode_db.L3_NAT_db_mixin.'
+        mock.patch('neutron.db.l3_dvr_db.L3_NAT_with_dvr_db_mixin.'
                    '_core_plugin').start()
-        mock.patch('neutron.db.l3_gwmode_db.L3_NAT_db_mixin.'
+        mock.patch('neutron.db.l3_dvr_db.L3_NAT_with_dvr_db_mixin.'
                    'add_router_interface').start()
-        mock.patch('neutron.db.l3_gwmode_db.L3_NAT_db_mixin.'
+        mock.patch('neutron.db.l3_dvr_db.L3_NAT_with_dvr_db_mixin.'
                    'remove_router_interface').start()
         mock.patch('neutron.openstack.common.excutils.'
                    'save_and_reraise_exception').start()

@@ -12,8 +12,6 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-#
-# @author: Ivar Lazzaro (ivar-lazzaro), Cisco Systems Inc.
 
 from neutron.common import constants as n_constants
 from neutron import context
@@ -21,6 +19,7 @@ from neutron import manager
 from neutron.openstack.common.gettextutils import _LW
 from neutron.openstack.common import log
 from neutron.openstack.common import loopingcall
+from neutron.plugins.ml2 import db as l2_db
 from neutron.plugins.ml2 import driver_context
 
 LOG = log.getLogger(__name__)
@@ -79,9 +78,11 @@ class ApicBaseSynchronizer(SynchronizerBase):
 
         # Sync Ports (compute/gateway/dhcp)
         for port in self.core_plugin.get_ports(ctx):
+            _, binding = l2_db.get_locked_port_and_binding(ctx.session,
+                                                           port['id'])
             network = self.core_plugin.get_network(ctx, port['network_id'])
             mech_context = driver_context.PortContext(self.core_plugin, ctx,
-                                                      port, network)
+                                                      port, network, binding)
             try:
                 self.driver.create_port_postcommit(mech_context)
             except Exception:

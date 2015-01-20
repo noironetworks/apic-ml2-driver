@@ -12,15 +12,12 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-#
-# @author: Arvind Somya (asomya@cisco.com), Cisco Systems Inc.
-# @author: Ivar Lazzaro (ivarlazzaro@gmail.com), Cisco Systems Inc.
 
 from apicapi import apic_mapper
 
 from neutron.db import db_base_plugin_v2
 from neutron.db import extraroute_db
-from neutron.db import l3_gwmode_db
+from neutron.db import l3_dvr_db
 from neutron.openstack.common import excutils
 from neutron.plugins.common import constants
 
@@ -28,9 +25,8 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import mechanism_apic
 
 
 class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
-                          db_base_plugin_v2.CommonDbMixin,
-                          extraroute_db.ExtraRoute_db_mixin,
-                          l3_gwmode_db.L3_NAT_db_mixin):
+                          l3_dvr_db.L3_NAT_with_dvr_db_mixin,
+                          extraroute_db.ExtraRoute_db_mixin):
     supported_extension_aliases = ["router", "ext-gw-mode", "extraroute"]
 
     def __init__(self):

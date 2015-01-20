@@ -12,24 +12,19 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-#
-# @author: Arvind Somya (asomya@cisco.com), Cisco Systems Inc.
 
 from apicapi import apic_manager
-from apicapi import exceptions as exc
 from keystoneclient.v2_0 import client as keyclient
 import netaddr
-from oslo.config import cfg
-
 from neutron.common import constants as n_constants
-from neutron.extensions import portbindings
 from neutron.openstack.common import lockutils
 from neutron.openstack.common import log
 from neutron.plugins.common import constants
 from neutron.plugins.ml2 import driver_api as api
+from neutron.plugins.ml2.drivers.cisco.apic import apic_model
 from neutron.plugins.ml2 import models
+from oslo.config import cfg
 
-from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_model
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_sync
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config
 
@@ -104,7 +99,7 @@ class APICMechanismDriver(api.MechanismDriver):
                 in [constants.TYPE_VLAN]):
             seg = context.bound_segment.get(api.SEGMENTATION_ID)
         # hosts on which this vlan is provisioned
-        host = port.get(portbindings.HOST_ID)
+        host = context.host
         # Create a static path attachment for the host/epg/switchport combo
         with self.apic_manager.apic.transaction() as trs:
             self.apic_manager.ensure_path_created_for_port(
@@ -147,7 +142,7 @@ class APICMechanismDriver(api.MechanismDriver):
         # Get port
         port = context.current
         # Check if a compute port
-        if port.get(portbindings.HOST_ID):
+        if context.host:
             self._perform_path_port_operations(context, port)
         if port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
             self._perform_gw_port_operations(context, port)
@@ -162,16 +157,16 @@ class APICMechanismDriver(api.MechanismDriver):
                                                        network_id)
 
     def _get_active_path_count(self, context):
-        return (context._plugin_context.session.query(models.PortBinding).
-                filter_by(host=context.current.get(portbindings.HOST_ID),
-                          segment=context._binding.segment).count())
+        return context._plugin_context.session.query(
+            models.PortBinding).filter_by(
+                host=context.host, segment=context._binding.segment).count()
 
     @lockutils.synchronized('apic-portlock')
     def _delete_port_path(self, context, atenant_id, anetwork_id):
         if not self._get_active_path_count(context):
             self.apic_manager.ensure_path_deleted_for_port(
                 atenant_id, anetwork_id,
-                context.current.get(portbindings.HOST_ID))
+                context.host)
 
     def _delete_path_if_last(self, context):
         if not self._get_active_path_count(context):
@@ -207,9 +202,10 @@ class APICMechanismDriver(api.MechanismDriver):
 
     def delete_port_postcommit(self, context):
         port = context.current
-        if port.get(portbindings.HOST_ID):
+        # Check if a compute port
+        if context.host:
             self._delete_path_if_last(context)
-        elif port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
+        if port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
             self._delete_contract(context)
 
     @sync_init

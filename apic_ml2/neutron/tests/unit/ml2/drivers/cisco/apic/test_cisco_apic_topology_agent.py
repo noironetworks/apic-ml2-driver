@@ -12,8 +12,6 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-#
-# @author: Ivar Lazzaro (ivarlazzaro@gmail.com), Cisco Systems, Inc.
 
 import sys
 
@@ -29,7 +27,7 @@ from apic_ml2.neutron.tests.unit.ml2.drivers.cisco.apic import (
 
 NOTIFIER = ('apic_ml2.neutron.plugins.ml2.drivers.cisco.apic.'
             'apic_topology.ApicTopologyServiceNotifierApi')
-RPC_CONNECTION = 'neutron.openstack.common.rpc.common.Connection'
+RPC_CONNECTION = 'neutron.common.rpc.Connection'
 AGENTS_DB = 'neutron.db.agents_db'
 PERIODIC_TASK = 'neutron.openstack.common.periodic_task'
 DEV_EXISTS = 'neutron.agent.linux.ip_lib.device_exists'

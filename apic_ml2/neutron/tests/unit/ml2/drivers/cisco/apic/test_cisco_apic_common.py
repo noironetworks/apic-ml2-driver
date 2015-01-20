@@ -12,18 +12,14 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-#
-# @author: Henry Gessau, Cisco Systems
 
 import contextlib
+import mock
 import requests
 
-import mock
-from oslo.config import cfg
-
-from neutron.common import config as neutron_config
 from neutron.plugins.ml2 import config  # noqa
-from neutron.tests.unit import test_api_v2
+from neutron.tests import base
+from oslo.config import cfg
 
 
 OK = requests.codes.ok
@@ -153,8 +149,7 @@ class ConfigMixin(object):
 
     def set_up_mocks(self):
         # Mock the configuration file
-        args = ['--config-file', test_api_v2.etcdir('neutron.conf.test')]
-        neutron_config.parse(args=args)
+        base.BaseTestCase.config_parse()
 
         # Configure global option apic_system_id
         cfg.CONF.set_override('apic_system_id', APIC_SYSTEM_ID)

@@ -12,37 +12,33 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-#
-# @author: Mandeep Dhami (dhami@noironetworks.com), Cisco Systems Inc.
 
 import re
+import sys
 
 import eventlet
 
 eventlet.monkey_patch()
-
 from oslo.config import cfg
 
 from neutron.agent.common import config
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
-from neutron.common import rpc as neutron_rpc
+from neutron.common import config as common_cfg
+from neutron.common import rpc
 from neutron.common import utils as neutron_utils
-from neutron import context
 from neutron.db import agents_db
 from neutron import manager
 from neutron.openstack.common.gettextutils import _LE, _LI
 from neutron.openstack.common import lockutils
 from neutron.openstack.common import log as logging
 from neutron.openstack.common import periodic_task
-from neutron.openstack.common import rpc
 from neutron.openstack.common import service as svc
 from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron import service
 
-from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import mechanism_apic as \
-    ma
-
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (mechanism_apic as
+                                                             ma)
 
 ACI_PORT_DESCR_FORMATS = [
     'topology/pod-1/node-(\d+)/sys/conng/path-\[eth(\d+)/(\d+)\]',
@@ -90,11 +86,10 @@ class ApicTopologyService(manager.Manager):
         }
 
         self.conn = rpc.create_connection(new=True)
-        self.dispatcher = neutron_rpc.PluginRpcDispatcher(
-            [self, agents_db.AgentExtRpcCallback()])
+        self.dispatcher = [self, agents_db.AgentExtRpcCallback()]
         self.conn.create_consumer(
             self.topic, self.dispatcher, fanout=True)
-        self.conn.consume_in_thread()
+        self.conn.consume_in_threads()
 
     def after_start(self):
         LOG.info(_LI("APIC service agent started"))
@@ -143,7 +138,7 @@ class ApicTopologyService(manager.Manager):
                 self.peers[(host, interface)] = nlink
 
 
-class ApicTopologyServiceNotifierApi(rpc.proxy.RpcProxy):
+class ApicTopologyServiceNotifierApi(rpc.RpcProxy):
 
     RPC_API_VERSION = '1.1'
 
@@ -331,19 +326,13 @@ class ApicTopologyAgent(manager.Manager):
             LOG.exception(_LE("APIC host agent: failed in reporting state"))
 
 
-class ApicService(service.Service):
-
-    def report_state(self):
-        ctxt = context.get_admin_context()
-        self.manager.report_send(ctxt)
-
-
 def launch(binary, manager, topic=None):
     cfg.CONF(project='neutron')
-    config.setup_logging(cfg.CONF)
+    common_cfg.init(sys.argv[1:])
+    config.setup_logging()
     report_period = cfg.CONF.ml2_cisco_apic.apic_agent_report_interval
     poll_period = cfg.CONF.ml2_cisco_apic.apic_agent_poll_interval
-    server = ApicService.create(
+    server = service.Service.create(
         binary=binary, manager=manager, topic=topic,
         report_interval=report_period, periodic_interval=poll_period)
     svc.launch(server).wait()
@@ -352,7 +341,7 @@ def launch(binary, manager, topic=None):
 def service_main():
     launch(
         BINARY_APIC_SERVICE_AGENT,
-        'apic_ml2.neutron.plugins.ml2.drivers.' +
+        'neutron.plugins.ml2.drivers.' +
         'cisco.apic.apic_topology.ApicTopologyService',
         TOPIC_APIC_SERVICE)
 
@@ -360,5 +349,5 @@ def service_main():
 def agent_main():
     launch(
         BINARY_APIC_HOST_AGENT,
-        'apic_ml2.neutron.plugins.ml2.drivers.' +
+        'neutron.plugins.ml2.drivers.' +
         'cisco.apic.apic_topology.ApicTopologyAgent')

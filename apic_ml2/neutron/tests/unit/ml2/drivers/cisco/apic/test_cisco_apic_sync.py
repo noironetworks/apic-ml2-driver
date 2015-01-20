@@ -12,8 +12,6 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-#
-# @author: Ivar Lazzaro (ivarlazzaro@gmail.com), Cisco Systems, Inc.
 
 import sys
 
@@ -21,14 +19,13 @@ import mock
 
 sys.modules["apicapi"] = mock.Mock()
 
-from neutron.tests import base
-
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_sync
-
+from neutron.tests import base
 
 LOOPING_CALL = 'neutron.openstack.common.loopingcall.FixedIntervalLoopingCall'
 GET_PLUGIN = 'neutron.manager.NeutronManager.get_plugin'
 GET_ADMIN_CONTEXT = 'neutron.context.get_admin_context'
+L2_DB = 'neutron.plugins.ml2.db.get_locked_port_and_binding'
 NETWORK_CONTEXT = 'neutron.plugins.ml2.driver_context.NetworkContext'
 SUBNET_CONTEXT = 'neutron.plugins.ml2.driver_context.SubnetContext'
 PORT_CONTEXT = 'neutron.plugins.ml2.driver_context.PortContext'
@@ -49,6 +46,9 @@ class TestCiscoApicSync(base.BaseTestCase):
         # Patch get admin context
         self.get_admin_context = mock.patch(GET_ADMIN_CONTEXT).start()
         self.get_admin_context.return_value = mock.Mock()
+        # Patch get locked port and binding
+        self.get_locked_port_and_binding = mock.patch(L2_DB).start()
+        self.get_locked_port_and_binding.return_value = [mock.Mock()] * 2
         # Patch driver context
         mock.patch(NETWORK_CONTEXT).start()
         mock.patch(SUBNET_CONTEXT).start()
@@ -64,6 +64,7 @@ class TestCiscoApicSync(base.BaseTestCase):
         sync.sync_base()
         self.driver.create_network_postcommit.assert_called_once()
         self.driver.create_subnet_postcommit.assert_called_once()
+        self.get_locked_port_and_binding.assert_called_once()
         self.driver.create_port_postcommit.assert_called_once()
 
     def test_sync_router(self):
