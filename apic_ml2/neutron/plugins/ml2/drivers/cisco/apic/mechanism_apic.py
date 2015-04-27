@@ -18,13 +18,13 @@ from keystoneclient.v2_0 import client as keyclient
 import netaddr
 from neutron.agent import securitygroups_rpc
 from neutron.common import constants as n_constants
+from neutron.common import rpc as n_rpc
+from neutron.common import topics
 from neutron.extensions import portbindings
+from neutron import manager
 from neutron.openstack.common import lockutils
 from neutron.openstack.common import log
 from neutron.plugins.common import constants
-from neutron.common import rpc as n_rpc
-from neutron.common import topics
-from neutron import manager
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers.cisco.apic import apic_model
 from neutron.plugins.ml2.drivers import mech_agent
@@ -166,7 +166,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 'network_type': segment.get('network_type'),
                 'tenant_id': port['tenant_id'],
                 'host': port[portbindings.HOST_ID],
-                'ptg_tentant': str(self.name_mapper.tenant(
+                'ptg_tenant': str(self.name_mapper.tenant(
                     context, port['tenant_id'])),
                 'endpoint_group_name': str(
                     self.name_mapper.network(
