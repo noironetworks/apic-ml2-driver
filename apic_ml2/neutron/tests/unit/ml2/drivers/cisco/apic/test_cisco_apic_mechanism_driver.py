@@ -68,6 +68,8 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.driver.name_mapper.subnet = echo
         self.driver.name_mapper.port = echo
         self.driver.name_mapper.router = echo
+        self.driver.name_mapper.pre_existing = echo
+        self.driver.name_mapper.echo = echo
         self.driver.name_mapper.app_profile.return_value = mocked.APIC_AP
         self.driver.apic_manager = mock.Mock(
             name_mapper=mock.Mock(), ext_net_dict=self.external_network_dict)
@@ -215,10 +217,12 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.assertFalse(mgr.ensure_external_epg_created.called)
 
         mgr.ensure_external_epg_consumed_contract.assert_called_once_with(
-            mocked.APIC_NETWORK_PRE, mgr.get_router_contract.return_value,
+            mocked.APIC_NETWORK_PRE + '-name',
+            mgr.get_router_contract.return_value,
             transaction='transaction', external_epg=mocked.APIC_EXT_EPG)
         mgr.ensure_external_epg_provided_contract.assert_called_once_with(
-            mocked.APIC_NETWORK_PRE, mgr.get_router_contract.return_value,
+            mocked.APIC_NETWORK_PRE + '-name',
+            mgr.get_router_contract.return_value,
             transaction='transaction', external_epg=mocked.APIC_EXT_EPG)
 
     def test_delete_gw_port_postcommit(self):
@@ -245,7 +249,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.driver._delete_path_if_last = mock.Mock()
         self.driver.delete_port_postcommit(port_ctx)
         mgr.delete_external_epg_contract.assert_called_once_with(
-            mocked.APIC_ROUTER, net_ctx.current['name'], scope=False,
+            mocked.APIC_ROUTER, net_ctx.current['name'],
             external_epg=mocked.APIC_EXT_EPG)
 
     def test_update_gw_port_postcommit_fail_contract_create(self):

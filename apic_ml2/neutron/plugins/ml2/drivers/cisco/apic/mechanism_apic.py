@@ -275,8 +275,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         router_info = self.apic_manager.ext_net_dict.get(network['name'])
 
         if router_id and router_info:
-            external_epg = (router_info.get('external_epg') or
-                            apic_manager.EXT_EPG)
+            external_epg = apic_manager.EXT_EPG
             scope = not bool(router_info.get('external_epg'))
             with self.apic_manager.apic.transaction() as trs:
                 # Get/Create contract
@@ -303,6 +302,11 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                     self.apic_manager.ensure_external_epg_created(
                         anetwork_id, external_epg=external_epg,
                         transaction=trs)
+                elif 'external_epg' in router_info:
+                    anetwork_id = self.name_mapper.pre_existing(
+                        context, network['id'])
+                    external_epg = self.name_mapper.pre_existing(
+                        context, router_info['external_epg'])
 
             ok = self._create_nat_epg_for_ext_net(network, external_epg, cid,
                                                   router_info)
@@ -339,9 +343,12 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             self.apic_manager.delete_external_epg_contract(arouter_id,
                                                            network_id)
         else:
+            anetwork_id = self.name_mapper.pre_existing(
+                context, context.network.current['name'])
+            external_epg = self.name_mapper.pre_existing(
+                context, router_info['external_epg'])
             self.apic_manager.delete_external_epg_contract(
-                arouter_id, context.network.current['name'],
-                external_epg=router_info['external_epg'], scope=False)
+                arouter_id, anetwork_id, external_epg=external_epg)
 
     def _get_active_path_count(self, context):
         return context._plugin_context.session.query(
