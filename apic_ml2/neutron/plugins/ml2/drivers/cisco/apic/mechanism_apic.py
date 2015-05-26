@@ -124,19 +124,29 @@ class APICMechanismDriver(api.MechanismDriver):
                 # Ensure that the external ctx exists
                 self.apic_manager.ensure_context_enforced()
                 # Create External Routed Network and configure it
-                self.apic_manager.ensure_external_routed_network_created(
-                    anetwork_id, transaction=trs)
-                self.apic_manager.ensure_logical_node_profile_created(
-                    anetwork_id, switch, module, sport, encap,
-                    address, transaction=trs)
-                self.apic_manager.ensure_static_route_created(
-                    anetwork_id, switch, next_hop, transaction=trs)
-                self.apic_manager.ensure_external_epg_created(
-                    anetwork_id, transaction=trs)
-                self.apic_manager.ensure_external_epg_consumed_contract(
-                    anetwork_id, cid, transaction=trs)
-                self.apic_manager.ensure_external_epg_provided_contract(
-                    anetwork_id, cid, transaction=trs)
+                if not router_info.get('preexisting'):
+                    self.apic_manager.ensure_external_routed_network_created(
+                        anetwork_id, transaction=trs)
+                    self.apic_manager.ensure_logical_node_profile_created(
+                        anetwork_id, switch, module, sport, encap,
+                        address, transaction=trs)
+                    self.apic_manager.ensure_static_route_created(
+                        anetwork_id, switch, next_hop, transaction=trs)
+                    self.apic_manager.ensure_external_epg_created(
+                        anetwork_id, transaction=trs)
+                    self.apic_manager.ensure_external_epg_consumed_contract(
+                        anetwork_id, cid, transaction=trs)
+                    self.apic_manager.ensure_external_epg_provided_contract(
+                        anetwork_id, cid, transaction=trs)
+                elif 'external_epg' in router_info:
+                    self.apic_manager.ensure_external_epg_consumed_contract(
+                        anetwork_id, cid,
+                        external_epg=router_info['external_epg'],
+                        transaction=trs)
+                    self.apic_manager.ensure_external_epg_provided_contract(
+                        anetwork_id, cid,
+                        external_epg=router_info['external_epg'],
+                        transaction=trs)
 
     def _perform_port_operations(self, context):
         # Get port
@@ -153,8 +163,16 @@ class APICMechanismDriver(api.MechanismDriver):
             context, context.network.current['id'])
         arouter_id = self.name_mapper.router(context,
                                              port.get('device_id'))
-        self.apic_manager.delete_external_epg_contract(arouter_id,
-                                                       network_id)
+        router_info = self.apic_manager.ext_net_dict.get(
+            context.network.current['name'], {})
+
+        if 'external_epg' not in router_info:
+            self.apic_manager.delete_external_epg_contract(arouter_id,
+                                                           network_id)
+        else:
+            self.apic_manager.delete_external_epg_contract(
+                arouter_id, network_id,
+                external_epg=router_info['external_epg'])
 
     def _get_active_path_count(self, context):
         return context._plugin_context.session.query(
@@ -250,7 +268,10 @@ class APICMechanismDriver(api.MechanismDriver):
             if self.apic_manager.ext_net_dict.get(network_name):
                 network_id = self.name_mapper.network(context,
                                                       context.current['id'])
-                self.apic_manager.delete_external_routed_network(network_id)
+                router_info = self.apic_manager.ext_net_dict.get(network_name)
+                if not router_info.get('preexisting'):
+                    self.apic_manager.delete_external_routed_network(
+                        network_id)
 
     @sync_init
     def create_subnet_postcommit(self, context):

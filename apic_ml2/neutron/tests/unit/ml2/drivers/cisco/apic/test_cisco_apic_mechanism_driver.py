@@ -42,6 +42,10 @@ TEST_SEGMENT1 = 'test-segment1'
 TEST_SEGMENT2 = 'test-segment2'
 
 
+def echo(context, id):
+    return id
+
+
 class TestCiscoApicMechDriver(base.BaseTestCase,
                               mocked.ControllerMixin,
                               mocked.ConfigMixin):
@@ -58,11 +62,11 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.driver.vif_type = 'test-vif_type'
         self.driver.cap_port_filter = 'test-cap_port_filter'
         self.driver.name_mapper = mock.Mock()
-        self.driver.name_mapper.tenant.return_value = mocked.APIC_TENANT
-        self.driver.name_mapper.network.return_value = mocked.APIC_NETWORK
-        self.driver.name_mapper.subnet.return_value = mocked.APIC_SUBNET
-        self.driver.name_mapper.port.return_value = mocked.APIC_PORT
-        self.driver.name_mapper.router.return_value = mocked.APIC_ROUTER
+        self.driver.name_mapper.tenant = echo
+        self.driver.name_mapper.network = echo
+        self.driver.name_mapper.subnet = echo
+        self.driver.name_mapper.port = echo
+        self.driver.name_mapper.router = echo
         self.driver.name_mapper.app_profile.return_value = mocked.APIC_AP
         self.driver.apic_manager = mock.Mock(
             name_mapper=mock.Mock(), ext_net_dict=self.external_network_dict)
@@ -160,6 +164,59 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             mocked.APIC_NETWORK, mgr.get_router_contract.return_value,
             transaction='transaction')
 
+    def test_update_pre_gw_port_postcommit(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK_PRE,
+                                            TEST_SEGMENT1, external=True)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK_PRE,
+                                          'vm1', net_ctx, HOST_ID1, gw=True)
+        mgr = self.driver.apic_manager
+        mgr.get_router_contract.return_value = mocked.FakeDbContract(
+            mocked.APIC_CONTRACT)
+        self.driver.update_port_postcommit(port_ctx)
+        mgr.get_router_contract.assert_called_once_with(
+            port_ctx.current['device_id'])
+        mgr.ensure_context_enforced.assert_called_once()
+        self.assertFalse(mgr.ensure_external_routed_network_created.called)
+        self.assertFalse(mgr.ensure_logical_node_profile_created.called)
+        self.assertFalse(mgr.ensure_static_route_created.called)
+        self.assertFalse(mgr.ensure_external_epg_created.called)
+
+        mgr.ensure_external_epg_consumed_contract.assert_called_once_with(
+            mocked.APIC_NETWORK_PRE, mgr.get_router_contract.return_value,
+            transaction='transaction', external_epg=mocked.APIC_EXT_EPG)
+        mgr.ensure_external_epg_provided_contract.assert_called_once_with(
+            mocked.APIC_NETWORK_PRE, mgr.get_router_contract.return_value,
+            transaction='transaction', external_epg=mocked.APIC_EXT_EPG)
+
+    def test_delete_gw_port_postcommit(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK,
+                                            TEST_SEGMENT1, external=True)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK,
+                                          'vm1', net_ctx, HOST_ID1, gw=True)
+        self.driver._delete_path_if_last = mock.Mock()
+        self.driver.delete_port_postcommit(port_ctx)
+        mgr = self.driver.apic_manager
+        mgr.delete_external_epg_contract.assert_called_once_with(
+            mocked.APIC_ROUTER, mocked.APIC_NETWORK)
+
+    def test_delete_pre_gw_port_postcommit(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK_PRE,
+                                            TEST_SEGMENT1, external=True)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK_PRE,
+                                          'vm1', net_ctx, HOST_ID1, gw=True)
+        mgr = self.driver.apic_manager
+        self.driver._delete_path_if_last = mock.Mock()
+        self.driver.delete_port_postcommit(port_ctx)
+        mgr.delete_external_epg_contract.assert_called_once_with(
+            mocked.APIC_ROUTER, mocked.APIC_NETWORK_PRE,
+            external_epg=mocked.APIC_EXT_EPG)
+
     def test_update_gw_port_postcommit_fail_contract_create(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
                                             mocked.APIC_NETWORK,
@@ -210,6 +267,14 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.driver.delete_network_postcommit(ctx)
         mgr.delete_external_routed_network.assert_called_once_with(
             mocked.APIC_NETWORK)
+
+    def test_delete_pre_external_network_postcommit(self):
+        ctx = self._get_network_context(mocked.APIC_TENANT,
+                                        mocked.APIC_NETWORK_PRE,
+                                        TEST_SEGMENT1, external=True)
+        mgr = self.driver.apic_manager
+        self.driver.delete_network_postcommit(ctx)
+        self.assertFalse(mgr.delete_external_routed_network.called)
 
     def test_create_subnet_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
