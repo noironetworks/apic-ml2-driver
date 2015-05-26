@@ -245,7 +245,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.driver._delete_path_if_last = mock.Mock()
         self.driver.delete_port_postcommit(port_ctx)
         mgr.delete_external_epg_contract.assert_called_once_with(
-            mocked.APIC_ROUTER, mocked.APIC_NETWORK_PRE,
+            mocked.APIC_ROUTER, net_ctx.current['name'], scope=False,
             external_epg=mocked.APIC_EXT_EPG)
 
     def test_update_gw_port_postcommit_fail_contract_create(self):
