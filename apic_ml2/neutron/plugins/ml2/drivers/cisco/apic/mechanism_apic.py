@@ -140,15 +140,16 @@ class APICMechanismDriver(api.MechanismDriver):
                     self.apic_manager.ensure_external_epg_provided_contract(
                         anetwork_id, cid, transaction=trs)
                 elif 'external_epg' in router_info:
-                    anetwork_id = network['name']
+                    anetwork_id = self.name_mapper.pre_existing(
+                        context, network['name'])
+                    external_epg = self.name_mapper.pre_existing(
+                        context, router_info['external_epg'])
                     self.apic_manager.ensure_external_epg_consumed_contract(
-                        anetwork_id, cid,
-                        external_epg=router_info['external_epg'],
-                        transaction=trs, scope=False)
+                        anetwork_id, cid, external_epg=external_epg,
+                        transaction=trs)
                     self.apic_manager.ensure_external_epg_provided_contract(
-                        anetwork_id, cid,
-                        external_epg=router_info['external_epg'],
-                        transaction=trs, scope=False)
+                        anetwork_id, cid, external_epg=external_epg,
+                        transaction=trs)
 
     def _perform_port_operations(self, context):
         # Get port
@@ -172,9 +173,12 @@ class APICMechanismDriver(api.MechanismDriver):
             self.apic_manager.delete_external_epg_contract(arouter_id,
                                                            network_id)
         else:
+            anetwork_id = self.name_mapper.pre_existing(
+                context, context.network.current['name'])
+            external_epg = self.name_mapper.pre_existing(
+                context, router_info['external_epg'])
             self.apic_manager.delete_external_epg_contract(
-                arouter_id, context.network.current['name'],
-                external_epg=router_info['external_epg'], scope=False)
+                arouter_id, anetwork_id, external_epg=external_epg)
 
     def _get_active_path_count(self, context):
         return context._plugin_context.session.query(
