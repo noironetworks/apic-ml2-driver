@@ -40,16 +40,21 @@ from neutron import service
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (mechanism_apic as
                                                              ma)
 
+ACI_CHASSIS_DESCR_FORMAT = 'topology/pod-1/node-(\d+)'
 ACI_PORT_DESCR_FORMATS = [
     'topology/pod-1/node-(\d+)/sys/conng/path-\[eth(\d+)/(\d+)\]',
     'topology/pod-1/paths-(\d+)/pathep-\[eth(\d+)/(\d+)\]',
 ]
+ACI_PORT_LOCAL_FORMAT = 'Eth(\d+)/(\d+)'
+ACI_VPCPORT_DESCR_FORMAT = 'topology/pod-1/protpaths-(\d+)-(\d+)/pathep-\[(.*)\]'
+
 AGENT_FORCE_UPDATE_COUNT = 100
 BINARY_APIC_SERVICE_AGENT = 'neutron-cisco-apic-service-agent'
 BINARY_APIC_HOST_AGENT = 'neutron-cisco-apic-host-agent'
 TOPIC_APIC_SERVICE = 'apic-service'
 TYPE_APIC_SERVICE_AGENT = 'cisco-apic-service-agent'
 TYPE_APIC_HOST_AGENT = 'cisco-apic-host-agent'
+VPCMODULE_NAME = 'vpc-%s-%s'
 
 
 LOG = logging.getLogger(__name__)
@@ -177,6 +182,9 @@ class ApicTopologyAgent(manager.Manager):
         self.lldpcmd = None
         self.peers = {}
         self.port_desc_re = map(re.compile, ACI_PORT_DESCR_FORMATS)
+        self.port_local_re = re.compile(ACI_PORT_LOCAL_FORMAT)
+        self.vpcport_desc_re = re.compile(ACI_VPCPORT_DESCR_FORMAT)
+        self.chassis_desc_re = re.compile(ACI_CHASSIS_DESCR_FORMAT)
         self.root_helper = self.conf.root_helper
         self.service_agent = ApicTopologyServiceNotifierApi()
         self.state = None
@@ -255,6 +263,7 @@ class ApicTopologyAgent(manager.Manager):
             LOG.exception(_LE("APIC service agent: exception in LLDP parsing"))
 
     def _get_peers(self):
+        interfaces = {}
         peers = {}
         lldpkeys = utils.execute(self.lldpcmd, self.root_helper)
         for line in lldpkeys.splitlines():
@@ -262,7 +271,14 @@ class ApicTopologyAgent(manager.Manager):
                 continue
             fqkey, value = line.split('=', 1)
             lldp, interface, key = fqkey.split('.', 2)
-            if key == 'port.descr':
+            if lldp == 'lldp':
+                if interface not in interfaces:
+                    interfaces[interface] = {}
+                interfaces[interface][key] = value
+
+        for interface in interfaces:
+            if 'port.descr' in interfaces[interface]:
+                value = interfaces[interface]['port.descr']
                 for regexp in self.port_desc_re:
                     match = regexp.match(value)
                     if match:
@@ -273,6 +289,31 @@ class ApicTopologyAgent(manager.Manager):
                         if interface not in peers:
                             peers[interface] = []
                         peers[interface].append(peer)
+                match = self.vpcport_desc_re.match(value)
+                if match:
+                    mac = self._get_mac(interface)
+                    switch1, switch2, bundle = match.group(1, 2, 3)
+                    switch, module, port = None, None, None
+                    if (bundle is not None and
+                        'chassis.descr' in interfaces[interface]):
+                        value = interfaces[interface]['chassis.descr']
+                        match = self.chassis_desc_re.match(value)
+                        if match:
+                            switch = match.group(1)
+                        if (switch is not None and
+                            'port.local' in interfaces[interface]):
+                            value = interfaces[interface]['port.local']
+                            match = self.port_local_re.match(value)
+                            if match:
+                                module, port = match.group(1, 2)
+                            if module is not None and port is not None:
+                                vpcmodule = VPCMODULE_NAME % (module, port)
+                                peer = (self.host, interface, mac,
+                                        switch, vpcmodule, bundle)
+                                if interface not in peers:
+                                    peers[interface] = []
+                                peers[interface].append(peer)
+
         return peers
 
     def _valid_peers(self, peers):
