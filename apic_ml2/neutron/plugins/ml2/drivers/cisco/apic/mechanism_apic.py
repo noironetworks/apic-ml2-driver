@@ -108,15 +108,9 @@ class APICMechanismDriver(api.MechanismDriver):
     def _perform_gw_port_operations(self, context, port):
         router_id = port.get('device_id')
         network = context.network.current
-        anetwork_id = self.name_mapper.network(context, network['id'])
         router_info = self.apic_manager.ext_net_dict.get(network['name'])
 
         if router_id and router_info:
-            address = router_info['cidr_exposed']
-            next_hop = router_info['gateway_ip']
-            encap = router_info.get('encap')  # No encap if None
-            switch = router_info['switch']
-            module, sport = router_info['port'].split('/')
             with self.apic_manager.apic.transaction() as trs:
                 # Get/Create contract
                 arouter_id = self.name_mapper.router(context, router_id)
@@ -125,6 +119,13 @@ class APICMechanismDriver(api.MechanismDriver):
                 self.apic_manager.ensure_context_enforced()
                 # Create External Routed Network and configure it
                 if not router_info.get('preexisting'):
+                    address = router_info['cidr_exposed']
+                    next_hop = router_info['gateway_ip']
+                    encap = router_info.get('encap')  # No encap if None
+                    switch = router_info['switch']
+                    module, sport = router_info['port'].split('/')
+                    anetwork_id = self.name_mapper.network(context,
+                                                           network['id'])
                     self.apic_manager.ensure_external_routed_network_created(
                         anetwork_id, transaction=trs)
                     self.apic_manager.ensure_logical_node_profile_created(
@@ -139,14 +140,15 @@ class APICMechanismDriver(api.MechanismDriver):
                     self.apic_manager.ensure_external_epg_provided_contract(
                         anetwork_id, cid, transaction=trs)
                 elif 'external_epg' in router_info:
+                    anetwork_id = network['name']
                     self.apic_manager.ensure_external_epg_consumed_contract(
                         anetwork_id, cid,
                         external_epg=router_info['external_epg'],
-                        transaction=trs)
+                        transaction=trs, scope=False)
                     self.apic_manager.ensure_external_epg_provided_contract(
                         anetwork_id, cid,
                         external_epg=router_info['external_epg'],
-                        transaction=trs)
+                        transaction=trs, scope=False)
 
     def _perform_port_operations(self, context):
         # Get port
@@ -171,8 +173,8 @@ class APICMechanismDriver(api.MechanismDriver):
                                                            network_id)
         else:
             self.apic_manager.delete_external_epg_contract(
-                arouter_id, network_id,
-                external_epg=router_info['external_epg'])
+                arouter_id, context.network.current['name'],
+                external_epg=router_info['external_epg'], scope=False)
 
     def _get_active_path_count(self, context):
         return context._plugin_context.session.query(
