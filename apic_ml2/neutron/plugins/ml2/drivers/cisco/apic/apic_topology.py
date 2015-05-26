@@ -46,7 +46,8 @@ ACI_PORT_DESCR_FORMATS = [
     'topology/pod-1/paths-(\d+)/pathep-\[eth(\d+)/(\d+)\]',
 ]
 ACI_PORT_LOCAL_FORMAT = 'Eth(\d+)/(\d+)'
-ACI_VPCPORT_DESCR_FORMAT = 'topology/pod-1/protpaths-(\d+)-(\d+)/pathep-\[(.*)\]'
+ACI_VPCPORT_DESCR_FORMAT = ('topology/pod-1/protpaths-(\d+)-(\d+)/pathep-'
+                            '\[(.*)\]')
 
 AGENT_FORCE_UPDATE_COUNT = 5
 BINARY_APIC_SERVICE_AGENT = 'neutron-cisco-apic-service-agent'
@@ -131,16 +132,13 @@ class ApicTopologyService(manager.Manager):
                 self.apic_manager.remove_hostlink(*clink)
                 self.peers.pop((host, interface))
         else:
-            if clink is None:
-                # add new link to database
-                self.apic_manager.add_hostlink(*nlink)
-                self.peers[(host, interface)] = nlink
-            elif clink != nlink:
-                # delete old link and add new one (don't update in place)
+            if clink is not None and clink != nlink:
+                # delete old link
                 self.apic_manager.remove_hostlink(*clink)
                 self.peers.pop((host, interface))
-                self.apic_manager.add_hostlink(*nlink)
-                self.peers[(host, interface)] = nlink
+            # always try to add the new one (for sync)
+            self.apic_manager.add_hostlink(*nlink)
+            self.peers[(host, interface)] = nlink
 
 
 class ApicTopologyServiceNotifierApi(rpc.RpcProxy):
@@ -216,7 +214,9 @@ class ApicTopologyAgent(manager.Manager):
     def after_start(self):
         LOG.info(_LI("APIC host agent: started on %s"), self.host)
 
-    @periodic_task.periodic_task
+    @periodic_task.periodic_task(
+        spacing=cfg.CONF.ml2_cisco_apic.apic_agent_poll_interval,
+        run_immediately=True)
     def _check_for_new_peers(self, context):
         LOG.debug("APIC host agent: _check_for_new_peers")
 
@@ -295,13 +295,13 @@ class ApicTopologyAgent(manager.Manager):
                     switch1, switch2, bundle = match.group(1, 2, 3)
                     switch, module, port = None, None, None
                     if (bundle is not None and
-                        'chassis.descr' in interfaces[interface]):
+                            'chassis.descr' in interfaces[interface]):
                         value = interfaces[interface]['chassis.descr']
                         match = self.chassis_desc_re.match(value)
                         if match:
                             switch = match.group(1)
                         if (switch is not None and
-                            'port.local' in interfaces[interface]):
+                                'port.local' in interfaces[interface]):
                             value = interfaces[interface]['port.local']
                             match = self.port_local_re.match(value)
                             if match:
