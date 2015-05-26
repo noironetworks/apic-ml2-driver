@@ -48,7 +48,7 @@ ACI_PORT_DESCR_FORMATS = [
 ACI_PORT_LOCAL_FORMAT = 'Eth(\d+)/(\d+)'
 ACI_VPCPORT_DESCR_FORMAT = 'topology/pod-1/protpaths-(\d+)-(\d+)/pathep-\[(.*)\]'
 
-AGENT_FORCE_UPDATE_COUNT = 100
+AGENT_FORCE_UPDATE_COUNT = 5
 BINARY_APIC_SERVICE_AGENT = 'neutron-cisco-apic-service-agent'
 BINARY_APIC_HOST_AGENT = 'neutron-cisco-apic-host-agent'
 TOPIC_APIC_SERVICE = 'apic-service'
