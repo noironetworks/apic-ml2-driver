@@ -207,6 +207,18 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         mgr.delete_external_epg_contract.assert_called_once_with(
             mocked.APIC_ROUTER, mocked.APIC_NETWORK)
 
+    def test_delete_unrelated_gw_port_postcommit(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            'unrelated',
+                                            TEST_SEGMENT1, external=True)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          'unrelated',
+                                          'vm1', net_ctx, HOST_ID1, gw=True)
+        self.driver._delete_path_if_last = mock.Mock()
+        self.driver.delete_port_postcommit(port_ctx)
+        mgr = self.driver.apic_manager
+        self.assertFalse(mgr.delete_external_epg_contract.called)
+
     def test_delete_pre_gw_port_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
                                             mocked.APIC_NETWORK_PRE,

@@ -169,16 +169,17 @@ class APICMechanismDriver(api.MechanismDriver):
         router_info = self.apic_manager.ext_net_dict.get(
             context.network.current['name'], {})
 
-        if 'external_epg' not in router_info:
-            self.apic_manager.delete_external_epg_contract(arouter_id,
-                                                           network_id)
-        else:
-            anetwork_id = self.name_mapper.pre_existing(
-                context, context.network.current['name'])
-            external_epg = self.name_mapper.pre_existing(
-                context, router_info['external_epg'])
-            self.apic_manager.delete_external_epg_contract(
-                arouter_id, anetwork_id, external_epg=external_epg)
+        if router_info:
+            if 'external_epg' not in router_info:
+                self.apic_manager.delete_external_epg_contract(arouter_id,
+                                                               network_id)
+            else:
+                anetwork_id = self.name_mapper.pre_existing(
+                    context, context.network.current['name'])
+                external_epg = self.name_mapper.pre_existing(
+                    context, router_info['external_epg'])
+                self.apic_manager.delete_external_epg_contract(
+                    arouter_id, anetwork_id, external_epg=external_epg)
 
     def _get_active_path_count(self, context):
         return context._plugin_context.session.query(
