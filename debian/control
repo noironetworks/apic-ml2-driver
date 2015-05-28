@@ -1,0 +1,14 @@
+Source: neutron-ml2-driver-apic
+Section: python
+Priority: optional
+Maintainer: Cisco Systems, Inc. <apicapi@noironetworks.com>
+Build-Depends: debhelper (>= 9), python-setuptools (>= 3.3), python-all (>= 2.7)
+Standards-Version: 3.9.5
+Homepage: https://github.com/noironetworks/apic-ml2-driver
+Vcs-Browser: https://github.com/noironetworks/apic-ml2-driver
+
+Package: neutron-ml2-driver-apic
+Architecture: all
+Depends: lldpd, neutron-plugin-ml2, ${misc:Depends}, ${python:Depends}
+Description: Neutron ML2 driver for Cisco APIC
+ Standalone Openstack Neutron ML2 driver for working with Cisco APIC
