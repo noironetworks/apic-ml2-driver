@@ -1,0 +1,5 @@
+neutron-ml2-driver-apic (@VERSION@-@REVISION@) trusty; urgency=low
+
+  * [Placeholder]
+
+ -- Amit Bose <bose@noironetworks.com>  Wed, 29 Apr 2015 22:53:44 +0000
