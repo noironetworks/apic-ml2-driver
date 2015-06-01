@@ -382,7 +382,7 @@ def launch(binary, manager, topic=None):
 def service_main():
     launch(
         BINARY_APIC_SERVICE_AGENT,
-        'neutron.plugins.ml2.drivers.' +
+        'apic_ml2.neutron.plugins.ml2.drivers.' +
         'cisco.apic.apic_topology.ApicTopologyService',
         TOPIC_APIC_SERVICE)
 
@@ -390,5 +390,5 @@ def service_main():
 def agent_main():
     launch(
         BINARY_APIC_HOST_AGENT,
-        'neutron.plugins.ml2.drivers.' +
+        'apic_ml2.neutron.plugins.ml2.drivers.' +
         'cisco.apic.apic_topology.ApicTopologyAgent')
