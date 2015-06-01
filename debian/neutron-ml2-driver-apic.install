@@ -1,2 +1,2 @@
-debian/neutron-driver-apic-agent.conf /etc/init/
-debian/neutron-driver-apic-svc.conf /etc/init/
+debian/neutron-cisco-apic-host-agent.conf /etc/init/
+debian/neutron-cisco-apic-service-agent.conf /etc/init/
