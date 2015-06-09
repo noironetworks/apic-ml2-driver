@@ -28,6 +28,7 @@ from neutron.plugins.common import constants
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers.cisco.apic import apic_model
 from neutron.plugins.ml2.drivers import mech_agent
+from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron.plugins.ml2 import models
 from opflexagent import constants as ofcst
 from opflexagent import rpc

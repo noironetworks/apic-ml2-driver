@@ -23,7 +23,6 @@ sys.modules["opflexagent"].constants.TYPE_OPFLEX = 'opflex'
 
 from neutron.common import constants as n_constants
 from neutron.extensions import portbindings
-from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron.tests import base
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
