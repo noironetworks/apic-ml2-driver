@@ -159,20 +159,25 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             return port['device_owner'] == n_constants.DEVICE_OWNER_DHCP
 
         segment = port_context.bound_segment or {}
-        return {'device': kwargs.get('device'),
-                'port_id': port_id,
-                'mac_address': port['mac_address'],
-                'segment': segment,
-                'segmentation_id': segment.get('segmentation_id'),
-                'network_type': segment.get('network_type'),
-                'tenant_id': port['tenant_id'],
-                'host': port[portbindings.HOST_ID],
-                'ptg_tenant': str(self.name_mapper.tenant(
-                    context, port['tenant_id'])),
-                'endpoint_group_name': str(
-                    self.name_mapper.network(
-                        context, port['network_id'])),
-                'promiscuous_mode': is_port_promiscuous(port)}
+        details = {'device': kwargs.get('device'),
+                   'port_id': port_id,
+                   'mac_address': port['mac_address'],
+                   'app_profile_name': str(
+                       self.apic_manager.app_profile_name),
+                   'segment': segment,
+                   'segmentation_id': segment.get('segmentation_id'),
+                   'network_type': segment.get('network_type'),
+                   'tenant_id': port['tenant_id'],
+                   'host': port[portbindings.HOST_ID],
+                   'ptg_tenant': str(self.name_mapper.tenant(
+                       context, port['tenant_id'])),
+                   'endpoint_group_name': str(
+                       self.name_mapper.network(
+                           context, port['network_id'])),
+                   'promiscuous_mode': is_port_promiscuous(port)}
+        if port['device_owner'].startswith('compute:') and port['device_id']:
+            details['vm-name'] = port['device_id']
+        return details
 
     def sync_init(f):
         def inner(inst, *args, **kwargs):
