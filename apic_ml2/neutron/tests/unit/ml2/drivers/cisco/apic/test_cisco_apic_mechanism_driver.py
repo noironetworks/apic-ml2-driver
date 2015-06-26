@@ -140,6 +140,22 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.driver.create_port_postcommit(port_ctx)
         self.assertFalse(mgr.ensure_path_created_for_port.called)
 
+    def test_create_port_cross_tenant(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK,
+                                            TEST_SEGMENT1)
+        port_ctx = self._get_port_context('some-admin',
+                                          mocked.APIC_NETWORK,
+                                          'vm1', net_ctx, HOST_ID1,
+                                          device_owner='any')
+        mgr = self.driver.apic_manager
+        self.driver.create_port_postcommit(port_ctx)
+        self.assertEqual(port_ctx.current['tenant_id'], 'some-admin')
+        # Path creation gets called with the network tenant id
+        mgr.ensure_path_created_for_port.assert_called_once_with(
+            mocked.APIC_TENANT, mocked.APIC_NETWORK, HOST_ID1,
+            ENCAP, transaction='transaction')
+
     def test_update_port_nobound_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
                                             mocked.APIC_NETWORK,

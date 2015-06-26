@@ -251,7 +251,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         network_id = context.network.current['id']
         anetwork_id = self.name_mapper.network(context, network_id)
         # Get tenant details from port context
-        tenant_id = context.current['tenant_id']
+        tenant_id = context.network.current['tenant_id']
         tenant_id = self.name_mapper.tenant(context, tenant_id)
 
         # Get segmentation id
@@ -365,7 +365,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     def _delete_path_if_last(self, context):
         if not self._get_active_path_count(context):
-            tenant_id = context.current['tenant_id']
+            tenant_id = context.network.current['tenant_id']
             atenant_id = self.name_mapper.tenant(context, tenant_id)
             network_id = context.network.current['id']
             anetwork_id = self.name_mapper.network(context, network_id)
