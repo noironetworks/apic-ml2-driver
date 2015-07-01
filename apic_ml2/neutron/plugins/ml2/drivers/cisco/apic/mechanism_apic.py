@@ -47,8 +47,12 @@ _apic_driver_instance = None
 
 class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
+    apic_manager = None
+
     @staticmethod
     def get_apic_manager(client=True):
+        if APICMechanismDriver.apic_manager:
+            return APICMechanismDriver.apic_manager
         apic_config = cfg.CONF.ml2_cisco_apic
         network_config = {
             'vlan_ranges': cfg.CONF.ml2_type_vlan.network_vlan_ranges,
@@ -60,10 +64,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         apic_system_id = cfg.CONF.apic_system_id
         keyclient_param = keyclient if client else None
         keystone_authtoken = cfg.CONF.keystone_authtoken if client else None
-        return apic_manager.APICManager(apic_model.ApicDbModel(), log,
-                                        network_config, apic_config,
-                                        keyclient_param, keystone_authtoken,
-                                        apic_system_id)
+        APICMechanismDriver.apic_manager = apic_manager.APICManager(
+            apic_model.ApicDbModel(), log, network_config, apic_config,
+            keyclient_param, keystone_authtoken, apic_system_id)
+        return APICMechanismDriver.apic_manager
 
     @staticmethod
     def get_base_synchronizer(inst):
@@ -126,9 +130,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     def initialize(self):
         # initialize apic
-        self.apic_manager = APICMechanismDriver.get_apic_manager()
-        self._setup_rpc_listeners()
-        self._setup_rpc()
+        APICMechanismDriver.get_apic_manager()
         self.name_mapper = self.apic_manager.apic_mapper
         self.synchronizer = None
         self.apic_manager.ensure_infra_created_on_apic()

@@ -91,7 +91,6 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
         self.contract = FakeContract()
         self.plugin.get_router = mock.Mock(
             return_value={'id': ROUTER, 'admin_state_up': True})
-        self.plugin.manager = mock.Mock()
         self.plugin.manager.apic.transaction = self.fake_transaction
 
         self.plugin.get_subnet = mock.Mock(return_value=self.subnet)
@@ -146,3 +145,6 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
                           self.plugin.create_router, self.context, data)
         routers = self.plugin.get_routers(self.context)
         self.assertEqual(0, len(routers))
+
+    def test_singleton_manager(self):
+        self.assertIs(md.APICMechanismDriver.apic_manager, self.plugin.manager)
