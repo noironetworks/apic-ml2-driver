@@ -159,10 +159,10 @@ class APICMechanismDriver(api.MechanismDriver):
         # Get port
         port = context.current
         # Check if a compute port
-        if context.host:
-            self._perform_path_port_operations(context, port)
         if port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
             self._perform_gw_port_operations(context, port)
+        elif context.host:
+            self._perform_path_port_operations(context, port)
 
     def _delete_contract(self, context):
         port = context.current
