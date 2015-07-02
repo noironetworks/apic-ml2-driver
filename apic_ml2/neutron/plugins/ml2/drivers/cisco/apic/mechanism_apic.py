@@ -324,12 +324,11 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
     def _perform_port_operations(self, context):
         # Get port
         port = context.current
-        # Check if a compute port
-        if self._is_port_bound(port) and not self._is_apic_network_type(
-                context):
-            self._perform_path_port_operations(context, port)
         if port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
             self._perform_gw_port_operations(context, port)
+        elif self._is_port_bound(port) and not self._is_apic_network_type(
+                context):
+            self._perform_path_port_operations(context, port)
         self._notify_ports_due_to_router_update(port)
 
     def _delete_contract(self, context):
