@@ -30,15 +30,14 @@ from neutron.common import utils as neutron_utils
 from neutron.db import agents_db
 from neutron import manager
 from neutron.openstack.common.gettextutils import _LE, _LI
-from neutron.openstack.common import lockutils
 from neutron.openstack.common import log as logging
 from neutron.openstack.common import periodic_task
 from neutron.openstack.common import service as svc
-from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron import service
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (mechanism_apic as
                                                              ma)
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import rpc as arpc
 
 ACI_CHASSIS_DESCR_FORMAT = 'topology/pod-1/node-(\d+)'
 ACI_PORT_DESCR_FORMATS = [
@@ -52,7 +51,6 @@ ACI_VPCPORT_DESCR_FORMAT = ('topology/pod-1/protpaths-(\d+)-(\d+)/pathep-'
 AGENT_FORCE_UPDATE_COUNT = 5
 BINARY_APIC_SERVICE_AGENT = 'neutron-cisco-apic-service-agent'
 BINARY_APIC_HOST_AGENT = 'neutron-cisco-apic-host-agent'
-TOPIC_APIC_SERVICE = 'apic-service'
 TYPE_APIC_SERVICE_AGENT = 'cisco-apic-service-agent'
 TYPE_APIC_HOST_AGENT = 'cisco-apic-host-agent'
 VPCMODULE_NAME = 'vpc-%s-%s'
@@ -61,7 +59,7 @@ VPCMODULE_NAME = 'vpc-%s-%s'
 LOG = logging.getLogger(__name__)
 
 
-class ApicTopologyService(manager.Manager):
+class ApicTopologyService(manager.Manager, arpc.ApicTopologyRpcCallback):
 
     RPC_API_VERSION = '1.1'
 
@@ -70,15 +68,15 @@ class ApicTopologyService(manager.Manager):
             host = neutron_utils.get_hostname()
         super(ApicTopologyService, self).__init__(host=host)
 
+        self.apic_manager = ma.APICMechanismDriver.get_apic_manager(False)
+        self.peers = {}
         self.conf = cfg.CONF.ml2_cisco_apic
         self.conn = None
-        self.peers = {}
         self.invalid_peers = []
         self.dispatcher = None
         self.state = None
         self.state_agent = None
-        self.topic = TOPIC_APIC_SERVICE
-        self.apic_manager = ma.APICMechanismDriver.get_apic_manager(False)
+        self.topic = arpc.TOPIC_APIC_SERVICE
 
     def init_host(self):
         LOG.info(_LI("APIC service agent starting ..."))
@@ -115,57 +113,6 @@ class ApicTopologyService(manager.Manager):
         except Exception:
             LOG.exception(_LE("APIC service agent: failed in reporting state"))
 
-    @lockutils.synchronized('apic_service')
-    def update_link(self, context,
-                    host, interface, mac,
-                    switch, module, port):
-        LOG.debug("APIC service agent: received update_link: %s",
-                  ", ".join(map(str,
-                                [host, interface, mac, switch, module, port])))
-
-        nlink = (host, interface, mac, switch, module, port)
-        clink = self.peers.get((host, interface), None)
-
-        if switch == 0:
-            # this is a link delete, remove it
-            if clink is not None:
-                self.apic_manager.remove_hostlink(*clink)
-                self.peers.pop((host, interface))
-        else:
-            if clink is not None and clink != nlink:
-                # delete old link
-                self.apic_manager.remove_hostlink(*clink)
-                self.peers.pop((host, interface))
-            # always try to add the new one (for sync)
-            self.apic_manager.add_hostlink(*nlink)
-            self.peers[(host, interface)] = nlink
-
-
-class ApicTopologyServiceNotifierApi(rpc.RpcProxy):
-
-    RPC_API_VERSION = '1.1'
-
-    def __init__(self):
-        super(ApicTopologyServiceNotifierApi, self).__init__(
-            topic=TOPIC_APIC_SERVICE,
-            default_version=self.RPC_API_VERSION)
-
-    def update_link(self, context, host, interface, mac, switch, module, port):
-        self.fanout_cast(
-            context, self.make_msg(
-                'update_link',
-                host=host, interface=interface, mac=mac,
-                switch=switch, module=module, port=port),
-            topic=TOPIC_APIC_SERVICE)
-
-    def delete_link(self, context, host, interface):
-        self.fanout_cast(
-            context, self.make_msg(
-                'delete_link',
-                host=host, interface=interface, mac=None,
-                switch=0, module=0, port=0),
-            topic=TOPIC_APIC_SERVICE)
-
 
 class ApicTopologyAgent(manager.Manager):
     def __init__(self, host=None):
@@ -184,10 +131,10 @@ class ApicTopologyAgent(manager.Manager):
         self.vpcport_desc_re = re.compile(ACI_VPCPORT_DESCR_FORMAT)
         self.chassis_desc_re = re.compile(ACI_CHASSIS_DESCR_FORMAT)
         self.root_helper = self.conf.root_helper
-        self.service_agent = ApicTopologyServiceNotifierApi()
+        self.service_agent = arpc.ApicTopologyServiceNotifierApi()
         self.state = None
         self.state_agent = None
-        self.topic = TOPIC_APIC_SERVICE
+        self.topic = arpc.TOPIC_APIC_SERVICE
         self.uplink_ports = []
         self.invalid_peers = []
 
@@ -384,7 +331,7 @@ def service_main():
         BINARY_APIC_SERVICE_AGENT,
         'apic_ml2.neutron.plugins.ml2.drivers.' +
         'cisco.apic.apic_topology.ApicTopologyService',
-        TOPIC_APIC_SERVICE)
+        arpc.TOPIC_APIC_SERVICE)
 
 
 def agent_main():
