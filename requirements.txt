@@ -3,3 +3,4 @@
 # process, which may cause wedges in the gate later.
 
 apicapi
+oslo.concurrency>=1.8.0,<1.9.0

@@ -17,10 +17,11 @@ import contextlib
 import mock
 import requests
 
+from neutron import context
 from neutron.plugins.ml2 import config  # noqa
 from neutron.tests import base
 from oslo.config import cfg
-
+import webob
 
 OK = requests.codes.ok
 
@@ -161,7 +162,7 @@ class ConfigMixin(object):
 
         # Configure the ML2 mechanism drivers and network types
         ml2_opts = {
-            'mechanism_drivers': ['apic'],
+            'mechanism_drivers': ['openvswitch', 'cisco_apic_ml2'],
             'tenant_network_types': ['vlan'],
         }
         for opt, val in ml2_opts.items():
@@ -235,8 +236,130 @@ class ConfigMixin(object):
         self.mocked_parser.return_value.read.return_value = [apic_switch_cfg]
         self.mocked_parser.return_value.parsed = [apic_switch_cfg]
 
+    def override_conf(self, opt, val, group):
+        cfg.CONF.set_override(opt, val, group)
+
 
 class FakeDbContract(object):
 
     def __init__(self, contract_id):
         self.contract_id = contract_id
+
+
+class ApiManagerMixin(object):
+
+    def _create_resource(self, type, expected_res_status=None,
+                         is_admin_context=False, **kwargs):
+        plural = get_resource_plural(type)
+
+        data = {type: {'tenant_id': self._tenant_id}}
+        data[type].update(**kwargs)
+
+        req = self.new_create_request(plural, data, self.fmt)
+        req.environ['neutron.context'] = context.Context(
+            '', kwargs.get('tenant_id', self._tenant_id) if not
+            is_admin_context else self._tenant_id, is_admin_context)
+        res = req.get_response(self.api)
+
+        if expected_res_status:
+            self.assertEqual(res.status_int, expected_res_status)
+        elif res.status_int >= webob.exc.HTTPClientError.code:
+            raise webob.exc.HTTPClientError(code=res.status_int)
+
+        return self.deserialize(self.fmt, res)
+
+    def _update_resource(
+            self, id, type, expected_res_status=None, is_admin_context=False,
+            **kwargs):
+        plural = get_resource_plural(type)
+        data = {type: kwargs}
+        tenant_id = kwargs.pop('tenant_id', self._tenant_id)
+        # Create PT with bound port
+        req = self.new_update_request(plural, data, id, self.fmt)
+        req.environ['neutron.context'] = context.Context(
+            '', tenant_id if not is_admin_context else self._tenant_id,
+            is_admin_context)
+        res = req.get_response(self.api)
+
+        if expected_res_status:
+            self.assertEqual(res.status_int, expected_res_status)
+        elif res.status_int >= webob.exc.HTTPClientError.code:
+            raise webob.exc.HTTPClientError(code=res.status_int)
+        return self.deserialize(self.fmt, res)
+
+    def _show_resource(self, id, plural, expected_res_status=None,
+                       is_admin_context=False, tenant_id=None):
+        req = self.new_show_request(plural, id, fmt=self.fmt)
+        req.environ['neutron.context'] = context.Context(
+            '', tenant_id or self._tenant_id, is_admin_context)
+        res = req.get_response(self.api)
+
+        if expected_res_status:
+            self.assertEqual(res.status_int, expected_res_status)
+        elif res.status_int >= webob.exc.HTTPClientError.code:
+            raise webob.exc.HTTPClientError(code=res.status_int)
+        return self.deserialize(self.fmt, res)
+
+    def _delete_resource(self, id, plural, is_admin_context=False,
+                         expected_res_status=None, tenant_id=None):
+        req = self.new_delete_request(plural, id)
+        req.environ['neutron.context'] = context.Context(
+            '', tenant_id or self._tenant_id, is_admin_context)
+        res = req.get_response(self.api)
+        if expected_res_status:
+            self.assertEqual(res.status_int, expected_res_status)
+        elif res.status_int >= webob.exc.HTTPClientError.code:
+            raise webob.exc.HTTPClientError(code=res.status_int)
+        if res.status_int != 204:
+            return self.deserialize(self.fmt, res)
+
+
+class ApicDBTestBase(ApiManagerMixin):
+
+    fmt = 'json'
+
+    def __getattr__(self, item):
+
+        # Update Method
+        if item.startswith('update_'):
+            resource = item[len('update_'):]
+            plural = get_resource_plural(resource)
+
+            def update_wrapper(id, **kwargs):
+                return self._update_resource(id, resource, **kwargs)
+            return update_wrapper
+        # Show Method
+        if item.startswith('show_'):
+            resource = item[len('show_'):]
+            plural = get_resource_plural(resource)
+
+            def show_wrapper(id, **kwargs):
+                return self._show_resource(id, plural, **kwargs)
+            return show_wrapper
+        # Create Method
+        if item.startswith('create_'):
+            resource = item[len('create_'):]
+            plural = get_resource_plural(resource)
+
+            def create_wrapper(**kwargs):
+                return self._create_resource(resource, **kwargs)
+            return create_wrapper
+        # Delete Method
+        if item.startswith('delete_'):
+            resource = item[len('delete_'):]
+            plural = get_resource_plural(resource)
+
+            def delete_wrapper(id, **kwargs):
+                return self._delete_resource(id, plural, **kwargs)
+            return delete_wrapper
+
+        raise AttributeError
+
+
+def get_resource_plural(resource):
+    if resource.endswith('y'):
+        resource_plural = resource.replace('y', 'ies')
+    else:
+        resource_plural = resource + 's'
+
+    return resource_plural

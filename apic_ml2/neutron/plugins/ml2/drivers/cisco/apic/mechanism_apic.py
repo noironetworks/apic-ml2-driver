@@ -17,6 +17,7 @@ from apicapi import apic_manager
 from keystoneclient.v2_0 import client as keyclient
 import netaddr
 from neutron.common import constants as n_constants
+from neutron.common import rpc as n_rpc
 from neutron.openstack.common import lockutils
 from neutron.openstack.common import log
 from neutron.plugins.common import constants
@@ -27,6 +28,7 @@ from oslo.config import cfg
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_sync
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import rpc
 
 
 LOG = log.getLogger(__name__)
@@ -71,10 +73,24 @@ class APICMechanismDriver(api.MechanismDriver):
     def initialize(self):
         # initialize apic
         APICMechanismDriver.get_apic_manager()
+        self._setup_rpc_listeners()
         self.name_mapper = self.apic_manager.apic_mapper
         self.synchronizer = None
         self.apic_manager.ensure_infra_created_on_apic()
         self.apic_manager.ensure_bgp_pod_policy_created_on_apic()
+
+    def _setup_rpc_listeners(self):
+        self.endpoints = []
+        if cfg.CONF.ml2_cisco_apic.integrated_topology_service:
+            self.endpoints.append(
+                rpc.ApicTopologyRpcCallbackMechanism(
+                    self.apic_manager, self))
+        if self.endpoints:
+            self.topic = rpc.TOPIC_APIC_SERVICE
+            self.conn = n_rpc.create_connection(new=True)
+            self.conn.create_consumer(self.topic, self.endpoints,
+                                      fanout=False)
+            return self.conn.consume_in_threads()
 
     def sync_init(f):
         def inner(inst, *args, **kwargs):
