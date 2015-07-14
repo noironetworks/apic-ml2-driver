@@ -26,7 +26,7 @@ from apic_ml2.neutron.tests.unit.ml2.drivers.cisco.apic import (
     test_cisco_apic_common as mocked)
 
 NOTIFIER = ('apic_ml2.neutron.plugins.ml2.drivers.cisco.apic.'
-            'apic_topology.ApicTopologyServiceNotifierApi')
+            'rpc.ApicTopologyServiceNotifierApi')
 RPC_CONNECTION = 'neutron.common.rpc.Connection'
 AGENTS_DB = 'neutron.db.agents_db'
 PERIODIC_TASK = 'neutron.openstack.common.periodic_task'
