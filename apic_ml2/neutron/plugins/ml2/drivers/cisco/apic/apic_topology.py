@@ -192,17 +192,20 @@ class ApicTopologyAgent(manager.Manager):
                 self.peers[interface] = peer
                 if (interface in curr_peers and
                         curr_peers[interface] != peer):
+                    LOG.debug('reporting peer removal: %s', peer)
                     self.service_agent.update_link(
                         context, peer[0], peer[1], None, 0, 0, 0)
                 if (interface not in curr_peers or
                         curr_peers[interface] != peer or
                         force_send):
+                    LOG.debug('reporting new peer: %s', peer)
                     self.service_agent.update_link(context, *peer)
                 if interface in curr_peers:
                     curr_peers.pop(interface)
 
             # Any interface still in curr_peers need to be deleted
             for peer in curr_peers.values():
+                LOG.debug('reporting peer removal: %s', peer)
                 self.service_agent.update_link(
                     context, peer[0], peer[1], None, 0, 0, 0)
 
