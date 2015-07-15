@@ -156,6 +156,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 t_rpc.ApicTopologyRpcCallbackMechanism(
                     self.apic_manager, self))
         if self.topology_endpoints:
+            LOG.debug("New RPC endpoints: %s", self.topology_endpoints)
             self.topology_topic = t_rpc.TOPIC_APIC_SERVICE
             self.topology_conn = n_rpc.create_connection(new=True)
             self.topology_conn.create_consumer(
