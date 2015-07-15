@@ -17,6 +17,7 @@ import eventlet
 
 eventlet.monkey_patch()
 from oslo.concurrency import lockutils
+from oslo import messaging
 
 from neutron.common import rpc
 from neutron import context as nctx
@@ -91,12 +92,16 @@ class ApicTopologyRpcCallbackMechanism(ApicTopologyRpcCallback):
     runs within the mechanism driver, the standalone service should be
     disabled.
     """
+    RPC_API_VERSION = "1.1"
+    target = messaging.Target(version=RPC_API_VERSION)
+
     def __init__(self, apic_manager, driver):
         self.mech_apic = driver
         self.apic_manager = apic_manager
         self.peers = self._load_peers()
 
     def _remove_hostlink(self, *args):
+        LOG.debug("remove host link %s", args)
         # Remove link from the DB
         self.apic_manager.remove_hostlink(*args)
 
@@ -116,6 +121,7 @@ class ApicTopologyRpcCallbackMechanism(ApicTopologyRpcCallback):
                 atenant_id, anetwork_id, host)
 
     def _add_hostlink(self, *args):
+        LOG.debug("add host link %s", args)
         # Add link to the DB
         self.apic_manager.add_hostlink(*args)
 
