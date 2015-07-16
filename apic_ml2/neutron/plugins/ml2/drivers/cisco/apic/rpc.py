@@ -49,6 +49,9 @@ class ApicTopologyRpcCallback(object):
         nlink = (host, interface, mac, switch, module, port)
         clink = self.peers.get((host, interface), None)
 
+        LOG.debug("current link: %s", clink)
+        LOG.debug("new link: %s", nlink)
+
         if switch == 0:
             # this is a link delete, remove it
             if clink is not None:
@@ -99,6 +102,7 @@ class ApicTopologyRpcCallbackMechanism(ApicTopologyRpcCallback):
         self.mech_apic = driver
         self.apic_manager = apic_manager
         self.peers = self._load_peers()
+        LOG.debug("Current peers %s", self.peers)
 
     def _remove_hostlink(self, *args):
         LOG.debug("remove host link %s", args)
@@ -139,8 +143,12 @@ class ApicTopologyRpcCallbackMechanism(ApicTopologyRpcCallback):
             if network.get(api.NETWORK_TYPE) == constants.TYPE_VLAN:
                 seg = network.get(api.SEGMENTATION_ID)
 
-            self.apic_manager.ensure_path_created_for_port(
-                atenant_id, anetwork_id, host, seg)
+            if seg:
+                self.apic_manager.ensure_path_created_for_port(
+                    atenant_id, anetwork_id, host, seg)
+            else:
+                LOG.warn("Network with empty segmentation id can't be pushed "
+                         "on APIC: %s", network['id'])
 
     def _get_networks_from_host(self, context, plugin, host):
         # Retrieve Plugin Context and core plugin
