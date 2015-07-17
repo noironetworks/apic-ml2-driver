@@ -107,7 +107,7 @@ class ApicTopologyRpcCallbackMechanism(ApicTopologyRpcCallback):
     def _remove_hostlink(self, *args):
         LOG.debug("remove host link %s", args)
         # Remove link from the DB
-        self.apic_manager.remove_hostlink(*args)
+        host_config = self.apic_manager.remove_hostlink(*args)
 
         context = nctx.get_admin_context()
         plugin = manager.NeutronManager.get_plugin()
@@ -122,7 +122,7 @@ class ApicTopologyRpcCallbackMechanism(ApicTopologyRpcCallback):
             anetwork_id = self.mech_apic.name_mapper.network(
                 context, network['id'])
             self.apic_manager.ensure_path_deleted_for_port(
-                atenant_id, anetwork_id, host)
+                atenant_id, anetwork_id, host, host_config=host_config)
 
     def _add_hostlink(self, *args):
         LOG.debug("add host link %s", args)
