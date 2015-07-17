@@ -158,7 +158,8 @@ class MechanismRpcTestCase(test_plugin.NeutronDbPluginV2TestCase,
                                      '1')
                 # Assert H1 on net vlan static paths deleted
                 (self.driver.apic_manager.ensure_path_deleted_for_port.
-                    assert_called_once_with(self._tenant_id, net['id'], 'h1'))
+                    assert_called_once_with(self._tenant_id, net['id'], 'h1',
+                                            host_config=mock.ANY))
 
                 self.driver.apic_manager.reset_mock()
 
@@ -237,8 +238,10 @@ class MechanismRpcTestCase(test_plugin.NeutronDbPluginV2TestCase,
                     # for network)
                     mgr = self.driver.apic_manager
                     expected_calls_remove = [
-                        mock.call(self._tenant_id, net1['id'], 'h1'),
-                        mock.call(self._tenant_id, net2['id'], 'h1')]
+                        mock.call(self._tenant_id, net1['id'], 'h1',
+                                  host_config=mock.ANY),
+                        mock.call(self._tenant_id, net2['id'], 'h1',
+                                  host_config=mock.ANY)]
 
                     # Create path expected calls
                     net1 = self.show_network(
