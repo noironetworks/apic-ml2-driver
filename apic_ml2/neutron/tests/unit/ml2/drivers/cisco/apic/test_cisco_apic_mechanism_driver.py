@@ -95,6 +95,14 @@ class MechanismRpcTestCase(test_plugin.NeutronDbPluginV2TestCase,
         self.rpc = self.driver.topology_endpoints[0]
         self.db = apic_model.ApicDbModel()
 
+        def remove_hostlink(host, ifname, *args, **kwargs):
+            info = self.db.get_hostlink(host, ifname)
+            self.db.delete_hostlink(host, ifname)
+            return info
+
+        self.driver.apic_manager.remove_hostlink = remove_hostlink
+        self.driver.apic_manager.db = self.db
+
     def _bind_port_to_host(self, port_id, host):
         plugin = manager.NeutronManager.get_plugin()
         ctx = context.get_admin_context()
@@ -118,10 +126,14 @@ class MechanismRpcTestCase(test_plugin.NeutronDbPluginV2TestCase,
             len(observed),
             msg='There are more calls than expected: %s' % str(observed))
 
-    def _add_hosts_to_apic(self, num):
+    def _add_hosts_to_apic(self, num, vpc=False):
         for x in range(1, num + 1):
-            self.db.add_hostlink('h%s' % x, 'static', None, str(x), '1',
-                                 str(x))
+            self.db.add_hostlink(
+                'h%s' % x, 'eth0' if vpc else 'static', None, str(x), '1',
+                str(x))
+            if vpc:
+                self.db.add_hostlink(
+                    'h%s' % x, 'eth1', None, str(x + 1), '1', str(x))
         self.rpc.peers = self.rpc._load_peers()
 
     def test_rpc_endpoint_set(self):
@@ -157,9 +169,9 @@ class MechanismRpcTestCase(test_plugin.NeutronDbPluginV2TestCase,
                 self.rpc.update_link(mock.Mock(), 'h1', 'static', None, 0, '1',
                                      '1')
                 # Assert H1 on net vlan static paths deleted
-                (self.driver.apic_manager.ensure_path_deleted_for_port.
-                    assert_called_once_with(self._tenant_id, net['id'], 'h1',
-                                            host_config=mock.ANY))
+                (self.driver.apic_manager.delete_path.
+                    assert_called_once_with(self._tenant_id, net['id'], '1',
+                                            '1', '1'))
 
                 self.driver.apic_manager.reset_mock()
 
@@ -167,8 +179,33 @@ class MechanismRpcTestCase(test_plugin.NeutronDbPluginV2TestCase,
                 self.rpc.update_link(mock.Mock(), 'h3', 'static', None, 0, '1',
                                      '3')
                 self.assertEqual(
-                    0, self.driver.apic_manager.ensure_path_deleted_for_port.
-                    call_count)
+                    0, self.driver.apic_manager.delete_path.call_count)
+
+    def test_remove_hostlink_vpc(self):
+        self._add_hosts_to_apic(3, vpc=True)
+
+        net = self.create_network()['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4)
+        # Create two ports
+        with self.port(subnet=sub) as p1:
+            self._bind_port_to_host(p1['port']['id'], 'h1')
+            self.driver.apic_manager.reset_mock()
+
+            # Remove H1 interface from ACI
+            self.rpc.update_link(mock.Mock(), 'h1', 'eth0', None, 0, '1',
+                                 '1')
+            # Another link still exists
+            self.assertEqual(
+                0, self.driver.apic_manager.delete_path.call_count)
+
+            self.rpc.update_link(mock.Mock(), 'h1', 'eth1', None, 0, '2',
+                                 '1')
+
+            (self.driver.apic_manager.delete_path.
+             assert_called_once_with(self._tenant_id, net['id'], '2', '1',
+                                     '1'))
 
     def test_add_hostlink(self):
         # Test removal of one link
@@ -238,10 +275,8 @@ class MechanismRpcTestCase(test_plugin.NeutronDbPluginV2TestCase,
                     # for network)
                     mgr = self.driver.apic_manager
                     expected_calls_remove = [
-                        mock.call(self._tenant_id, net1['id'], 'h1',
-                                  host_config=mock.ANY),
-                        mock.call(self._tenant_id, net2['id'], 'h1',
-                                  host_config=mock.ANY)]
+                        mock.call(self._tenant_id, net1['id'], '1', '1', '1'),
+                        mock.call(self._tenant_id, net2['id'], '1', '1', '1')]
 
                     # Create path expected calls
                     net1 = self.show_network(
@@ -253,10 +288,9 @@ class MechanismRpcTestCase(test_plugin.NeutronDbPluginV2TestCase,
                                   net1['provider:segmentation_id']),
                         mock.call(self._tenant_id, net2['id'], 'h1',
                                   net2['provider:segmentation_id'])]
-
                     self._check_call_list(
                         expected_calls_remove,
-                        mgr.ensure_path_deleted_for_port.call_args_list)
+                        mgr.delete_path.call_args_list)
                     self._check_call_list(
                         expected_calls_add,
                         mgr.ensure_path_created_for_port.call_args_list)
