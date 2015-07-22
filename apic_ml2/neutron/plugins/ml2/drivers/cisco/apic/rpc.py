@@ -107,22 +107,28 @@ class ApicTopologyRpcCallbackMechanism(ApicTopologyRpcCallback):
     def _remove_hostlink(self, *args):
         LOG.debug("remove host link %s", args)
         # Remove link from the DB
-        host_config = self.apic_manager.remove_hostlink(*args)
-
+        link = self.apic_manager.remove_hostlink(*args)
         context = nctx.get_admin_context()
         plugin = manager.NeutronManager.get_plugin()
         host = args[0]
-
-        # REVISIT(ivar): The following could be optimized aggregating all the
-        # networks by tenant
-        for network in self._get_networks_from_host(context, plugin, host):
-            # Delete all paths for this host
-            atenant_id = self.mech_apic.name_mapper.tenant(
-                context, network['tenant_id'])
-            anetwork_id = self.mech_apic.name_mapper.network(
-                context, network['id'])
-            self.apic_manager.ensure_path_deleted_for_port(
-                atenant_id, anetwork_id, host, host_config=host_config)
+        LOG.debug("existing link from deletion %s", str(link))
+        # Another interface could still be up for that host on that module
+        # (VPC)
+        if link and not self._get_hostlinks_for_host(host, link.module,
+                                                     link.port):
+            # REVISIT(ivar): The following could be optimized aggregating all
+            # the networks by tenant
+            for network in self._get_networks_from_host(context, plugin, host):
+                # Delete all paths for this host
+                atenant_id = self.mech_apic.name_mapper.tenant(
+                    context, network['tenant_id'])
+                anetwork_id = self.mech_apic.name_mapper.network(
+                    context, network['id'])
+                LOG.debug("deleting path %s", (
+                    atenant_id, anetwork_id, link.swid, link.module,
+                    link.port))
+                self.apic_manager.delete_path(
+                    atenant_id, anetwork_id, link.swid, link.module, link.port)
 
     def _add_hostlink(self, *args):
         LOG.debug("add host link %s", args)
@@ -162,6 +168,11 @@ class ApicTopologyRpcCallbackMechanism(ApicTopologyRpcCallback):
             networks = plugin.get_networks(context, {'id': [x['network_id'] for
                                                             x in ports]})
         return networks
+
+    def _get_hostlinks_for_host(self, host, module, port):
+        session = db_api.get_session()
+        return session.query(apic_model.HostLink).filter_by(
+            host=host, module=module, port=port).all()
 
 
 class ApicTopologyServiceNotifierApi(rpc.RpcProxy):
