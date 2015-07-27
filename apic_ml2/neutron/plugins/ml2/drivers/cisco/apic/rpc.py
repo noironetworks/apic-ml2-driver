@@ -17,6 +17,7 @@ import eventlet
 
 eventlet.monkey_patch()
 from oslo.concurrency import lockutils
+from oslo.db import exception as db_exc
 from oslo import messaging
 
 from neutron.common import rpc
@@ -133,7 +134,11 @@ class ApicTopologyRpcCallbackMechanism(ApicTopologyRpcCallback):
     def _add_hostlink(self, *args):
         LOG.debug("add host link %s", args)
         # Add link to the DB
-        self.apic_manager.add_hostlink(*args)
+        try:
+            self.apic_manager.add_hostlink(*args)
+        except db_exc.DBDuplicateEntry:
+            LOG.info(_("Duplicate entry for link %s, topology change already "
+                       "been server"), args)
 
         context = nctx.get_admin_context()
         plugin = manager.NeutronManager.get_plugin()

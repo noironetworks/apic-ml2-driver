@@ -27,7 +27,7 @@ from neutron.plugins.ml2.drivers.cisco.apic import apic_model
 from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron.tests import base
 from neutron.tests.unit import test_db_plugin as test_plugin
-
+from oslo.db import exception as db_exc
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
     mechanism_apic as md)
@@ -289,6 +289,13 @@ class MechanismRpcTestCase(test_plugin.NeutronDbPluginV2TestCase,
                     self._check_call_list(
                         expected_calls_add,
                         mgr.ensure_path_created_for_port.call_args_list)
+
+    def test_duplicate_hostlink(self):
+        self.driver.apic_manager.add_hostlink = mock.Mock(
+            side_effect=db_exc.DBDuplicateEntry)
+        # The below doesn't rise
+        self.rpc.update_link(
+            mock.Mock(), 'h1', 'static', None, '1', '1', '1')
 
 
 class TestCiscoApicMechDriver(base.BaseTestCase,

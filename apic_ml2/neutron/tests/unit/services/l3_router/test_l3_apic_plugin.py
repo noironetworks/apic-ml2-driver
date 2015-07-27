@@ -107,6 +107,7 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
                    'remove_router_interface').start()
         mock.patch('neutron.openstack.common.excutils.'
                    'save_and_reraise_exception').start()
+        self.addCleanup(self.plugin.manager.reset_mock)
 
     def _test_add_router_interface(self, interface_info):
         mgr = self.plugin.manager
