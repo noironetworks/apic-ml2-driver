@@ -169,8 +169,9 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                    'network_type': segment.get('network_type'),
                    'tenant_id': port['tenant_id'],
                    'host': port[portbindings.HOST_ID],
-                   'ptg_tenant': str(self.name_mapper.tenant(
-                       context, port['tenant_id'])),
+                   'ptg_tenant': self.apic_manager.apic.fvTenant.name(
+                       str(self.name_mapper.tenant(
+                           context, port['tenant_id']))),
                    'endpoint_group_name': str(
                        self.name_mapper.network(
                            context, port['network_id'])),
