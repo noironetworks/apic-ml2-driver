@@ -347,6 +347,17 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             mocked.APIC_TENANT, mocked.APIC_NETWORK, HOST_ID1,
             ENCAP, transaction='transaction')
 
+    def test_update_host(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK,
+                                            TEST_SEGMENT1)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK,
+                                          'vm1', net_ctx, HOST_ID1,
+                                          device_owner='any')
+        port_ctx.original_host = HOST_ID2
+        self.driver.update_port_postcommit(port_ctx)
+
     def test_create_port_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
                                             mocked.APIC_NETWORK,
@@ -673,25 +684,13 @@ class FakePortContext(object):
         else:
             self._bound_segment = None
 
-    @property
-    def current(self):
-        return self._port
-
-    @property
-    def network(self):
-        return self._network
-
-    @property
-    def bound_segment(self):
-        return self._bound_segment
+        self.current = self._port
+        self.network = self._network
+        self.bound_segment = self._bound_segment
+        self.host = self._port.get(portbindings.HOST_ID)
+        self.original_host = None
+        self._binding = mock.Mock()
+        self._binding.segment = self._bound_segment
 
     def set_binding(self, segment_id, vif_type, cap_port_filter):
         pass
-
-    @property
-    def host(self):
-        return self._port.get(portbindings.HOST_ID)
-
-    @property
-    def original_host(self):
-        return self._original_port.get(portbindings.HOST_ID)
