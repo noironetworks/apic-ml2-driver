@@ -110,6 +110,17 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             mocked.APIC_TENANT, mocked.APIC_NETWORK, HOST_ID1,
             ENCAP, transaction='transaction')
 
+    def test_update_host(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK,
+                                            TEST_SEGMENT1)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK,
+                                          'vm1', net_ctx, HOST_ID1,
+                                          device_owner='any')
+        port_ctx.original_host = HOST_ID2
+        self.driver.update_port_postcommit(port_ctx)
+
     def test_create_port_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
                                             mocked.APIC_NETWORK,

@@ -352,25 +352,26 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 self.apic_manager.delete_external_epg_contract(
                     arouter_id, anetwork_id, external_epg=external_epg)
 
-    def _get_active_path_count(self, context):
+    def _get_active_path_count(self, context, host=None):
         return context._plugin_context.session.query(
             models.PortBinding).filter_by(
-                host=context.host, segment=context._binding.segment).count()
+                host=host or context.host,
+                segment=context._binding.segment).count()
 
     @lockutils.synchronized('apic-portlock')
-    def _delete_port_path(self, context, atenant_id, anetwork_id):
+    def _delete_port_path(self, context, atenant_id, anetwork_id, host=None):
         if not self._get_active_path_count(context):
             self.apic_manager.ensure_path_deleted_for_port(
                 atenant_id, anetwork_id,
-                context.host)
+                host or context.host)
 
-    def _delete_path_if_last(self, context):
+    def _delete_path_if_last(self, context, host=None):
         if not self._get_active_path_count(context):
             tenant_id = context.network.current['tenant_id']
             atenant_id = self.name_mapper.tenant(context, tenant_id)
             network_id = context.network.current['id']
             anetwork_id = self.name_mapper.network(context, network_id)
-            self._delete_port_path(context, atenant_id, anetwork_id)
+            self._delete_port_path(context, atenant_id, anetwork_id, host=host)
 
     def _get_subnet_info(self, context, subnet):
         if subnet['gateway_ip']:
@@ -394,6 +395,11 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     @sync_init
     def update_port_postcommit(self, context):
+        if (not self._is_apic_network_type(context) and
+                context.original_host and (context.original_host !=
+                                           context.host)):
+            # The VM was migrated
+            self._delete_path_if_last(context, host=context.original_host)
         self._perform_port_operations(context)
 
     def delete_port_postcommit(self, context):
