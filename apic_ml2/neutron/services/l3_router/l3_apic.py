@@ -17,6 +17,7 @@ from apicapi import apic_mapper
 
 from neutron.db import db_base_plugin_v2
 from neutron.db import extraroute_db
+from neutron.db import l3_db
 from neutron.db import l3_dvr_db
 from neutron.openstack.common import excutils
 from neutron.plugins.common import constants
@@ -130,8 +131,16 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
     # Router API
 
     @sync_init
-    def create_router(self, *args, **kwargs):
-        return super(ApicL3ServicePlugin, self).create_router(*args, **kwargs)
+    def create_router(self, context, router):
+        r = router['router']
+        gw_info = r.pop(l3_db.EXTERNAL_GW_INFO, None)
+        tenant_id = self._get_tenant_id_for_create(context, r)
+        router_db = self._create_router_db(context, r, tenant_id)
+        # gw info operation happens outside the transaction
+        if gw_info:
+            self._update_router_gw_info(context, router_db['id'],
+                                        gw_info, router=router_db)
+        return self._make_router_dict(router_db)
 
     @sync_init
     def update_router(self, context, id, router):
