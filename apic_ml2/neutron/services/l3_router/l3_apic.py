@@ -18,6 +18,7 @@ from apicapi import apic_mapper
 from neutron.db import db_base_plugin_v2
 from neutron.db import extraroute_db
 from neutron.db import l3_dvr_db
+from neutron.extensions import l3
 from neutron.openstack.common import excutils
 from neutron.plugins.common import constants
 
@@ -181,3 +182,39 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
                                                interface_info)
         return super(ApicL3ServicePlugin, self).remove_router_interface(
             context, router_id, interface_info)
+
+    # Floating IP API
+    def create_floatingip(self, context, floatingip):
+        res = super(ApicL3ServicePlugin, self).create_floatingip(context,
+            floatingip)
+        port_id = floatingip.get('floatingip', {}).get('port_id')
+        self._notify_port_update(port_id)
+        return res
+
+    def update_floatingip(self, context, id, floatingip):
+        port_id = [self._get_port_mapped_to_floatingip(context, id)]
+        res = super(ApicL3ServicePlugin, self).update_floatingip(context,
+            id, floatingip)
+        port_id.append(floatingip.get('floatingip', {}).get('port_id'))
+        for p in port_id:
+            self._notify_port_update(p)
+        return res
+
+    def delete_floatingip(self, context, id):
+        port_id = self._get_port_mapped_to_floatingip(context, id)
+        res = super(ApicL3ServicePlugin, self).delete_floatingip(context, id)
+        self._notify_port_update(port_id)
+        return res
+
+    def _get_port_mapped_to_floatingip(self, context, fip_id):
+        try:
+            fip = self.get_floatingip(context, fip_id)
+            return fip.get('port_id')
+        except l3.FloatingIPNotFound:
+            pass
+        return None
+
+    def _notify_port_update(self, port_id):
+        l2 = mechanism_apic.APICMechanismDriver.get_driver_instance()
+        if l2 and port_id:
+            l2.notify_port_update(port_id)

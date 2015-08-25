@@ -16,8 +16,10 @@
 from apicapi import apic_manager
 from keystoneclient.v2_0 import client as keyclient
 import netaddr
+from neutron import context as nctx
 from neutron.agent import securitygroups_rpc
 from neutron.common import constants as n_constants
+from neutron.common import exceptions as n_exc
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.extensions import portbindings
@@ -40,6 +42,7 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config
 
 LOG = log.getLogger(__name__)
 
+_apic_driver_instance = None
 
 class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
@@ -72,6 +75,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         apic_config = cfg.CONF.ml2_cisco_apic
         return apic_sync.ApicRouterSynchronizer(inst,
                                                 apic_config.apic_sync_interval)
+
+    @staticmethod
+    def get_driver_instance():
+        return _apic_driver_instance
 
     def __init__(self):
         sg_enabled = securitygroups_rpc.is_firewall_enabled()
@@ -125,6 +132,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         self.synchronizer = None
         self.apic_manager.ensure_infra_created_on_apic()
         self.apic_manager.ensure_bgp_pod_policy_created_on_apic()
+        global _apic_driver_instance
+        _apic_driver_instance = self
 
     def _setup_rpc_listeners(self):
         self.endpoints = [rpc.GBPServerRpcCallback(self)]
@@ -178,7 +187,51 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                    'promiscuous_mode': is_port_promiscuous(port)}
         if port['device_owner'].startswith('compute:') and port['device_id']:
             details['vm-name'] = port['device_id']
+            self._add_ip_mapping_details(context, port, details)
         return details
+
+    def _add_ip_mapping_details(self, context, port, details):
+        """ Add information about IP mapping for DNAT/SNAT """
+        l3plugin = manager.NeutronManager.get_service_plugins().get(
+            constants.L3_ROUTER_NAT)
+        core_plugin = context._plugin
+
+        ext_nets = core_plugin.get_networks(context,
+            filters={'name': self.apic_manager.ext_net_dict.keys()})
+        ext_nets = {n['id']: n for n in ext_nets}
+        fip_ext_nets = set()
+
+        fips = l3plugin.get_floatingips(context,
+                                        filters={'port_id': [port['id']]})
+        for f in fips:
+            net = ext_nets.get(f['floating_network_id'])
+            if not net:
+                continue
+            f['nat_epg_name'] = self._get_nat_epg_for_ext_net(net)
+            f['nat_epg_tenant'] = apic_manager.TENANT_COMMON
+            fip_ext_nets.add(net['id'])
+        ipms = []
+        for net_id, net in ext_nets.iteritems():
+            if (net_id in fip_ext_nets or
+                not self._is_connected_to_ext_net(context, port, net)):
+                continue
+            ipms.append({'external_segment_name': net['name'],
+                         'nat_epg_name': self._get_nat_epg_for_ext_net(net),
+                         'nat_epg_tenant': apic_manager.TENANT_COMMON})
+        details['floating_ip'] = fips
+        details['ip_mapping'] = ipms
+
+    def _is_connected_to_ext_net(self, context, port, ext_net):
+        """ Return True is there a router between the external-network
+        and any subnet in which the port has an IP-address """
+        core_plugin = context._plugin
+        port_sn = self._get_port_subnets(port)
+        router_gw_ports = core_plugin.get_ports(context,
+            filters={'device_owner': [n_constants.DEVICE_OWNER_ROUTER_GW],
+                     'network_id': [ext_net['id']]})
+        router_sn = self._get_router_interface_subnets(context,
+            [x['device_id'] for x in router_gw_ports])
+        return bool(port_sn & router_sn)
 
     def sync_init(f):
         def inner(inst, *args, **kwargs):
@@ -239,12 +292,21 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                     address, transaction=trs)
                 self.apic_manager.ensure_static_route_created(
                     anetwork_id, switch, next_hop, transaction=trs)
+                external_epg = apic_manager.EXT_EPG
                 self.apic_manager.ensure_external_epg_created(
-                    anetwork_id, transaction=trs)
-                self.apic_manager.ensure_external_epg_consumed_contract(
-                    anetwork_id, cid, transaction=trs)
-                self.apic_manager.ensure_external_epg_provided_contract(
-                    anetwork_id, cid, transaction=trs)
+                    anetwork_id, external_epg=external_epg,
+                    transaction=trs)
+
+            ok = self._create_nat_epg_for_ext_net(network, external_epg, cid,
+                                                  router_info)
+            if not ok:      # fallback to non-NAT config
+                with self.apic_manager.apic.transaction() as trs:
+                    self.apic_manager.ensure_external_epg_consumed_contract(
+                        anetwork_id, cid, external_epg=external_epg,
+                        transaction=trs)
+                    self.apic_manager.ensure_external_epg_provided_contract(
+                        anetwork_id, cid, external_epg=external_epg,
+                        transaction=trs)
 
     def _perform_port_operations(self, context):
         # Get port
@@ -255,6 +317,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             self._perform_path_port_operations(context, port)
         if port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
             self._perform_gw_port_operations(context, port)
+        self._notify_ports_due_to_router_update(port)
 
     def _delete_contract(self, context):
         port = context.current
@@ -317,6 +380,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             self._delete_path_if_last(context)
         if port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
             self._delete_contract(context)
+        self._notify_ports_due_to_router_update(port)
 
     @sync_init
     def create_network_postcommit(self, context):
@@ -361,6 +425,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 network_id = self.name_mapper.network(context,
                                                       context.current['id'])
                 self.apic_manager.delete_external_routed_network(network_id)
+                self._delete_nat_epg_for_ext_net(context.current)
 
     @sync_init
     def create_subnet_postcommit(self, context):
@@ -403,3 +468,137 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
     def _is_apic_network_type(self, port_context):
         return (port_context.network.current['provider:network_type'] ==
                 ofcst.TYPE_OPFLEX)
+
+    def notify_port_update(self, port_id, context=None):
+        context = context or nctx.get_admin_context()
+        core_plugin = manager.NeutronManager.get_plugin()
+        try:
+            port = core_plugin.get_port(context, port_id)
+            if self._is_port_bound(port):
+                self.notifier.port_update(context, port)
+        except n_exc.PortNotFound:
+            # Notification not needed
+            pass
+
+    def _get_nat_epg_for_ext_net(self, ext_net):
+        return "NAT-epg-%s" % ext_net['name']
+
+    def _get_nat_bd_for_ext_net(self, ext_net):
+        return "NAT-bd-%s" % ext_net['name']
+
+    def _get_nat_vrf_for_ext_net(self, ext_net):
+        return "NAT-vrf-%s" % ext_net['name']
+
+    def _get_shadow_name_for_nat(self, name):
+        return "Shd-%s" % name
+
+    def _create_nat_epg_for_ext_net(self, ext_net, ext_epg_name,
+                                    router_contract, ext_info):
+        l3out_name = ext_net['name']
+        tenant_name = apic_manager.TENANT_COMMON
+        nat_vrf_name = self._get_nat_vrf_for_ext_net(ext_net)
+        nat_bd_name = self._get_nat_bd_for_ext_net(ext_net)
+        nat_epg_name = self._get_nat_epg_for_ext_net(ext_net)
+        nat_contract = "NAT-allow-all"
+        shadow_ext_epg = self._get_shadow_name_for_nat(ext_epg_name)
+        shadow_l3out = self._get_shadow_name_for_nat(l3out_name)
+        try:
+            with self.apic_manager.apic.transaction(None) as trs:
+                # create NAT EPG and allow-everything contract
+                self.apic_manager.ensure_nat_epg_contract_created(
+                    tenant_name, nat_epg_name, nat_bd_name,
+                    nat_vrf_name, nat_contract,
+                    transaction=trs)
+                # make external EPG use NAT contract
+                self.apic_manager.ensure_external_epg_consumed_contract(
+                    l3out_name, nat_contract, external_epg=ext_epg_name,
+                    transaction=trs)
+                self.apic_manager.ensure_external_epg_provided_contract(
+                    l3out_name, nat_contract, external_epg=ext_epg_name,
+                    transaction=trs)
+                # make L3-out use NAT-vrf
+                self.apic_manager.ensure_external_routed_network_created(
+                    l3out_name, context=nat_vrf_name,
+                    transaction=trs)
+
+                # create shadow L3-out and shadow external-epg
+                self.apic_manager.ensure_external_routed_network_created(
+                    shadow_l3out, transaction=trs)
+                self.apic_manager.ensure_external_epg_created(
+                    shadow_l3out, external_epg=shadow_ext_epg,
+                    transaction=trs)
+                # make them use router-contract
+                self.apic_manager.ensure_external_epg_consumed_contract(
+                    shadow_l3out, router_contract,
+                    external_epg=shadow_ext_epg, transaction=trs)
+                self.apic_manager.ensure_external_epg_provided_contract(
+                    shadow_l3out, router_contract,
+                    external_epg=shadow_ext_epg, transaction=trs)
+
+                # link up shadow external-EPG to NAT EPG
+                self.apic_manager.associate_external_epg_to_nat_epg(
+                    tenant_name, shadow_l3out, shadow_ext_epg,
+                    nat_epg_name, target_owner=tenant_name,
+                    transaction=trs)
+
+                # create any required subnets
+                gw, plen = ext_info.get('host_pool_cidr', '/').split('/', 1)
+                if gw and plen:
+                    self.apic_manager.ensure_subnet_created_on_apic(
+                        tenant_name, nat_bd_name, gw + '/' + plen,
+                        transaction=trs)
+            return True
+        except Exception as e:
+            LOG.info(_("Unable to create NAT EPG: %s"), e)
+            return False
+
+    def _delete_nat_epg_for_ext_net(self, ext_net):
+        tenant_name = apic_manager.TENANT_COMMON
+        with self.apic_manager.apic.transaction(None) as trs:
+            # delete shadow L3-out and shadow external-EPG
+            shadow_l3out = self._get_shadow_name_for_nat(ext_net['name'])
+            self.apic_manager.delete_external_routed_network(shadow_l3out,
+                tenant_name, transaction=trs)
+            # delete NAT epg
+            self.apic_manager.ensure_nat_epg_deleted(tenant_name,
+                self._get_nat_epg_for_ext_net(ext_net),
+                self._get_nat_bd_for_ext_net(ext_net),
+                self._get_nat_vrf_for_ext_net(ext_net),
+                transaction=trs)
+
+    def _get_router_interface_subnets(self, context, router_ids):
+        core_plugin = manager.NeutronManager.get_plugin()
+        router_intf_ports = core_plugin.get_ports(context,
+            filters={'device_owner': [n_constants.DEVICE_OWNER_ROUTER_INTF],
+                     'device_id': router_ids})
+        router_sn = set([y['subnet_id']
+                         for x in router_intf_ports
+                         for y in x.get('fixed_ips', [])])
+        return router_sn
+
+    def _get_port_subnets(self, port):
+        return set([x['subnet_id']
+                    for x in port.get('fixed_ips', [])])
+
+    def _notify_ports_due_to_router_update(self, router_port):
+        """Find ports whose DNAT/SNAT info may be affected due to change
+        in a router's connectivity to external/tenant network"""
+        dev_owner = router_port['device_owner']
+        admin_ctx = nctx.get_admin_context()
+        if dev_owner == n_constants.DEVICE_OWNER_ROUTER_INTF:
+            subnet_ids = self._get_port_subnets(router_port)
+        elif dev_owner == n_constants.DEVICE_OWNER_ROUTER_GW:
+            subnet_ids = self._get_router_interface_subnets(admin_ctx,
+                [router_port['device_id']])
+        else:
+            return
+        core_plugin = manager.NeutronManager.get_plugin()
+        subnets = core_plugin.get_subnets(admin_ctx,
+            filters={'id': list(subnet_ids)})
+        nets = set([x['network_id'] for x in subnets])
+        ports = core_plugin.get_ports(admin_ctx,
+            filters={'network_id': list(nets)})
+        for p in ports:
+            port_sn_ids = self._get_port_subnets(p)
+            if (subnet_ids & port_sn_ids) and self._is_port_bound(p):
+                self.notifier.port_update(admin_ctx, p)
