@@ -1,5 +1,11 @@
 neutron-ml2-driver-apic (@VERSION@-@REVISION@) trusty; urgency=low
 
-  * [Placeholder]
+  * Update to Kilo
+
+ -- Amit Bose <bose@noironetworks.com>  Tue, 25 Aug 2015 15:13:46 -0700
+
+neutron-ml2-driver-apic (2014.2.0-1) trusty; urgency=low
+
+  * Initial release
 
  -- Amit Bose <bose@noironetworks.com>  Wed, 29 Apr 2015 22:53:44 +0000
