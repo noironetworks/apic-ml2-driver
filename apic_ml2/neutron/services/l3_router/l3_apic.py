@@ -185,16 +185,16 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
 
     # Floating IP API
     def create_floatingip(self, context, floatingip):
-        res = super(ApicL3ServicePlugin, self).create_floatingip(context,
-            floatingip)
+        res = super(ApicL3ServicePlugin, self).create_floatingip(
+            context, floatingip)
         port_id = floatingip.get('floatingip', {}).get('port_id')
         self._notify_port_update(port_id)
         return res
 
     def update_floatingip(self, context, id, floatingip):
         port_id = [self._get_port_mapped_to_floatingip(context, id)]
-        res = super(ApicL3ServicePlugin, self).update_floatingip(context,
-            id, floatingip)
+        res = super(ApicL3ServicePlugin, self).update_floatingip(
+            context, id, floatingip)
         port_id.append(floatingip.get('floatingip', {}).get('port_id'))
         for p in port_id:
             self._notify_port_update(p)

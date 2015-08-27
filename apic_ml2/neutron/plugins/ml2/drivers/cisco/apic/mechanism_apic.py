@@ -16,12 +16,12 @@
 from apicapi import apic_manager
 from keystoneclient.v2_0 import client as keyclient
 import netaddr
-from neutron import context as nctx
 from neutron.agent import securitygroups_rpc
 from neutron.common import constants as n_constants
 from neutron.common import exceptions as n_exc
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
+from neutron import context as nctx
 from neutron.extensions import portbindings
 from neutron import manager
 from neutron.openstack.common import lockutils
@@ -43,6 +43,7 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config
 LOG = log.getLogger(__name__)
 
 _apic_driver_instance = None
+
 
 class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
@@ -191,12 +192,13 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         return details
 
     def _add_ip_mapping_details(self, context, port, details):
-        """ Add information about IP mapping for DNAT/SNAT """
+        """Add information about IP mapping for DNAT/SNAT."""
         l3plugin = manager.NeutronManager.get_service_plugins().get(
             constants.L3_ROUTER_NAT)
         core_plugin = context._plugin
 
-        ext_nets = core_plugin.get_networks(context,
+        ext_nets = core_plugin.get_networks(
+            context,
             filters={'name': self.apic_manager.ext_net_dict.keys()})
         ext_nets = {n['id']: n for n in ext_nets}
         fip_ext_nets = set()
@@ -213,7 +215,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         ipms = []
         for net_id, net in ext_nets.iteritems():
             if (net_id in fip_ext_nets or
-                not self._is_connected_to_ext_net(context, port, net)):
+                    not self._is_connected_to_ext_net(context, port, net)):
                 continue
             ipms.append({'external_segment_name': net['name'],
                          'nat_epg_name': self._get_nat_epg_for_ext_net(net),
@@ -222,15 +224,16 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         details['ip_mapping'] = ipms
 
     def _is_connected_to_ext_net(self, context, port, ext_net):
-        """ Return True is there a router between the external-network
-        and any subnet in which the port has an IP-address """
+        # Return True is there a router between the external-network
+        # and any subnet in which the port has an IP-address.
         core_plugin = context._plugin
         port_sn = self._get_port_subnets(port)
-        router_gw_ports = core_plugin.get_ports(context,
+        router_gw_ports = core_plugin.get_ports(
+            context,
             filters={'device_owner': [n_constants.DEVICE_OWNER_ROUTER_GW],
                      'network_id': [ext_net['id']]})
-        router_sn = self._get_router_interface_subnets(context,
-            [x['device_id'] for x in router_gw_ports])
+        router_sn = self._get_router_interface_subnets(
+            context, [x['device_id'] for x in router_gw_ports])
         return bool(port_sn & router_sn)
 
     def sync_init(f):
@@ -557,10 +560,11 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         with self.apic_manager.apic.transaction(None) as trs:
             # delete shadow L3-out and shadow external-EPG
             shadow_l3out = self._get_shadow_name_for_nat(ext_net['name'])
-            self.apic_manager.delete_external_routed_network(shadow_l3out,
-                tenant_name, transaction=trs)
+            self.apic_manager.delete_external_routed_network(
+                shadow_l3out, tenant_name, transaction=trs)
             # delete NAT epg
-            self.apic_manager.ensure_nat_epg_deleted(tenant_name,
+            self.apic_manager.ensure_nat_epg_deleted(
+                tenant_name,
                 self._get_nat_epg_for_ext_net(ext_net),
                 self._get_nat_bd_for_ext_net(ext_net),
                 self._get_nat_vrf_for_ext_net(ext_net),
@@ -568,7 +572,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     def _get_router_interface_subnets(self, context, router_ids):
         core_plugin = manager.NeutronManager.get_plugin()
-        router_intf_ports = core_plugin.get_ports(context,
+        router_intf_ports = core_plugin.get_ports(
+            context,
             filters={'device_owner': [n_constants.DEVICE_OWNER_ROUTER_INTF],
                      'device_id': router_ids})
         router_sn = set([y['subnet_id']
@@ -581,23 +586,23 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                     for x in port.get('fixed_ips', [])])
 
     def _notify_ports_due_to_router_update(self, router_port):
-        """Find ports whose DNAT/SNAT info may be affected due to change
-        in a router's connectivity to external/tenant network"""
+        # Find ports whose DNAT/SNAT info may be affected due to change
+        # in a router's connectivity to external/tenant network.
         dev_owner = router_port['device_owner']
         admin_ctx = nctx.get_admin_context()
         if dev_owner == n_constants.DEVICE_OWNER_ROUTER_INTF:
             subnet_ids = self._get_port_subnets(router_port)
         elif dev_owner == n_constants.DEVICE_OWNER_ROUTER_GW:
-            subnet_ids = self._get_router_interface_subnets(admin_ctx,
-                [router_port['device_id']])
+            subnet_ids = self._get_router_interface_subnets(
+                admin_ctx, [router_port['device_id']])
         else:
             return
         core_plugin = manager.NeutronManager.get_plugin()
-        subnets = core_plugin.get_subnets(admin_ctx,
-            filters={'id': list(subnet_ids)})
+        subnets = core_plugin.get_subnets(
+            admin_ctx, filters={'id': list(subnet_ids)})
         nets = set([x['network_id'] for x in subnets])
-        ports = core_plugin.get_ports(admin_ctx,
-            filters={'network_id': list(nets)})
+        ports = core_plugin.get_ports(
+            admin_ctx, filters={'network_id': list(nets)})
         for p in ports:
             port_sn_ids = self._get_port_subnets(p)
             if (subnet_ids & port_sn_ids) and self._is_port_bound(p):
