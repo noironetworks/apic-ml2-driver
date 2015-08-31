@@ -16,6 +16,8 @@
 import sys
 
 import mock
+from neutron.common import exceptions as n_exc
+from neutron import context
 
 sys.modules["apicapi"] = mock.Mock()
 
@@ -39,11 +41,6 @@ TEST_SEGMENT1 = 'test-segment1'
 SUBNET_GATEWAY = '10.3.2.1'
 SUBNET_CIDR = '10.3.1.0/24'
 SUBNET_NETMASK = '24'
-
-
-class FakeContext(object):
-    def __init__(self):
-        self.tenant_id = None
 
 
 class FakeContract(object):
@@ -74,7 +71,7 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
         mocked.ConfigMixin.set_up_mocks(self)
         self.plugin = l3_apic.ApicL3ServicePlugin()
         md.APICMechanismDriver.get_router_synchronizer = mock.Mock()
-        self.context = FakeContext()
+        self.context = context.get_admin_context()
         self.context.tenant_id = TENANT
         self.interface_info = {'subnet': {'subnet_id': SUBNET},
                                'port': {'port_id': PORT}}
@@ -105,8 +102,8 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
                    'add_router_interface').start()
         mock.patch('neutron.db.l3_dvr_db.L3_NAT_with_dvr_db_mixin.'
                    'remove_router_interface').start()
-        mock.patch('neutron.openstack.common.excutils.'
-                   'save_and_reraise_exception').start()
+        mock.patch(
+            'neutron.manager.NeutronManager.get_service_plugins').start()
         self.addCleanup(self.plugin.manager.reset_mock)
 
     def _test_add_router_interface(self, interface_info):
@@ -137,3 +134,17 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
 
     def test_singleton_manager(self):
         self.assertIs(md.APICMechanismDriver.apic_manager, self.plugin.manager)
+
+    def test_create_router_gateway_fails(self):
+        # Force _update_router_gw_info failure
+        self.plugin._update_router_gw_info = mock.Mock(
+            side_effect=n_exc.NeutronException)
+        data = {'router': {
+            'name': 'router1', 'admin_state_up': True,
+            'external_gateway_info': {'network_id': 'some_uuid'}}}
+
+        # Verify router doesn't persist on failure
+        self.assertRaises(n_exc.NeutronException,
+                          self.plugin.create_router, self.context, data)
+        routers = self.plugin.get_routers(self.context)
+        self.assertEqual(0, len(routers))
