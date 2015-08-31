@@ -21,9 +21,12 @@ from neutron.db import l3_db
 from neutron.db import l3_dvr_db
 from neutron.extensions import l3
 from neutron.openstack.common import excutils
+from neutron.openstack.common import log as logging
 from neutron.plugins.common import constants
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import mechanism_apic
+
+LOG = logging.getLogger(__name__)
 
 
 class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
@@ -137,10 +140,16 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         gw_info = r.pop(l3_db.EXTERNAL_GW_INFO, None)
         tenant_id = self._get_tenant_id_for_create(context, r)
         router_db = self._create_router_db(context, r, tenant_id)
-        # gw info operation happens outside the transaction
-        if gw_info:
-            self._update_router_gw_info(context, router_db['id'],
-                                        gw_info, router=router_db)
+        try:
+            if gw_info:
+                self._update_router_gw_info(context, router_db['id'],
+                                            gw_info, router=router_db)
+        except Exception:
+            with excutils.save_and_reraise_exception():
+                LOG.exception(_("An exception occurred while creating "
+                                "the router: %s"), router)
+                self.delete_router(context, router_db.id)
+
         return self._make_router_dict(router_db)
 
     @sync_init
