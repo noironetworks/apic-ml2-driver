@@ -281,6 +281,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             encap = router_info.get('encap')  # No encap if None
             switch = router_info['switch']
             module, sport = router_info['port'].split('/')
+            external_epg = (router_info.get('preexisting') or
+                            apic_manager.EXT_EPG)
             with self.apic_manager.apic.transaction() as trs:
                 # Get/Create contract
                 arouter_id = self.name_mapper.router(context, router_id)
@@ -288,17 +290,17 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 # Ensure that the external ctx exists
                 self.apic_manager.ensure_context_enforced()
                 # Create External Routed Network and configure it
-                self.apic_manager.ensure_external_routed_network_created(
-                    anetwork_id, transaction=trs)
-                self.apic_manager.ensure_logical_node_profile_created(
-                    anetwork_id, switch, module, sport, encap,
-                    address, transaction=trs)
-                self.apic_manager.ensure_static_route_created(
-                    anetwork_id, switch, next_hop, transaction=trs)
-                external_epg = apic_manager.EXT_EPG
-                self.apic_manager.ensure_external_epg_created(
-                    anetwork_id, external_epg=external_epg,
-                    transaction=trs)
+                if not router_info.get('preexisting'):
+                    self.apic_manager.ensure_external_routed_network_created(
+                        anetwork_id, transaction=trs)
+                    self.apic_manager.ensure_logical_node_profile_created(
+                        anetwork_id, switch, module, sport, encap,
+                        address, transaction=trs)
+                    self.apic_manager.ensure_static_route_created(
+                        anetwork_id, switch, next_hop, transaction=trs)
+                    self.apic_manager.ensure_external_epg_created(
+                        anetwork_id, external_epg=external_epg,
+                        transaction=trs)
 
             ok = self._create_nat_epg_for_ext_net(network, external_epg, cid,
                                                   router_info)
@@ -328,8 +330,16 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             context, context.network.current['id'])
         arouter_id = self.name_mapper.router(context,
                                              port.get('device_id'))
-        self.apic_manager.delete_external_epg_contract(arouter_id,
-                                                       network_id)
+        router_info = self.apic_manager.ext_net_dict.get(
+            context.network.current['name'], {})
+
+        if 'external_epg' not in router_info:
+            self.apic_manager.delete_external_epg_contract(arouter_id,
+                                                           network_id)
+        else:
+            self.apic_manager.delete_external_epg_contract(
+                arouter_id, network_id,
+                external_epg=router_info['external_epg'])
 
     def _get_active_path_count(self, context):
         return context._plugin_context.session.query(
@@ -427,7 +437,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             if self.apic_manager.ext_net_dict.get(network_name):
                 network_id = self.name_mapper.network(context,
                                                       context.current['id'])
-                self.apic_manager.delete_external_routed_network(network_id)
+                router_info = self.apic_manager.ext_net_dict.get(network_name)
+                if not router_info.get('preexisting'):
+                    self.apic_manager.delete_external_routed_network(
+                        network_id)
                 self._delete_nat_epg_for_ext_net(context.current)
 
     @sync_init
