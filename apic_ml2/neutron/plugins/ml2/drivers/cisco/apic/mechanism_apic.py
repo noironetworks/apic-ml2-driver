@@ -47,8 +47,12 @@ _apic_driver_instance = None
 
 class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
+    apic_manager = None
+
     @staticmethod
     def get_apic_manager(client=True):
+        if APICMechanismDriver.apic_manager:
+            return APICMechanismDriver.apic_manager
         apic_config = cfg.CONF.ml2_cisco_apic
         network_config = {
             'vlan_ranges': cfg.CONF.ml2_type_vlan.network_vlan_ranges,
@@ -60,10 +64,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         apic_system_id = cfg.CONF.apic_system_id
         keyclient_param = keyclient if client else None
         keystone_authtoken = cfg.CONF.keystone_authtoken if client else None
-        return apic_manager.APICManager(apic_model.ApicDbModel(), log,
-                                        network_config, apic_config,
-                                        keyclient_param, keystone_authtoken,
-                                        apic_system_id)
+        APICMechanismDriver.apic_manager = apic_manager.APICManager(
+            apic_model.ApicDbModel(), log, network_config, apic_config,
+            keyclient_param, keystone_authtoken, apic_system_id)
+        return APICMechanismDriver.apic_manager
 
     @staticmethod
     def get_base_synchronizer(inst):
@@ -126,9 +130,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     def initialize(self):
         # initialize apic
-        self.apic_manager = APICMechanismDriver.get_apic_manager()
-        self._setup_rpc_listeners()
-        self._setup_rpc()
+        APICMechanismDriver.get_apic_manager()
         self.name_mapper = self.apic_manager.apic_mapper
         self.synchronizer = None
         self.apic_manager.ensure_infra_created_on_apic()
@@ -251,7 +253,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         network_id = context.network.current['id']
         anetwork_id = self.name_mapper.network(context, network_id)
         # Get tenant details from port context
-        tenant_id = context.current['tenant_id']
+        tenant_id = context.network.current['tenant_id']
         tenant_id = self.name_mapper.tenant(context, tenant_id)
 
         # Get segmentation id
@@ -272,17 +274,11 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
     def _perform_gw_port_operations(self, context, port):
         router_id = port.get('device_id')
         network = context.network.current
-        anetwork_id = self.name_mapper.network(context, network['id'])
         router_info = self.apic_manager.ext_net_dict.get(network['name'])
 
         if router_id and router_info:
-            address = router_info['cidr_exposed']
-            next_hop = router_info['gateway_ip']
-            encap = router_info.get('encap')  # No encap if None
-            switch = router_info['switch']
-            module, sport = router_info['port'].split('/')
-            external_epg = (router_info.get('preexisting') or
-                            apic_manager.EXT_EPG)
+            external_epg = apic_manager.EXT_EPG
+            scope = not bool(router_info.get('external_epg'))
             with self.apic_manager.apic.transaction() as trs:
                 # Get/Create contract
                 arouter_id = self.name_mapper.router(context, router_id)
@@ -291,6 +287,13 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 self.apic_manager.ensure_context_enforced()
                 # Create External Routed Network and configure it
                 if not router_info.get('preexisting'):
+                    address = router_info['cidr_exposed']
+                    next_hop = router_info['gateway_ip']
+                    encap = router_info.get('encap')  # No encap if None
+                    switch = router_info['switch']
+                    module, sport = router_info['port'].split('/')
+                    anetwork_id = self.name_mapper.network(context,
+                                                           network['id'])
                     self.apic_manager.ensure_external_routed_network_created(
                         anetwork_id, transaction=trs)
                     self.apic_manager.ensure_logical_node_profile_created(
@@ -301,6 +304,11 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                     self.apic_manager.ensure_external_epg_created(
                         anetwork_id, external_epg=external_epg,
                         transaction=trs)
+                elif 'external_epg' in router_info:
+                    anetwork_id = self.name_mapper.pre_existing(
+                        context, network['id'])
+                    external_epg = self.name_mapper.pre_existing(
+                        context, router_info['external_epg'])
 
             ok = self._create_nat_epg_for_ext_net(network, external_epg, cid,
                                                   router_info)
@@ -308,20 +316,19 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 with self.apic_manager.apic.transaction() as trs:
                     self.apic_manager.ensure_external_epg_consumed_contract(
                         anetwork_id, cid, external_epg=external_epg,
-                        transaction=trs)
+                        transaction=trs, scope=scope)
                     self.apic_manager.ensure_external_epg_provided_contract(
                         anetwork_id, cid, external_epg=external_epg,
-                        transaction=trs)
+                        transaction=trs, scope=scope)
 
     def _perform_port_operations(self, context):
         # Get port
         port = context.current
-        # Check if a compute port
-        if self._is_port_bound(port) and not self._is_apic_network_type(
-                context):
-            self._perform_path_port_operations(context, port)
         if port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
             self._perform_gw_port_operations(context, port)
+        elif self._is_port_bound(port) and not self._is_apic_network_type(
+                context):
+            self._perform_path_port_operations(context, port)
         self._notify_ports_due_to_router_update(port)
 
     def _delete_contract(self, context):
@@ -333,33 +340,38 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         router_info = self.apic_manager.ext_net_dict.get(
             context.network.current['name'], {})
 
-        if 'external_epg' not in router_info:
-            self.apic_manager.delete_external_epg_contract(arouter_id,
-                                                           network_id)
-        else:
-            self.apic_manager.delete_external_epg_contract(
-                arouter_id, network_id,
-                external_epg=router_info['external_epg'])
+        if router_info:
+            if 'external_epg' not in router_info:
+                self.apic_manager.delete_external_epg_contract(arouter_id,
+                                                               network_id)
+            else:
+                anetwork_id = self.name_mapper.pre_existing(
+                    context, context.network.current['name'])
+                external_epg = self.name_mapper.pre_existing(
+                    context, router_info['external_epg'])
+                self.apic_manager.delete_external_epg_contract(
+                    arouter_id, anetwork_id, external_epg=external_epg)
 
-    def _get_active_path_count(self, context):
+    def _get_active_path_count(self, context, host=None):
         return context._plugin_context.session.query(
             models.PortBinding).filter_by(
-                host=context.host, segment=context._binding.segment).count()
+                host=host or context.host,
+                segment=context._binding.segment).count()
 
     @lockutils.synchronized('apic-portlock')
-    def _delete_port_path(self, context, atenant_id, anetwork_id):
+    def _delete_port_path(self, context, atenant_id, anetwork_id, host=None):
         if not self._get_active_path_count(context):
             self.apic_manager.ensure_path_deleted_for_port(
                 atenant_id, anetwork_id,
-                context.host)
+                host or context.host)
 
-    def _delete_path_if_last(self, context):
+    def _delete_path_if_last(self, context, host=None):
         if not self._get_active_path_count(context):
-            tenant_id = context.current['tenant_id']
+            tenant_id = context.network.current['tenant_id']
             atenant_id = self.name_mapper.tenant(context, tenant_id)
             network_id = context.network.current['id']
             anetwork_id = self.name_mapper.network(context, network_id)
-            self._delete_port_path(context, atenant_id, anetwork_id)
+            self._delete_port_path(context, atenant_id, anetwork_id, host=host)
 
     def _get_subnet_info(self, context, subnet):
         if subnet['gateway_ip']:
@@ -383,6 +395,11 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     @sync_init
     def update_port_postcommit(self, context):
+        if (not self._is_apic_network_type(context) and
+                context.original_host and (context.original_host !=
+                                           context.host)):
+            # The VM was migrated
+            self._delete_path_if_last(context, host=context.original_host)
         self._perform_port_operations(context)
 
     def delete_port_postcommit(self, context):
