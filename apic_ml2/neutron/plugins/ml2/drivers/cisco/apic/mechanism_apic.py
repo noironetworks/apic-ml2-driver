@@ -33,11 +33,12 @@ from neutron.plugins.ml2.drivers import mech_agent
 from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron.plugins.ml2 import models
 from opflexagent import constants as ofcst
-from opflexagent import rpc
+from opflexagent import rpc as o_rpc
 from oslo.config import cfg
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_sync
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import rpc as t_rpc
 
 
 LOG = log.getLogger(__name__)
@@ -131,6 +132,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
     def initialize(self):
         # initialize apic
         APICMechanismDriver.get_apic_manager()
+        self._setup_topology_rpc_listeners()
+        self._setup_opflex_rpc_listeners()
         self.name_mapper = self.apic_manager.apic_mapper
         self.synchronizer = None
         self.apic_manager.ensure_infra_created_on_apic()
@@ -138,16 +141,29 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         global _apic_driver_instance
         _apic_driver_instance = self
 
-    def _setup_rpc_listeners(self):
-        self.endpoints = [rpc.GBPServerRpcCallback(self)]
-        self.topic = rpc.TOPIC_OPFLEX
-        self.conn = n_rpc.create_connection(new=True)
-        self.conn.create_consumer(self.topic, self.endpoints,
-                                  fanout=False)
-        return self.conn.consume_in_threads()
+    def _setup_opflex_rpc_listeners(self):
+        self.opflex_endpoints = [o_rpc.GBPServerRpcCallback(self)]
+        self.opflex_topic = o_rpc.TOPIC_OPFLEX
+        self.opflex_conn = n_rpc.create_connection(new=True)
+        self.opflex_conn.create_consumer(
+            self.opflex_topic, self.opflex_endpoints, fanout=False)
+        return self.opflex_conn.consume_in_threads()
+
+    def _setup_topology_rpc_listeners(self):
+        self.topology_endpoints = []
+        if cfg.CONF.ml2_cisco_apic.integrated_topology_service:
+            self.topology_endpoints.append(
+                t_rpc.ApicTopologyRpcCallbackMechanism(
+                    self.apic_manager, self))
+        if self.topology_endpoints:
+            self.topology_topic = t_rpc.TOPIC_APIC_SERVICE
+            self.topology_conn = n_rpc.create_connection(new=True)
+            self.topology_conn.create_consumer(
+                self.topology_topic, self.topology_endpoints, fanout=False)
+            return self.topology_conn.consume_in_threads()
 
     def _setup_rpc(self):
-        self.notifier = rpc.AgentNotifierApi(topics.AGENT)
+        self.notifier = o_rpc.AgentNotifierApi(topics.AGENT)
 
     # RPC Method
     def get_gbp_details(self, context, **kwargs):

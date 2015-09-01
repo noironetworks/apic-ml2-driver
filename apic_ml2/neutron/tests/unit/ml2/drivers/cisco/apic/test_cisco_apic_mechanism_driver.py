@@ -23,11 +23,19 @@ sys.modules["opflexagent"].constants.TYPE_OPFLEX = 'opflex'
 sys.modules["apicapi"].apic_manager.TENANT_COMMON = 'common'
 
 from neutron.common import constants as n_constants
+from neutron import context
 from neutron.extensions import portbindings
+from neutron import manager
+from neutron.plugins.ml2.drivers.cisco.apic import apic_model
+from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron.tests import base
+from neutron.tests.unit import test_db_plugin as test_plugin
+
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
     mechanism_apic as md)
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
+    rpc as mech_rpc)
 from apic_ml2.neutron.tests.unit.ml2.drivers.cisco.apic import (
     test_cisco_apic_common as mocked)
 
@@ -45,9 +53,210 @@ SUBNET_NETMASK = '24'
 TEST_SEGMENT1 = 'test-segment1'
 TEST_SEGMENT2 = 'test-segment2'
 
+PLUGIN_NAME = 'neutron.plugins.ml2.plugin.Ml2Plugin'
+AGENT_TYPE = n_constants.AGENT_TYPE_OVS
+AGENT_CONF = {'alive': True, 'binary': 'somebinary',
+              'topic': 'sometopic', 'agent_type': AGENT_TYPE,
+              'configurations': {'opflex_networks': None,
+                                 'bridge_mappings': {'physnet1': 'br-eth1'}}}
+
 
 def echo(context, id):
     return id
+
+
+class MechanismRpcTestCase(test_plugin.NeutronDbPluginV2TestCase,
+                           mocked.ControllerMixin, mocked.ConfigMixin,
+                           mocked.ApicDBTestBase):
+
+    def setUp(self, plugin_name=None, service_plugins=None):
+        mocked.ControllerMixin.set_up_mocks(self)
+        mocked.ConfigMixin.set_up_mocks(self)
+        self.override_conf('integrated_topology_service', True,
+                           'ml2_cisco_apic')
+        plugin_name = plugin_name or PLUGIN_NAME
+        service_plugins = service_plugins or {'L3_ROUTER_NAT': 'cisco_apic_l3'}
+        super(MechanismRpcTestCase, self).setUp(
+            plugin_name, service_plugins=service_plugins)
+        self.plugin = manager.NeutronManager.get_plugin()
+        self.plugin.remove_networks_from_down_agents = mock.Mock()
+        self.plugin.is_agent_down = mock.Mock(return_value=False)
+        self.driver = self.plugin.mechanism_manager.mech_drivers[
+            'cisco_apic_ml2'].obj
+        self.driver.name_mapper.tenant = echo
+        self.driver.name_mapper.network = echo
+        self.driver.name_mapper.subnet = echo
+        self.driver.name_mapper.port = echo
+        self.driver.name_mapper.router = echo
+        self.driver.name_mapper.pre_existing = echo
+        self.driver.name_mapper.echo = echo
+        self.driver.name_mapper.app_profile.return_value = mocked.APIC_AP
+        self.driver.apic_manager.apic.transaction = self.fake_transaction
+        self.rpc = self.driver.topology_endpoints[0]
+        self.db = apic_model.ApicDbModel()
+
+    def _bind_port_to_host(self, port_id, host):
+        plugin = manager.NeutronManager.get_plugin()
+        ctx = context.get_admin_context()
+        agent = {'host': host}
+        agent.update(AGENT_CONF)
+        plugin.create_or_update_agent(ctx, agent)
+        data = {'port': {'binding:host_id': host, 'device_owner': 'compute:',
+                         'device_id': 'someid'}}
+        # Create EP with bound port
+        req = self.new_update_request('ports', data, port_id,
+                                      self.fmt)
+        return self.deserialize(self.fmt, req.get_response(self.api))
+
+    def _check_call_list(self, expected, observed):
+        for call in expected:
+            self.assertTrue(call in observed,
+                            msg='Call not found, expected:\n%s\nobserved:'
+                                '\n%s' % (str(call), str(observed)))
+            observed.remove(call)
+        self.assertFalse(
+            len(observed),
+            msg='There are more calls than expected: %s' % str(observed))
+
+    def _add_hosts_to_apic(self, num):
+        for x in range(1, num + 1):
+            self.db.add_hostlink('h%s' % x, 'static', None, str(x), '1',
+                                 str(x))
+        self.rpc.peers = self.rpc._load_peers()
+
+    def test_rpc_endpoint_set(self):
+        self.assertEqual(1, len(self.driver.topology_endpoints))
+        rpc = self.driver.topology_endpoints[0]
+        self.assertIsInstance(rpc, mech_rpc.ApicTopologyRpcCallbackMechanism)
+
+    def test_peers_loaded(self):
+        # Verify static configured hosts in rpc peers
+        self._add_hosts_to_apic(2)
+
+        peers = self.rpc._load_peers()
+        self.assertEqual(2, len(peers))
+        self.assertIn(('h1', 'static'), peers)
+        self.assertIn(('h2', 'static'), peers)
+
+    def test_remove_hostlink(self):
+        # Test removal of one link
+        self._add_hosts_to_apic(3)
+
+        net = self.create_network()['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4)
+        # Create two ports
+        with self.port(subnet=sub) as p1:
+            with self.port(subnet=sub) as p2:
+                self._bind_port_to_host(p1['port']['id'], 'h1')
+                self._bind_port_to_host(p2['port']['id'], 'h2')
+                self.driver.apic_manager.reset_mock()
+
+                # Remove H1 interface from ACI
+                self.rpc.update_link(mock.Mock(), 'h1', 'static', None, 0, '1',
+                                     '1')
+                # Assert H1 on net vlan static paths deleted
+                (self.driver.apic_manager.ensure_path_deleted_for_port.
+                    assert_called_once_with(self._tenant_id, net['id'], 'h1'))
+
+                self.driver.apic_manager.reset_mock()
+
+                # Unbound
+                self.rpc.update_link(mock.Mock(), 'h3', 'static', None, 0, '1',
+                                     '3')
+                self.assertEqual(
+                    0, self.driver.apic_manager.ensure_path_deleted_for_port.
+                    call_count)
+
+    def test_add_hostlink(self):
+        # Test removal of one link
+        self._add_hosts_to_apic(2)
+
+        net = self.create_network()['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4)
+        # Create two ports
+        with self.port(subnet=sub) as p1:
+            with self.port(subnet=sub) as p2:
+                with self.port(subnet=sub) as p3:
+                    self._bind_port_to_host(p1['port']['id'], 'h1')
+                    self._bind_port_to_host(p2['port']['id'], 'h2')
+                    self._bind_port_to_host(p3['port']['id'], 'h4')
+                    self.driver.apic_manager.reset_mock()
+
+                    # Add H3 interface from ACI
+                    self.rpc.update_link(
+                        mock.Mock(), 'h3', 'static', None, '3', '1', '3')
+                    # No path created since no port is bound on H3
+                    self.assertEqual(
+                        0,
+                        self.driver.apic_manager.ensure_path_created_for_port.
+                        call_count)
+                    self.driver.apic_manager.reset_mock()
+
+                    # Add H4 interface from ACI
+                    self.rpc.update_link(
+                        mock.Mock(), 'h4', 'static', None, '4', '1', '4')
+
+                    # P3 was bound in H4
+                    net = self.show_network(net['id'],
+                                            is_admin_context=True)['network']
+                    (self.driver.apic_manager.ensure_path_created_for_port.
+                        assert_called_once_with(
+                            self._tenant_id, net['id'], 'h4',
+                            net['provider:segmentation_id']))
+
+    def test_update_hostlink(self):
+        self._add_hosts_to_apic(1)
+
+        net1 = self.create_network()['network']
+        sub1 = self.create_subnet(
+            network_id=net1['id'], cidr='192.168.0.0/24',
+            ip_version=4)
+
+        net2 = self.create_network()['network']
+        sub2 = self.create_subnet(
+            network_id=net2['id'], cidr='192.168.1.0/24',
+            ip_version=4)
+        # Create two ports
+        with self.port(subnet=sub1) as p1:
+            with self.port(subnet=sub1) as p2:
+                with self.port(subnet=sub2) as p3:
+                    # Bind all on H1
+                    self._bind_port_to_host(p1['port']['id'], 'h1')
+                    self._bind_port_to_host(p2['port']['id'], 'h1')
+                    self._bind_port_to_host(p3['port']['id'], 'h1')
+                    self.driver.apic_manager.reset_mock()
+                    # Change host interface
+                    self.rpc.update_link(
+                        mock.Mock(), 'h1', 'static', None, '1', '1', '24')
+
+                    # Ports' path have been deleted and reissued two times (one
+                    # for network)
+                    mgr = self.driver.apic_manager
+                    expected_calls_remove = [
+                        mock.call(self._tenant_id, net1['id'], 'h1'),
+                        mock.call(self._tenant_id, net2['id'], 'h1')]
+
+                    # Create path expected calls
+                    net1 = self.show_network(
+                        net1['id'], is_admin_context=True)['network']
+                    net2 = self.show_network(
+                        net2['id'], is_admin_context=True)['network']
+                    expected_calls_add = [
+                        mock.call(self._tenant_id, net1['id'], 'h1',
+                                  net1['provider:segmentation_id']),
+                        mock.call(self._tenant_id, net2['id'], 'h1',
+                                  net2['provider:segmentation_id'])]
+
+                    self._check_call_list(
+                        expected_calls_remove,
+                        mgr.ensure_path_deleted_for_port.call_args_list)
+                    self._check_call_list(
+                        expected_calls_add,
+                        mgr.ensure_path_created_for_port.call_args_list)
 
 
 class TestCiscoApicMechDriver(base.BaseTestCase,
@@ -62,6 +271,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.driver = md.APICMechanismDriver()
         self.driver.synchronizer = None
         md.APICMechanismDriver.get_base_synchronizer = mock.Mock()
+        self.driver.initialize()
         self.driver.vif_type = 'test-vif_type'
         self.driver.cap_port_filter = 'test-cap_port_filter'
         self.driver.name_mapper = mock.Mock()
@@ -94,7 +304,6 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
 
     def test_initialize(self):
         mgr = self.driver.apic_manager
-        self.driver.initialize()
         mgr.ensure_infra_created_on_apic.assert_called_once()
         mgr.ensure_bgp_pod_policy_created_on_apic.assert_called_once()
 
