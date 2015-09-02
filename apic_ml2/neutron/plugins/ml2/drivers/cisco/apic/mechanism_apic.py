@@ -134,6 +134,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         APICMechanismDriver.get_apic_manager()
         self._setup_topology_rpc_listeners()
         self._setup_opflex_rpc_listeners()
+        self._setup_rpc()
         self.name_mapper = self.apic_manager.apic_mapper
         self.synchronizer = None
         self.apic_manager.ensure_infra_created_on_apic()
