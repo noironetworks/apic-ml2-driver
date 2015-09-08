@@ -463,10 +463,10 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
 
         expected_calls = [
             mock.call(mocked.APIC_NETWORK, transaction=mock.ANY),
-            mock.call(net_ctx.current['name'],
-                      context="NAT-vrf-%s" % net_ctx.current['name'],
+            mock.call(mocked.APIC_NETWORK,
+                      context="NAT-vrf-%s" % mocked.APIC_NETWORK,
                       transaction=mock.ANY),
-            mock.call("Shd-%s" % net_ctx.current['name'],
+            mock.call("Shd-%s" % mocked.APIC_NETWORK,
                       transaction=mock.ANY)]
         self._check_call_list(
             expected_calls,
@@ -484,7 +484,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         expected_calls = [
             mock.call(mocked.APIC_NETWORK, external_epg=mocked.APIC_EXT_EPG,
                       transaction=mock.ANY),
-            mock.call("Shd-%s" % net_ctx.current['name'],
+            mock.call("Shd-%s" % mocked.APIC_NETWORK,
                       external_epg="Shd-%s" % mocked.APIC_EXT_EPG,
                       transaction=mock.ANY)]
 
@@ -493,11 +493,11 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
 
         expected_calls = [
             mock.call(
-                "Shd-%s" % net_ctx.current['name'],
+                "Shd-%s" % mocked.APIC_NETWORK,
                 mgr.get_router_contract.return_value,
                 external_epg="Shd-%s" % mocked.APIC_EXT_EPG,
                 transaction=mock.ANY),
-            mock.call(net_ctx.current['name'], "NAT-allow-all",
+            mock.call(mocked.APIC_NETWORK, "NAT-allow-all",
                       external_epg=mocked.APIC_EXT_EPG, transaction=mock.ANY)]
         self._check_call_list(
             expected_calls,
@@ -505,11 +505,11 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
 
         expected_calls = [
             mock.call(
-                "Shd-%s" % net_ctx.current['name'],
+                "Shd-%s" % mocked.APIC_NETWORK,
                 mgr.get_router_contract.return_value,
                 external_epg="Shd-%s" % mocked.APIC_EXT_EPG,
                 transaction=mock.ANY),
-            mock.call(net_ctx.current['name'], "NAT-allow-all",
+            mock.call(mocked.APIC_NETWORK, "NAT-allow-all",
                       external_epg=mocked.APIC_EXT_EPG, transaction=mock.ANY)]
         self._check_call_list(
             expected_calls,
@@ -531,10 +531,10 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         mgr.ensure_context_enforced.assert_called_once()
 
         expected_calls = [
-            mock.call(net_ctx.current['name'],
-                      context="NAT-vrf-%s" % net_ctx.current['name'],
+            mock.call(mocked.APIC_NETWORK_PRE,
+                      context="NAT-vrf-%s" % mocked.APIC_NETWORK_PRE,
                       transaction=mock.ANY),
-            mock.call("Shd-%s" % net_ctx.current['name'],
+            mock.call("Shd-%s" % mocked.APIC_NETWORK_PRE,
                       transaction=mock.ANY)]
         self._check_call_list(
             expected_calls,
@@ -544,16 +544,16 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.assertFalse(mgr.ensure_static_route_created.called)
 
         mgr.ensure_external_epg_created.assert_called_once_with(
-            "Shd-%s" % net_ctx.current['name'],
+            "Shd-%s" % mocked.APIC_NETWORK_PRE,
             external_epg="Shd-%s" % mocked.APIC_EXT_EPG, transaction=mock.ANY)
 
         expected_calls = [
             mock.call(
-                "Shd-%s" % net_ctx.current['name'],
+                "Shd-%s" % mocked.APIC_NETWORK_PRE,
                 mgr.get_router_contract.return_value,
                 external_epg="Shd-%s" % mocked.APIC_EXT_EPG,
                 transaction=mock.ANY),
-            mock.call(net_ctx.current['name'], "NAT-allow-all",
+            mock.call(mocked.APIC_NETWORK_PRE, "NAT-allow-all",
                       external_epg=mocked.APIC_EXT_EPG, transaction=mock.ANY)]
         self._check_call_list(
             expected_calls,
@@ -561,11 +561,11 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
 
         expected_calls = [
             mock.call(
-                "Shd-%s" % net_ctx.current['name'],
+                "Shd-%s" % mocked.APIC_NETWORK_PRE,
                 mgr.get_router_contract.return_value,
                 external_epg="Shd-%s" % mocked.APIC_EXT_EPG,
                 transaction=mock.ANY),
-            mock.call(net_ctx.current['name'], "NAT-allow-all",
+            mock.call(mocked.APIC_NETWORK_PRE, "NAT-allow-all",
                       external_epg=mocked.APIC_EXT_EPG, transaction=mock.ANY)]
         self._check_call_list(
             expected_calls,
@@ -661,7 +661,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
 
         expected_calls = [
             mock.call(mocked.APIC_NETWORK),
-            mock.call("Shd-%s" % ctx.current['name'], 'common',
+            mock.call("Shd-%s" % mocked.APIC_NETWORK, 'common',
                       transaction=mock.ANY)]
         self._check_call_list(
             expected_calls, mgr.delete_external_routed_network.call_args_list)
@@ -673,7 +673,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         mgr = self.driver.apic_manager
         self.driver.delete_network_postcommit(ctx)
         mgr.delete_external_routed_network.assert_called_once_with(
-            "Shd-%s" % ctx.current['name'], 'common', transaction=mock.ANY)
+            "Shd-%s" % mocked.APIC_NETWORK_PRE, 'common', transaction=mock.ANY)
 
     def test_create_subnet_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,

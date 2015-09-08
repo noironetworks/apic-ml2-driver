@@ -328,8 +328,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                     external_epg = self.name_mapper.pre_existing(
                         context, router_info['external_epg'])
 
-            ok = self._create_nat_epg_for_ext_net(network, external_epg, cid,
-                                                  router_info)
+            ok = self._create_nat_epg_for_ext_net(anetwork_id, external_epg,
+                                                  cid, router_info)
             if not ok:      # fallback to non-NAT config
                 with self.apic_manager.apic.transaction() as trs:
                     self.apic_manager.ensure_external_epg_consumed_contract(
@@ -476,7 +476,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 if not router_info.get('preexisting'):
                     self.apic_manager.delete_external_routed_network(
                         network_id)
-                self._delete_nat_epg_for_ext_net(context.current)
+                self._delete_nat_epg_for_ext_net(network_id)
 
     @sync_init
     def create_subnet_postcommit(self, context):
@@ -531,25 +531,24 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             # Notification not needed
             pass
 
-    def _get_nat_epg_for_ext_net(self, ext_net):
-        return "NAT-epg-%s" % ext_net['name']
+    def _get_nat_epg_for_ext_net(self, l3out_name):
+        return "NAT-epg-%s" % l3out_name
 
-    def _get_nat_bd_for_ext_net(self, ext_net):
-        return "NAT-bd-%s" % ext_net['name']
+    def _get_nat_bd_for_ext_net(self, l3out_name):
+        return "NAT-bd-%s" % l3out_name
 
-    def _get_nat_vrf_for_ext_net(self, ext_net):
-        return "NAT-vrf-%s" % ext_net['name']
+    def _get_nat_vrf_for_ext_net(self, l3out_name):
+        return "NAT-vrf-%s" % l3out_name
 
     def _get_shadow_name_for_nat(self, name):
         return "Shd-%s" % name
 
-    def _create_nat_epg_for_ext_net(self, ext_net, ext_epg_name,
+    def _create_nat_epg_for_ext_net(self, l3out_name, ext_epg_name,
                                     router_contract, ext_info):
-        l3out_name = ext_net['name']
         tenant_name = apic_manager.TENANT_COMMON
-        nat_vrf_name = self._get_nat_vrf_for_ext_net(ext_net)
-        nat_bd_name = self._get_nat_bd_for_ext_net(ext_net)
-        nat_epg_name = self._get_nat_epg_for_ext_net(ext_net)
+        nat_vrf_name = self._get_nat_vrf_for_ext_net(l3out_name)
+        nat_bd_name = self._get_nat_bd_for_ext_net(l3out_name)
+        nat_epg_name = self._get_nat_epg_for_ext_net(l3out_name)
         nat_contract = "NAT-allow-all"
         shadow_ext_epg = self._get_shadow_name_for_nat(ext_epg_name)
         shadow_l3out = self._get_shadow_name_for_nat(l3out_name)
@@ -603,19 +602,19 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             LOG.info(_("Unable to create NAT EPG: %s"), e)
             return False
 
-    def _delete_nat_epg_for_ext_net(self, ext_net):
+    def _delete_nat_epg_for_ext_net(self, l3out_name):
         tenant_name = apic_manager.TENANT_COMMON
         with self.apic_manager.apic.transaction(None) as trs:
             # delete shadow L3-out and shadow external-EPG
-            shadow_l3out = self._get_shadow_name_for_nat(ext_net['name'])
+            shadow_l3out = self._get_shadow_name_for_nat(l3out_name)
             self.apic_manager.delete_external_routed_network(
                 shadow_l3out, tenant_name, transaction=trs)
             # delete NAT epg
             self.apic_manager.ensure_nat_epg_deleted(
                 tenant_name,
-                self._get_nat_epg_for_ext_net(ext_net),
-                self._get_nat_bd_for_ext_net(ext_net),
-                self._get_nat_vrf_for_ext_net(ext_net),
+                self._get_nat_epg_for_ext_net(l3out_name),
+                self._get_nat_bd_for_ext_net(l3out_name),
+                self._get_nat_vrf_for_ext_net(l3out_name),
                 transaction=trs)
 
     def _get_router_interface_subnets(self, context, router_ids):
