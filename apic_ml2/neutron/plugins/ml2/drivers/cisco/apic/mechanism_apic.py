@@ -229,7 +229,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             net = ext_nets.get(f['floating_network_id'])
             if not net:
                 continue
-            f['nat_epg_name'] = self._get_nat_epg_for_ext_net(net)
+            l3out_name = self.name_mapper.network(context, net['id'])
+            f['nat_epg_name'] = self._get_nat_epg_for_ext_net(l3out_name)
             f['nat_epg_tenant'] = apic_manager.TENANT_COMMON
             fip_ext_nets.add(net['id'])
         ipms = []
@@ -237,8 +238,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             if (net_id in fip_ext_nets or
                     not self._is_connected_to_ext_net(context, port, net)):
                 continue
+            l3out_name = self.name_mapper.network(context, net_id)
             ipms.append({'external_segment_name': net['name'],
-                         'nat_epg_name': self._get_nat_epg_for_ext_net(net),
+                         'nat_epg_name':
+                            self._get_nat_epg_for_ext_net(l3out_name),
                          'nat_epg_tenant': apic_manager.TENANT_COMMON})
         details['floating_ip'] = fips
         details['ip_mapping'] = ipms
