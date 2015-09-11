@@ -83,10 +83,10 @@ apic_opts = [
                default=0,
                help=_("Synchronization interval in seconds")),
     cfg.FloatOpt('apic_agent_report_interval',
-                 default=5,
+                 default=60,
                  help=_('Interval between agent status updates (in sec)')),
     cfg.FloatOpt('apic_agent_poll_interval',
-                 default=2,
+                 default=60,
                  help=_('Interval between agent poll for topology (in sec)')),
     cfg.BoolOpt('integrated_topology_service', default=False,
                 help=_("Use integrated topology service for better host "
