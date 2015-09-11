@@ -139,6 +139,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         self.synchronizer = None
         self.apic_manager.ensure_infra_created_on_apic()
         self.apic_manager.ensure_bgp_pod_policy_created_on_apic()
+        self.nat_enabled = self.apic_manager.use_vmm
         global _apic_driver_instance
         _apic_driver_instance = self
 
@@ -213,6 +214,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     def _add_ip_mapping_details(self, context, port, details):
         """Add information about IP mapping for DNAT/SNAT."""
+        if not nat_enabled:
+            return
         l3plugin = manager.NeutronManager.get_service_plugins().get(
             constants.L3_ROUTER_NAT)
         core_plugin = context._plugin
@@ -548,6 +551,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     def _create_nat_epg_for_ext_net(self, l3out_name, ext_epg_name,
                                     router_contract, ext_info):
+        if not self.nat_enabled:
+            return False
         tenant_name = apic_manager.TENANT_COMMON
         nat_vrf_name = self._get_nat_vrf_for_ext_net(l3out_name)
         nat_bd_name = self._get_nat_bd_for_ext_net(l3out_name)
@@ -606,6 +611,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             return False
 
     def _delete_nat_epg_for_ext_net(self, l3out_name):
+        if not self.nat_enabled:
+            return
         tenant_name = apic_manager.TENANT_COMMON
         with self.apic_manager.apic.transaction(None) as trs:
             # delete shadow L3-out and shadow external-EPG
@@ -638,6 +645,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
     def _notify_ports_due_to_router_update(self, router_port):
         # Find ports whose DNAT/SNAT info may be affected due to change
         # in a router's connectivity to external/tenant network.
+        if not self.nat_enabled:
+            return
         dev_owner = router_port['device_owner']
         admin_ctx = nctx.get_admin_context()
         if dev_owner == n_constants.DEVICE_OWNER_ROUTER_INTF:
