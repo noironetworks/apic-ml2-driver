@@ -302,7 +302,6 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
         if router_id and router_info:
             external_epg = apic_manager.EXT_EPG
-            scope = not bool(router_info.get('external_epg'))
             with self.apic_manager.apic.transaction() as trs:
                 # Get/Create contract
                 arouter_id = self.name_mapper.router(context, router_id)
@@ -340,10 +339,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 with self.apic_manager.apic.transaction() as trs:
                     self.apic_manager.ensure_external_epg_consumed_contract(
                         anetwork_id, cid, external_epg=external_epg,
-                        transaction=trs, scope=scope)
+                        transaction=trs)
                     self.apic_manager.ensure_external_epg_provided_contract(
                         anetwork_id, cid, external_epg=external_epg,
-                        transaction=trs, scope=scope)
+                        transaction=trs)
 
     def _perform_port_operations(self, context):
         # Get port
