@@ -329,7 +329,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                         transaction=trs)
                 elif 'external_epg' in router_info:
                     anetwork_id = self.name_mapper.pre_existing(
-                        context, network['id'])
+                        context, network['name'])
                     external_epg = self.name_mapper.pre_existing(
                         context, router_info['external_epg'])
 
@@ -481,7 +481,11 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 if not router_info.get('preexisting'):
                     self.apic_manager.delete_external_routed_network(
                         network_id)
-                self._delete_nat_epg_for_ext_net(network_id)
+                    l3out_name = network_id
+                else:
+                    l3out_name = self.name_mapper.pre_existing(
+                        context, network_name)
+                self._delete_nat_epg_for_ext_net(l3out_name)
 
     @sync_init
     def create_subnet_postcommit(self, context):
