@@ -132,9 +132,6 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
     def test_remove_router_interface_port(self):
         self._test_remove_router_interface(self.interface_info['port'])
 
-    def test_singleton_manager(self):
-        self.assertIs(md.APICMechanismDriver.apic_manager, self.plugin.manager)
-
     def test_create_router_gateway_fails(self):
         # Force _update_router_gw_info failure
         self.plugin._update_router_gw_info = mock.Mock(
@@ -148,3 +145,6 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
                           self.plugin.create_router, self.context, data)
         routers = self.plugin.get_routers(self.context)
         self.assertEqual(0, len(routers))
+
+    def test_singleton_manager(self):
+        self.assertIs(md.APICMechanismDriver.apic_manager, self.plugin.manager)
