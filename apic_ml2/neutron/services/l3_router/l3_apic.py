@@ -19,10 +19,14 @@ from neutron.db import db_base_plugin_v2
 from neutron.db import extraroute_db
 from neutron.db import l3_db
 from neutron.db import l3_dvr_db
+from neutron.extensions import l3
 from neutron.openstack.common import excutils
+from neutron.openstack.common import log as logging
 from neutron.plugins.common import constants
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import mechanism_apic
+
+LOG = logging.getLogger(__name__)
 
 
 class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
@@ -136,10 +140,16 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         gw_info = r.pop(l3_db.EXTERNAL_GW_INFO, None)
         tenant_id = self._get_tenant_id_for_create(context, r)
         router_db = self._create_router_db(context, r, tenant_id)
-        # gw info operation happens outside the transaction
-        if gw_info:
-            self._update_router_gw_info(context, router_db['id'],
-                                        gw_info, router=router_db)
+        try:
+            if gw_info:
+                self._update_router_gw_info(context, router_db['id'],
+                                            gw_info, router=router_db)
+        except Exception:
+            with excutils.save_and_reraise_exception():
+                LOG.exception(_("An exception occurred while creating "
+                                "the router: %s"), router)
+                self.delete_router(context, router_db.id)
+
         return self._make_router_dict(router_db)
 
     @sync_init
@@ -190,3 +200,39 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
                                                interface_info)
         return super(ApicL3ServicePlugin, self).remove_router_interface(
             context, router_id, interface_info)
+
+    # Floating IP API
+    def create_floatingip(self, context, floatingip):
+        res = super(ApicL3ServicePlugin, self).create_floatingip(
+            context, floatingip)
+        port_id = floatingip.get('floatingip', {}).get('port_id')
+        self._notify_port_update(port_id)
+        return res
+
+    def update_floatingip(self, context, id, floatingip):
+        port_id = [self._get_port_mapped_to_floatingip(context, id)]
+        res = super(ApicL3ServicePlugin, self).update_floatingip(
+            context, id, floatingip)
+        port_id.append(floatingip.get('floatingip', {}).get('port_id'))
+        for p in port_id:
+            self._notify_port_update(p)
+        return res
+
+    def delete_floatingip(self, context, id):
+        port_id = self._get_port_mapped_to_floatingip(context, id)
+        res = super(ApicL3ServicePlugin, self).delete_floatingip(context, id)
+        self._notify_port_update(port_id)
+        return res
+
+    def _get_port_mapped_to_floatingip(self, context, fip_id):
+        try:
+            fip = self.get_floatingip(context, fip_id)
+            return fip.get('port_id')
+        except l3.FloatingIPNotFound:
+            pass
+        return None
+
+    def _notify_port_update(self, port_id):
+        l2 = mechanism_apic.APICMechanismDriver.get_driver_instance()
+        if l2 and port_id:
+            l2.notify_port_update(port_id)
