@@ -214,7 +214,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     def _add_ip_mapping_details(self, context, port, details):
         """Add information about IP mapping for DNAT/SNAT."""
-        if not nat_enabled:
+        if not self.nat_enabled:
             return
         l3plugin = manager.NeutronManager.get_service_plugins().get(
             constants.L3_ROUTER_NAT)
@@ -244,7 +244,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             l3out_name = self.name_mapper.network(context, net_id)
             ipms.append({'external_segment_name': net['name'],
                          'nat_epg_name':
-                            self._get_nat_epg_for_ext_net(l3out_name),
+                         self._get_nat_epg_for_ext_net(l3out_name),
                          'nat_epg_tenant': apic_manager.TENANT_COMMON})
         details['floating_ip'] = fips
         details['ip_mapping'] = ipms
