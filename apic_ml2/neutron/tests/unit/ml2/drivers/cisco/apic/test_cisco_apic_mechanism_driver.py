@@ -705,7 +705,8 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
                    'name': net_id + '-name',
                    'tenant_id': tenant_id,
                    'provider:segmentation_id': seg_id,
-                   'provider:network_type': seg_type}
+                   'provider:network_type': seg_type,
+                   'provider:segmentation_id': seg_id}
         if external:
             network['router:external'] = True
         if seg_id:

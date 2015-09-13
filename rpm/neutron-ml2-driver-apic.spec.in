@@ -1,6 +1,7 @@
-%global release_name juno
+%global release_name kilo
 %define host_agent neutron-cisco-apic-host-agent.service
 %define service_agent neutron-cisco-apic-service-agent.service
+%define version_py @VERSION_PY@
 
 Name:		neutron-ml2-driver-apic
 Version:	@VERSION@
@@ -13,8 +14,8 @@ BuildArch:	noarch
 BuildRequires:	python2-devel
 BuildRequires:	python-pbr
 BuildRequires:	python-setuptools
-Requires:	openstack-neutron-ml2 >= 2014.2
-Requires:	openstack-neutron-ml2 < 2014.3
+Requires:	openstack-neutron-ml2 >= 2015.1
+Requires:	openstack-neutron-ml2 < 2015.2
 Requires:	lldpad
 Requires:	apicapi
 Requires:	python-oslo-concurrency
@@ -26,7 +27,7 @@ Requires(postun): systemd-units
 Standalone Openstack Neutron ML2 driver for working with Cisco APIC
 
 %prep
-%setup -qn neutron-ml2-driver-apic-%{version}
+%setup -qn neutron-ml2-driver-apic-%{version_py}
 rm -f requirements.txt
 
 %build
@@ -81,7 +82,7 @@ install -p -D -m 0644 rpm/%{service_agent} %{buildroot}/%{_unitdir}/%{service_ag
 %files
 %doc README.rst
 %{python2_sitelib}/apic_ml2
-%{python2_sitelib}/neutron_ml2_driver_apic-%%{version}*.egg-info
+%{python2_sitelib}/neutron_ml2_driver_apic-%%{version_py}*.egg-info
 %{_bindir}/apic-ml2-db-manage
 %{_bindir}/neutron-cisco-apic-host-agent
 %{_bindir}/neutron-cisco-apic-service-agent
@@ -91,5 +92,7 @@ install -p -D -m 0644 rpm/%{service_agent} %{buildroot}/%{_unitdir}/%{service_ag
 %{_sysconfdir}/neutron/rootwrap.d/cisco-apic.filters
 
 %changelog
+* Tue Aug 25 2015 Amit Bose <bose@noironetworks.com> - 2015.1.0-1
+- Update to Kilo
 * Mon May 18 2015 Amit Bose <bose@noironetworks.com> - 1.0.0-1
 - Initial release 
