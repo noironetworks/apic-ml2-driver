@@ -15,7 +15,7 @@
 
 import collections
 
-from neutron.agent.linux import dhcp
+from neutron.agent.linux import dhcp  # noqa
 
 
 class ApicDnsmasq(dhcp.Dnsmasq):

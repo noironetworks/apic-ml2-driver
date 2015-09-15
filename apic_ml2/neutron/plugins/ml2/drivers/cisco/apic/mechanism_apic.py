@@ -140,6 +140,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         self.apic_manager.ensure_infra_created_on_apic()
         self.apic_manager.ensure_bgp_pod_policy_created_on_apic()
         self.nat_enabled = self.apic_manager.use_vmm
+        self.per_tenant_context = cfg.CONF.ml2_cisco_apic.per_tenant_context
         global _apic_driver_instance
         _apic_driver_instance = self
 
