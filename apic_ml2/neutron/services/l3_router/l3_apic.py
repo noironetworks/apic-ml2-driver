@@ -85,7 +85,8 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         else:
             port = self.get_port(context, interface_info['port_id'])
             network_id = port['network_id']
-            tenant_id = port['tenant_id']
+            network = self.get_network(context, port['network_id'])
+            tenant_id = network['tenant_id']
 
         # Map openstack IDs to APIC IDs
         atenant_id, arouter_id, anetwork_id, _ = self._map_names(

@@ -79,6 +79,7 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
         self.port = {'tenant_id': TENANT,
                      'network_id': NETWORK,
                      'fixed_ips': [{'subnet_id': SUBNET}]}
+        self.network = {'tenant_id': TENANT}
         self.plugin.name_mapper = mock.Mock()
         l3_apic.apic_mapper.mapper_context = self.fake_transaction
         self.plugin.name_mapper.tenant.return_value = mocked.APIC_TENANT
@@ -94,7 +95,7 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
         self.plugin.manager.apic.transaction = self.fake_transaction
 
         self.plugin.get_subnet = mock.Mock(return_value=self.subnet)
-        self.plugin.get_network = mock.Mock(return_value=self.interface_info)
+        self.plugin.get_network = mock.Mock(return_value=self.network)
         self.plugin.get_port = mock.Mock(return_value=self.port)
         mock.patch('neutron.db.l3_dvr_db.L3_NAT_with_dvr_db_mixin.'
                    '_core_plugin').start()
