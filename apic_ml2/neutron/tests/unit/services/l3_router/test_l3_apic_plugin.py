@@ -91,7 +91,8 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
 
         self.contract = FakeContract()
         self.plugin.get_router = mock.Mock(
-            return_value={'id': ROUTER, 'admin_state_up': True})
+            return_value={'id': ROUTER, 'admin_state_up': True,
+                          'tenant_id': TENANT})
         self.plugin.manager.apic.transaction = self.fake_transaction
 
         self.plugin.get_subnet = mock.Mock(return_value=self.subnet)

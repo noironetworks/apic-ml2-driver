@@ -270,6 +270,32 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
         self.mgr.remove_router_interface.assert_called_once_with(
             'onetenant', router['id'], net['id'])
 
+    def test_inter_tenant_router_interface_disallowed(self):
+        net = self.create_network(
+            tenant_id='onetenant', expected_res_status=201, shared=True,
+            is_admin_context=True)['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4, is_admin_context=True,
+            tenant_id='anothertenant')
+        router = self.create_router(api=self.ext_api,
+                                    expected_res_status=201)['router']
+        self.l3_plugin.per_tenant_context = True
+
+        # Per subnet
+        self.assertRaises(
+            l3_apic.InterTenantRouterInterfaceNotAllowedOnPerTenantContext,
+            self.l3_plugin.add_router_interface, context.get_admin_context(),
+            router['id'], {'subnet_id': sub['subnet']['id']})
+
+        # Per port
+        with self.port(subnet=sub, tenant_id='anothertenant') as p1:
+            self.assertRaises(
+                l3_apic.InterTenantRouterInterfaceNotAllowedOnPerTenantContext,
+                self.l3_plugin.add_router_interface,
+                context.get_admin_context(), router['id'],
+                {'port_id': p1['port']['id']})
+
 
 class MechanismRpcTestCase(ApicML2IntegratedTestBase):
 

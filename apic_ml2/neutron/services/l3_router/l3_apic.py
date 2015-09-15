@@ -15,6 +15,7 @@
 
 from apicapi import apic_mapper
 
+from neutron.common import exceptions as n_exc
 from neutron.db import db_base_plugin_v2
 from neutron.db import extraroute_db
 from neutron.db import l3_db
@@ -23,10 +24,16 @@ from neutron.extensions import l3
 from neutron.openstack.common import excutils
 from neutron.openstack.common import log as logging
 from neutron.plugins.common import constants
+from oslo.config import cfg
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import mechanism_apic
 
 LOG = logging.getLogger(__name__)
+
+
+class InterTenantRouterInterfaceNotAllowedOnPerTenantContext(n_exc.BadRequest):
+    message = _("Cannot attach s router interface to a network owned by "
+                "another tenant when per_tenant_context is enabled.")
 
 
 class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
@@ -41,6 +48,7 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         self.synchronizer = None
         self.manager.ensure_infra_created_on_apic()
         self.manager.ensure_bgp_pod_policy_created_on_apic()
+        self.per_tenant_context = cfg.CONF.ml2_cisco_apic.per_tenant_context
 
     def _map_names(self, context,
                    tenant_id, router_id, net_id, subnet_id):
@@ -87,6 +95,9 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
 
         network = self.get_network(context, network_id)
         tenant_id = network['tenant_id']
+        if tenant_id != router['tenant_id'] and self.per_tenant_context:
+            # This operation is disallowed
+            raise InterTenantRouterInterfaceNotAllowedOnPerTenantContext()
 
         # Map openstack IDs to APIC IDs
         atenant_id, arouter_id, anetwork_id, _ = self._map_names(
