@@ -22,6 +22,7 @@ sys.modules["opflexagent"] = mock.Mock()
 sys.modules["opflexagent"].constants.TYPE_OPFLEX = 'opflex'
 sys.modules["apicapi"].apic_manager.TENANT_COMMON = 'common'
 
+from neutron.api import extensions
 from neutron.common import constants as n_constants
 from neutron import context
 from neutron.extensions import portbindings
@@ -30,12 +31,14 @@ from neutron.plugins.ml2.drivers.cisco.apic import apic_model
 from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron.tests import base
 from neutron.tests.unit import test_db_plugin as test_plugin
+from neutron.tests.unit import test_extensions
 from oslo.db import exception as db_exc
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
     mechanism_apic as md)
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
     rpc as mech_rpc)
+from apic_ml2.neutron.services.l3_router import l3_apic
 from apic_ml2.neutron.tests.unit.ml2.drivers.cisco.apic import (
     test_cisco_apic_common as mocked)
 
@@ -82,6 +85,8 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
         service_plugins = service_plugins or {'L3_ROUTER_NAT': 'cisco_apic_l3'}
         super(ApicML2IntegratedTestBase, self).setUp(
             plugin_name, service_plugins=service_plugins)
+        ext_mgr = extensions.PluginAwareExtensionManager.get_instance()
+        self.ext_api = test_extensions.setup_extensions_middleware(ext_mgr)
         self.plugin = manager.NeutronManager.get_plugin()
         self.plugin.remove_networks_from_down_agents = mock.Mock()
         self.plugin.is_agent_down = mock.Mock(return_value=False)
@@ -110,6 +115,7 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
         self.mgr.apic.fvTenant.name = name
         self.l3_plugin = manager.NeutronManager.get_service_plugins()[
             'L3_ROUTER_NAT']
+        l3_apic.apic_mapper.mapper_context = self.fake_transaction
 
     def _bind_port_to_host(self, port_id, host):
         plugin = manager.NeutronManager.get_plugin()
@@ -215,19 +221,54 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             self.assertEqual('onetenant', details['ptg_tenant'])
             self.assertEqual('onetenant', details['tenant_id'])
 
-    #def test_add_router_interface_on_shared_net(self):
-    #    net = self.create_network(
-    #        tenant_id='onetenant', expected_res_status=201, shared=True,
-    #        is_admin_context=True)['network']
-    #    sub = self.create_subnet(
-    #        network_id=net['id'], cidr='192.168.0.0/24',
-    #        ip_version=4, is_admin_context=True)
-    #    router = self.create_router(api=self.ext_api,
-    #                                expected_res_status=201)['router']
-    #    with self.port(subnet=sub, tenant_id='anothertenant') as p1:
-    #        self.l3_plugin.add_router_interface(
-    #            context, router['id'], {'port_id': p1['port']['id']})
+    def test_add_router_interface_on_shared_net_by_port(self):
+        net = self.create_network(
+            tenant_id='onetenant', expected_res_status=201, shared=True,
+            is_admin_context=True)['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4, is_admin_context=True)
+        router = self.create_router(api=self.ext_api,
+                                    expected_res_status=201)['router']
+        with self.port(subnet=sub, tenant_id='anothertenant') as p1:
+            self.l3_plugin.add_router_interface(
+                context.get_admin_context(), router['id'],
+                {'port_id': p1['port']['id']})
+            self.mgr.add_router_interface.assert_called_once_with(
+                'onetenant', router['id'], net['id'])
 
+            self.mgr.reset_mock()
+            # Test removal
+            self.l3_plugin.remove_router_interface(
+                context.get_admin_context(), router['id'],
+                {'port_id': p1['port']['id']})
+            self.mgr.remove_router_interface.assert_called_once_with(
+                'onetenant', router['id'], net['id'])
+
+    def test_add_router_interface_on_shared_net_by_subnet(self):
+        net = self.create_network(
+            tenant_id='onetenant', expected_res_status=201, shared=True,
+            is_admin_context=True)['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4, is_admin_context=True,
+            tenant_id='anothertenant')['subnet']
+        router = self.create_router(api=self.ext_api,
+                                    expected_res_status=201)['router']
+
+        self.l3_plugin.add_router_interface(
+            context.get_admin_context(), router['id'],
+            {'subnet_id': sub['id']})
+        self.mgr.add_router_interface.assert_called_once_with(
+            'onetenant', router['id'], net['id'])
+
+        self.mgr.reset_mock()
+        # Test removal
+        self.l3_plugin.remove_router_interface(
+            context.get_admin_context(), router['id'],
+            {'subnet_id': sub['id']})
+        self.mgr.remove_router_interface.assert_called_once_with(
+            'onetenant', router['id'], net['id'])
 
 
 class MechanismRpcTestCase(ApicML2IntegratedTestBase):
