@@ -81,12 +81,12 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         if 'subnet_id' in interface_info:
             subnet = self.get_subnet(context, interface_info['subnet_id'])
             network_id = subnet['network_id']
-            tenant_id = subnet['tenant_id']
         else:
             port = self.get_port(context, interface_info['port_id'])
             network_id = port['network_id']
-            network = self.get_network(context, port['network_id'])
-            tenant_id = network['tenant_id']
+
+        network = self.get_network(context, network_id)
+        tenant_id = network['tenant_id']
 
         # Map openstack IDs to APIC IDs
         atenant_id, arouter_id, anetwork_id, _ = self._map_names(
@@ -101,11 +101,12 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         if 'subnet_id' in interface_info:
             subnet = self.get_subnet(context, interface_info['subnet_id'])
             network_id = subnet['network_id']
-            tenant_id = subnet['tenant_id']
         else:
             port = self.get_port(context, interface_info['port_id'])
             network_id = port['network_id']
-            tenant_id = port['tenant_id']
+
+        network = self.get_network(context, network_id)
+        tenant_id = network['tenant_id']
 
         # Map openstack IDs to APIC IDs
         atenant_id, arouter_id, anetwork_id, _ = self._map_names(
