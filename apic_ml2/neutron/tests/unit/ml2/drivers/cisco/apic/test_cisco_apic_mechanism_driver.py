@@ -65,9 +65,13 @@ def echo(context, id):
     return id
 
 
-class MechanismRpcTestCase(test_plugin.NeutronDbPluginV2TestCase,
-                           mocked.ControllerMixin, mocked.ConfigMixin,
-                           mocked.ApicDBTestBase):
+def name(name):
+    return name
+
+
+class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
+                                mocked.ControllerMixin, mocked.ConfigMixin,
+                                mocked.ApicDBTestBase):
 
     def setUp(self, plugin_name=None, service_plugins=None):
         mocked.ControllerMixin.set_up_mocks(self)
@@ -76,7 +80,7 @@ class MechanismRpcTestCase(test_plugin.NeutronDbPluginV2TestCase,
                            'ml2_cisco_apic')
         plugin_name = plugin_name or PLUGIN_NAME
         service_plugins = service_plugins or {'L3_ROUTER_NAT': 'cisco_apic_l3'}
-        super(MechanismRpcTestCase, self).setUp(
+        super(ApicML2IntegratedTestBase, self).setUp(
             plugin_name, service_plugins=service_plugins)
         self.plugin = manager.NeutronManager.get_plugin()
         self.plugin.remove_networks_from_down_agents = mock.Mock()
@@ -102,6 +106,10 @@ class MechanismRpcTestCase(test_plugin.NeutronDbPluginV2TestCase,
 
         self.driver.apic_manager.remove_hostlink = remove_hostlink
         self.driver.apic_manager.db = self.db
+        self.mgr = self.driver.apic_manager
+        self.mgr.apic.fvTenant.name = name
+        self.l3_plugin = manager.NeutronManager.get_service_plugins()[
+            'L3_ROUTER_NAT']
 
     def _bind_port_to_host(self, port_id, host):
         plugin = manager.NeutronManager.get_plugin()
@@ -135,6 +143,94 @@ class MechanismRpcTestCase(test_plugin.NeutronDbPluginV2TestCase,
                 self.db.add_hostlink(
                     'h%s' % x, 'eth1', None, str(x + 1), '1', str(x))
         self.rpc.peers = self.rpc._load_peers()
+
+    def _get_gbp_details(self, port_id, host):
+        return self.driver.get_gbp_details(
+            context.get_admin_context(),
+            device='tap%s' % port_id, host=host)
+
+
+class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
+
+    def test_network_visibility(self):
+        net = self.create_network(tenant_id='onetenant',
+                                  expected_res_status=201)['network']
+
+        # Visible by onetenant
+        self.show_network(net['id'], tenant_id='onetenant',
+                          expected_res_status=200)
+        # Not visible by anothertenant
+        self.show_network(net['id'], tenant_id='anothertenant',
+                          expected_res_status=404)
+        # Visible by admintenant
+        self.show_network(net['id'], tenant_id='admintenant',
+                          is_admin_context=True, expected_res_status=200)
+
+    def test_shared_network_visibility(self):
+        net = self.create_network(
+            tenant_id='onetenant', expected_res_status=201, shared=True,
+            is_admin_context=True)['network']
+
+        # Visible by onetenant
+        self.show_network(net['id'], tenant_id='onetenant',
+                          expected_res_status=200)
+        # Visible by anothertenant
+        self.show_network(net['id'], tenant_id='anothertenant',
+                          expected_res_status=200)
+        # Visible by admintenant
+        self.show_network(net['id'], tenant_id='admintenant',
+                          is_admin_context=True, expected_res_status=200)
+
+    def test_port_on_shared_non_opflex_network(self):
+        net = self.create_network(
+            tenant_id='onetenant', expected_res_status=201, shared=True,
+            is_admin_context=True)['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4, is_admin_context=True)
+        with self.port(subnet=sub, tenant_id='anothertenant') as p1:
+            p1 = p1['port']
+            self.assertEqual(net['id'], p1['network_id'])
+            self.mgr.reset_mock()
+            # Bind port to trigger path binding
+            self._bind_port_to_host(p1['id'], 'h1')
+            # Called on the network's tenant
+            self.mgr.ensure_path_created_for_port.assert_called_once_with(
+                'onetenant', net['id'], 'h1', mock.ANY, transaction=mock.ANY)
+
+    def test_port_on_shared_opflex_network(self):
+        net = self.create_network(
+            tenant_id='onetenant', expected_res_status=201, shared=True,
+            is_admin_context=True)['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4, is_admin_context=True)
+        with self.port(subnet=sub, tenant_id='anothertenant') as p1:
+            p1 = p1['port']
+            self.assertEqual(net['id'], p1['network_id'])
+            # Bind port to trigger path binding
+            self._bind_port_to_host(p1['id'], 'h1')
+            self.driver._add_ip_mapping_details = mock.Mock()
+            details = self._get_gbp_details(p1['id'], 'h1')
+            self.assertEqual('onetenant', details['ptg_tenant'])
+            self.assertEqual('onetenant', details['tenant_id'])
+
+    #def test_add_router_interface_on_shared_net(self):
+    #    net = self.create_network(
+    #        tenant_id='onetenant', expected_res_status=201, shared=True,
+    #        is_admin_context=True)['network']
+    #    sub = self.create_subnet(
+    #        network_id=net['id'], cidr='192.168.0.0/24',
+    #        ip_version=4, is_admin_context=True)
+    #    router = self.create_router(api=self.ext_api,
+    #                                expected_res_status=201)['router']
+    #    with self.port(subnet=sub, tenant_id='anothertenant') as p1:
+    #        self.l3_plugin.add_router_interface(
+    #            context, router['id'], {'port_id': p1['port']['id']})
+
+
+
+class MechanismRpcTestCase(ApicML2IntegratedTestBase):
 
     def test_rpc_endpoint_set(self):
         self.assertEqual(1, len(self.driver.topology_endpoints))
@@ -765,7 +861,8 @@ class FakeSubnetContext(object):
         self._network = network
         self._plugin = mock.Mock()
         self._plugin_context = mock.Mock()
-        self._plugin.get_network.return_value = {}
+        self._plugin.get_network.return_value = {
+            'tenant_id': subnet['tenant_id']}
 
     @property
     def current(self):

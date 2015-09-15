@@ -170,10 +170,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     # RPC Method
     def get_gbp_details(self, context, **kwargs):
-        _core_plugin = manager.NeutronManager.get_plugin()
-        port_id = _core_plugin._device_to_port_id(
+        core_plugin = manager.NeutronManager.get_plugin()
+        port_id = core_plugin._device_to_port_id(
             kwargs['device'])
-        port_context = _core_plugin.get_bound_port_context(
+        port_context = core_plugin.get_bound_port_context(
             context, port_id, kwargs['host'])
         if not port_context:
             LOG.warning(_("Device %(device)s requested by agent "
@@ -183,8 +183,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             return
         port = port_context.current
 
-        context._plugin = _core_plugin
+        context._plugin = core_plugin
         context._plugin_context = context
+
+        network = core_plugin.get_network(context, port['network_id'])
 
         def is_port_promiscuous(port):
             return port['device_owner'] == n_constants.DEVICE_OWNER_DHCP
@@ -198,11 +200,11 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                    'segment': segment,
                    'segmentation_id': segment.get('segmentation_id'),
                    'network_type': segment.get('network_type'),
-                   'tenant_id': port['tenant_id'],
+                   'tenant_id': network['tenant_id'],
                    'host': port[portbindings.HOST_ID],
                    'ptg_tenant': self.apic_manager.apic.fvTenant.name(
                        str(self.name_mapper.tenant(
-                           context, port['tenant_id']))),
+                           context, network['tenant_id']))),
                    'endpoint_group_name': str(
                        self.name_mapper.network(
                            context, port['network_id'])),
@@ -398,10 +400,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     def _get_subnet_info(self, context, subnet):
         if subnet['gateway_ip']:
-            tenant_id = subnet['tenant_id']
             network_id = subnet['network_id']
             network = context._plugin.get_network(context._plugin_context,
                                                   network_id)
+            tenant_id = network['tenant_id']
             if not network.get('router:external'):
                 cidr = netaddr.IPNetwork(subnet['cidr'])
                 gateway_ip = '%s/%s' % (subnet['gateway_ip'],

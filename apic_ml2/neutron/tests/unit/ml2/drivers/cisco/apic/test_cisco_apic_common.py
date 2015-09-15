@@ -249,7 +249,7 @@ class FakeDbContract(object):
 class ApiManagerMixin(object):
 
     def _create_resource(self, type, expected_res_status=None,
-                         is_admin_context=False, **kwargs):
+                         is_admin_context=False, api=None, **kwargs):
         plural = get_resource_plural(type)
 
         data = {type: {'tenant_id': self._tenant_id}}
@@ -259,7 +259,7 @@ class ApiManagerMixin(object):
         req.environ['neutron.context'] = context.Context(
             '', kwargs.get('tenant_id', self._tenant_id) if not
             is_admin_context else self._tenant_id, is_admin_context)
-        res = req.get_response(self.api)
+        res = req.get_response(api or self.api)
 
         if expected_res_status:
             self.assertEqual(res.status_int, expected_res_status)
@@ -270,7 +270,7 @@ class ApiManagerMixin(object):
 
     def _update_resource(
             self, id, type, expected_res_status=None, is_admin_context=False,
-            **kwargs):
+            api=None, **kwargs):
         plural = get_resource_plural(type)
         data = {type: kwargs}
         tenant_id = kwargs.pop('tenant_id', self._tenant_id)
@@ -279,7 +279,7 @@ class ApiManagerMixin(object):
         req.environ['neutron.context'] = context.Context(
             '', tenant_id if not is_admin_context else self._tenant_id,
             is_admin_context)
-        res = req.get_response(self.api)
+        res = req.get_response(api or self.api)
 
         if expected_res_status:
             self.assertEqual(res.status_int, expected_res_status)
@@ -288,11 +288,11 @@ class ApiManagerMixin(object):
         return self.deserialize(self.fmt, res)
 
     def _show_resource(self, id, plural, expected_res_status=None,
-                       is_admin_context=False, tenant_id=None):
+                       is_admin_context=False, tenant_id=None, api=None):
         req = self.new_show_request(plural, id, fmt=self.fmt)
         req.environ['neutron.context'] = context.Context(
             '', tenant_id or self._tenant_id, is_admin_context)
-        res = req.get_response(self.api)
+        res = req.get_response(api or self.api)
 
         if expected_res_status:
             self.assertEqual(res.status_int, expected_res_status)
@@ -301,11 +301,11 @@ class ApiManagerMixin(object):
         return self.deserialize(self.fmt, res)
 
     def _delete_resource(self, id, plural, is_admin_context=False,
-                         expected_res_status=None, tenant_id=None):
+                         expected_res_status=None, tenant_id=None, api=None):
         req = self.new_delete_request(plural, id)
         req.environ['neutron.context'] = context.Context(
             '', tenant_id or self._tenant_id, is_admin_context)
-        res = req.get_response(self.api)
+        res = req.get_response(api or self.api)
         if expected_res_status:
             self.assertEqual(res.status_int, expected_res_status)
         elif res.status_int >= webob.exc.HTTPClientError.code:
