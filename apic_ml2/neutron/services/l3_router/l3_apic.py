@@ -13,8 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from apicapi import apic_manager
 from apicapi import apic_mapper
-
 from neutron.common import exceptions as n_exc
 from neutron.db import db_base_plugin_v2
 from neutron.db import extraroute_db
@@ -49,6 +49,8 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         self.manager.ensure_infra_created_on_apic()
         self.manager.ensure_bgp_pod_policy_created_on_apic()
         self.per_tenant_context = cfg.CONF.ml2_cisco_apic.per_tenant_context
+        self.tenant_common = (apic_manager.TENANT_COMMON if not
+                              self.per_tenant_context else None)
 
     def _map_names(self, context,
                    tenant_id, router_id, net_id, subnet_id):
@@ -138,8 +140,12 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         with apic_mapper.mapper_context(context) as ctx:
             arouter_id = router['id'] and self.name_mapper.router(ctx,
                                                                   router['id'])
+            tenant_id = self.tenant_common or self.name_mapper.tenant(
+                ctx, router['tenant_id'])
+
         with self.manager.apic.transaction() as trs:
-            self.manager.create_router(arouter_id, transaction=trs)
+            self.manager.create_router(arouter_id, owner=tenant_id,
+                                       transaction=trs)
             if router['admin_state_up']:
                 self.manager.enable_router(arouter_id, transaction=trs)
             else:

@@ -108,10 +108,16 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
             'neutron.manager.NeutronManager.get_service_plugins').start()
         self.addCleanup(self.plugin.manager.reset_mock)
 
+    def _tenant(self):
+        return ('common' if not self.plugin.per_tenant_context else
+                mocked.APIC_TENANT)
+
     def _test_add_router_interface(self, interface_info):
         mgr = self.plugin.manager
+        mgr.reset_mock()
         self.plugin.add_router_interface(self.context, ROUTER, interface_info)
         mgr.create_router.assert_called_once_with(mocked.APIC_ROUTER,
+                                                  owner=self._tenant(),
                                                   transaction='transaction')
         mgr.add_router_interface.assert_called_once_with(
             mocked.APIC_TENANT, mocked.APIC_ROUTER, mocked.APIC_NETWORK)
@@ -150,3 +156,11 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
 
     def test_singleton_manager(self):
         self.assertIs(md.APICMechanismDriver.apic_manager, self.plugin.manager)
+
+
+class TestCiscoApicL3PluginPerTenantVRF(TestCiscoApicL3Plugin):
+
+    def setUp(self):
+        self.override_conf('per_tenant_context', True,
+                           'ml2_cisco_apic')
+        super(TestCiscoApicL3PluginPerTenantVRF, self).setUp()
