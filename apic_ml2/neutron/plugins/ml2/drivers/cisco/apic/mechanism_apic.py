@@ -172,6 +172,32 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         self.notifier = o_rpc.AgentNotifierApi(topics.AGENT)
 
     # RPC Method
+    def get_vrf_details(self, context, **kwargs):
+        core_plugin = manager.NeutronManager.get_plugin()
+        vrf_id = kwargs['vrf_id']
+        # For the APIC ML2 driver, VRF ID is a tenant_id, need to return all
+        # the subnets for this tenant
+        ctx = nctx.get_admin_context()
+        if vrf_id != apic_manager.TENANT_COMMON:
+            subnets = core_plugin.get_subnets(ctx, {'tenant_id': [vrf_id]})
+        else:
+             subnets = core_plugin.get_subnets(ctx)
+
+        if subnets:
+            subnets = netaddr.IPSet([x['cidr'] for x in subnets])
+            subnets.compact()
+            subnets = [x for x in subnets.iter_cidrs()]
+
+        details = {
+            'l3_policy_id': vrf_id,
+            'vrf_tenant': self.apic_manager.apic.fvTenant.name(
+                self.name_mapper.tenant(context, vrf_id)),
+            'vrf_name': apic_manager.CONTEXT_SHARED,
+            'vrf_subnets': subnets
+        }
+        return details
+
+    # RPC Method
     def get_gbp_details(self, context, **kwargs):
         core_plugin = manager.NeutronManager.get_plugin()
         port_id = core_plugin._device_to_port_id(
@@ -204,6 +230,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                    'segmentation_id': segment.get('segmentation_id'),
                    'network_type': segment.get('network_type'),
                    'tenant_id': network['tenant_id'],
+                   'l3_policy_id': self.tenant_common or network['tenant_id'],
                    'host': port[portbindings.HOST_ID],
                    'ptg_tenant': self.apic_manager.apic.fvTenant.name(
                        str(self.name_mapper.tenant(
@@ -215,6 +242,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         if port['device_owner'].startswith('compute:') and port['device_id']:
             details['vm-name'] = port['device_id']
             self._add_ip_mapping_details(context, port, details)
+        details.update(
+            self.get_vrf_details(context, vrf_id=network['tenant_id']))
         return details
 
     def _add_ip_mapping_details(self, context, port, details):
@@ -512,6 +541,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             # Create subnet on BD
             self.apic_manager.ensure_subnet_created_on_apic(
                 tenant_id, network_id, gateway_ip)
+        self.notify_subnet_update(context.current)
 
     @sync_init
     def update_subnet_postcommit(self, context):
@@ -536,6 +566,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             tenant_id, network_id, gateway_ip = info
             self.apic_manager.ensure_subnet_deleted_on_apic(
                 tenant_id, network_id, gateway_ip)
+        self.notify_subnet_update(context.current)
 
     def _is_port_bound(self, port):
         return port[portbindings.VIF_TYPE] not in [
@@ -556,6 +587,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         except n_exc.PortNotFound:
             # Notification not needed
             pass
+
+    def notify_subnet_update(self, subnet, context=None):
+        context = context or nctx.get_admin_context()
+        self.notifier.subnet_update(context, subnet)
 
     def _get_nat_epg_for_ext_net(self, l3out_name):
         return "NAT-epg-%s" % l3out_name
