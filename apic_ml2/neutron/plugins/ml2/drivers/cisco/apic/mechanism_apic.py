@@ -180,6 +180,33 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         self.notifier = o_rpc.AgentNotifierApi(topics.AGENT)
 
     # RPC Method
+    def get_vrf_details(self, context, **kwargs):
+        core_plugin = manager.NeutronManager.get_plugin()
+        vrf_id = kwargs['vrf_id']
+        # For the APIC ML2 driver, VRF ID is a tenant_id, need to return all
+        # the subnets for this tenant
+        ctx = nctx.get_admin_context()
+        if self.per_tenant_context:
+            subnets = core_plugin.get_subnets(ctx, {'tenant_id': [vrf_id]})
+        else:
+            # need to retrieve the whole world
+            subnets = core_plugin.get_subnets(ctx)
+
+        if subnets:
+            subnets = netaddr.IPSet([x['cidr'] for x in subnets])
+            subnets.compact()
+            subnets = [x for x in subnets.iter_cidrs()]
+        vrf = self._get_tenant_vrf(vrf_id)
+        details = {
+            'l3_policy_id': vrf_id,
+            'vrf_tenant': self.apic_manager.apic.fvTenant.name(
+                self.name_mapper.tenant(context, vrf_id)),
+            'vrf_name': apic_manager.CONTEXT_SHARED,
+            'vrf_subnets': subnets
+        }
+        return details
+
+    # RPC Method
     def get_gbp_details(self, context, **kwargs):
         core_plugin = manager.NeutronManager.get_plugin()
         port_id = core_plugin._device_to_port_id(
@@ -212,6 +239,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                    'segmentation_id': segment.get('segmentation_id'),
                    'network_type': segment.get('network_type'),
                    'tenant_id': network['tenant_id'],
+                   'l3_policy_id': network['tenant_id'],
                    'host': port[portbindings.HOST_ID],
                    'ptg_tenant': self.apic_manager.apic.fvTenant.name(
                        str(self._get_network_aci_tenant(network))),
@@ -227,6 +255,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             # PTG name is different
             details['endpoint_group_name'] = self._get_nat_epg_for_ext_net(
                 details['endpoint_group_name'])
+        details.update(
+            self.get_vrf_details(context, vrf_id=network['tenant_id']))
         return details
 
     def _add_ip_mapping_details(self, context, port, details):
@@ -570,6 +600,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             # Create subnet on BD
             self.apic_manager.ensure_subnet_created_on_apic(
                 tenant_id, network_id, gateway_ip)
+        self.notify_subnet_update(context.current)
 
     @sync_init
     def update_subnet_postcommit(self, context):
@@ -607,6 +638,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             tenant_id, network_id, gateway_ip = info
             self.apic_manager.ensure_subnet_deleted_on_apic(
                 tenant_id, network_id, gateway_ip)
+        self.notify_subnet_update(context.current)
 
     def _is_port_bound(self, port):
         return port[portbindings.VIF_TYPE] not in [
@@ -629,6 +661,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         except n_exc.PortNotFound:
             # Notification not needed
             pass
+
+    def notify_subnet_update(self, subnet, context=None):
+        context = context or nctx.get_admin_context()
+        self.notifier.subnet_update(context, subnet)
 
     def _get_nat_epg_for_ext_net(self, l3out_name):
         return "NAT-epg-%s" % l3out_name
@@ -817,6 +853,15 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 vrf['aci_tenant'] = apic_manager.TENANT_COMMON
 
         return vrf
+
+    def _get_tenant_vrf(self, tenant_id):
+        vrf = {'aci_tenant': self.apic_system_id,
+               'aci_name': self.name_mapper.tenant(None, tenant_id)}
+        if not self.single_tenant_mode:
+            vrf['aci_tenant'] = self.name_mapper.tenant(None, tenant_id)
+            vrf['aci_name'] = apic_manager.CONTEXT_SHARED
+        elif not self.per_tenant_context:
+            vrf['aci_name'] = apic_manager.CONTEXT_SHARED
 
     def _get_network_no_nat_vrf(self, context, network):
         # No NAT VRF is always in the original VRF tenant.
