@@ -195,13 +195,14 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         if subnets:
             subnets = netaddr.IPSet([x['cidr'] for x in subnets])
             subnets.compact()
-            subnets = [x for x in subnets.iter_cidrs()]
+            subnets = [str(x) for x in subnets.iter_cidrs()]
+
         vrf = self._get_tenant_vrf(vrf_id)
         details = {
             'l3_policy_id': vrf_id,
             'vrf_tenant': self.apic_manager.apic.fvTenant.name(
-                self.name_mapper.tenant(context, vrf_id)),
-            'vrf_name': apic_manager.CONTEXT_SHARED,
+                vrf['aci_tenant']),
+            'vrf_name': str(vrf['aci_name']),
             'vrf_subnets': subnets
         }
         return details
@@ -862,6 +863,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             vrf['aci_name'] = apic_manager.CONTEXT_SHARED
         elif not self.per_tenant_context:
             vrf['aci_name'] = apic_manager.CONTEXT_SHARED
+        return vrf
 
     def _get_network_no_nat_vrf(self, context, network):
         # No NAT VRF is always in the original VRF tenant.
