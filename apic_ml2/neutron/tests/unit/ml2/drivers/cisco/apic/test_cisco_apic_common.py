@@ -33,6 +33,7 @@ APIC_PWD = 'topsecret'
 APIC_TENANT = 'citizen14'
 APIC_NETWORK = 'network99'
 APIC_NETWORK_PRE = 'network_pre'
+APIC_NETWORK_NO_NAT = 'network_no_nat'
 APIC_EXT_EPG = 'external_epg'
 APIC_NETNAME = 'net99name'
 APIC_SUBNET = '10.3.2.1/24'
@@ -229,6 +230,14 @@ class ConfigMixin(object):
                 'gateway_ip': APIC_EXT_GATEWAY_IP,
                 'preexisting': True,
                 'external_epg': APIC_EXT_EPG,
+            },
+            APIC_NETWORK_NO_NAT + '-name': {
+                'switch': APIC_EXT_SWITCH,
+                'port': APIC_EXT_MODULE + '/' + APIC_EXT_PORT,
+                'encap': APIC_EXT_ENCAP,
+                'cidr_exposed': APIC_EXT_CIDR_EXPOSED,
+                'gateway_ip': APIC_EXT_GATEWAY_IP,
+                'enable_nat': False,
             },
         }
         self.mocked_parser = mock.patch.object(
