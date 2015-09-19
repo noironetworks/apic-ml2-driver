@@ -217,8 +217,6 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     def _add_ip_mapping_details(self, context, port, details):
         """Add information about IP mapping for DNAT/SNAT."""
-        if not self.nat_enabled:
-            return
         l3plugin = manager.NeutronManager.get_service_plugins().get(
             constants.L3_ROUTER_NAT)
         core_plugin = context._plugin
@@ -226,7 +224,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         ext_nets = core_plugin.get_networks(
             context,
             filters={'name': self.apic_manager.ext_net_dict.keys()})
-        ext_nets = {n['id']: n for n in ext_nets}
+        ext_nets = {n['id']: n for n in ext_nets
+                    if self._is_nat_enabled_on_ext_net(n)}
         fip_ext_nets = set()
 
         fips = l3plugin.get_floatingips(context,
@@ -336,8 +335,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                     external_epg = self.name_mapper.pre_existing(
                         context, router_info['external_epg'])
 
-            ok = self._create_nat_epg_for_ext_net(anetwork_id, external_epg,
-                                                  cid, router_info)
+            ok = False
+            if self._is_nat_enabled_on_ext_net(network):
+                ok = self._create_nat_epg_for_ext_net(
+                    anetwork_id, external_epg, cid, router_info)
             if not ok:      # fallback to non-NAT config
                 with self.apic_manager.apic.transaction() as trs:
                     self.apic_manager.ensure_external_epg_consumed_contract(
@@ -355,7 +356,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         elif self._is_port_bound(port) and not self._is_apic_network_type(
                 context):
             self._perform_path_port_operations(context, port)
-        self._notify_ports_due_to_router_update(port)
+        if self._is_nat_enabled_on_ext_net(context.network.current):
+            self._notify_ports_due_to_router_update(port)
 
     def _delete_contract(self, context):
         port = context.current
@@ -436,7 +438,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             self._delete_path_if_last(context)
         if port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
             self._delete_contract(context)
-        self._notify_ports_due_to_router_update(port)
+        if self._is_nat_enabled_on_ext_net(context.network.current):
+            self._notify_ports_due_to_router_update(port)
 
     @sync_init
     def create_network_postcommit(self, context):
@@ -488,7 +491,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 else:
                     l3out_name = self.name_mapper.pre_existing(
                         context, network_name)
-                self._delete_nat_epg_for_ext_net(l3out_name)
+                if self._is_nat_enabled_on_ext_net(context.current):
+                    self._delete_nat_epg_for_ext_net(l3out_name)
 
     @sync_init
     def create_subnet_postcommit(self, context):
@@ -557,8 +561,6 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     def _create_nat_epg_for_ext_net(self, l3out_name, ext_epg_name,
                                     router_contract, ext_info):
-        if not self.nat_enabled:
-            return False
         tenant_name = apic_manager.TENANT_COMMON
         nat_vrf_name = self._get_nat_vrf_for_ext_net(l3out_name)
         nat_bd_name = self._get_nat_bd_for_ext_net(l3out_name)
@@ -617,8 +619,6 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             return False
 
     def _delete_nat_epg_for_ext_net(self, l3out_name):
-        if not self.nat_enabled:
-            return
         tenant_name = apic_manager.TENANT_COMMON
         with self.apic_manager.apic.transaction(None) as trs:
             # delete shadow L3-out and shadow external-EPG
@@ -672,3 +672,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             port_sn_ids = self._get_port_subnets(p)
             if (subnet_ids & port_sn_ids) and self._is_port_bound(p):
                 self.notifier.port_update(admin_ctx, p)
+
+    def _is_nat_enabled_on_ext_net(self, network):
+        ext_info = self.apic_manager.ext_net_dict.get(network['name'])
+        return (self.nat_enabled and ext_info and
+                ext_info.get('enable_nat', True))

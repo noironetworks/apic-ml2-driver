@@ -747,6 +747,49 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         mgr.delete_external_epg_contract.assert_called_once_with(
             mocked.APIC_ROUTER, mocked.APIC_NETWORK)
 
+    def test_update_no_nat_gw_port_postcommit(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK_NO_NAT,
+                                            TEST_SEGMENT1, external=True)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK_NO_NAT,
+                                          'vm1', net_ctx, HOST_ID1, gw=True)
+        mgr = self.driver.apic_manager
+        mgr.get_router_contract.return_value = mocked.FakeDbContract(
+            mocked.APIC_CONTRACT)
+        self.driver.update_port_postcommit(port_ctx)
+        mgr.get_router_contract.assert_called_once_with(
+            port_ctx.current['device_id'])
+        mgr.ensure_context_enforced.assert_called_once()
+
+        mgr.ensure_external_routed_network_created.assert_called_once_with(
+            mocked.APIC_NETWORK_NO_NAT, transaction=mock.ANY)
+
+        mgr.ensure_logical_node_profile_created.assert_called_once_with(
+            mocked.APIC_NETWORK_NO_NAT, mocked.APIC_EXT_SWITCH,
+            mocked.APIC_EXT_MODULE, mocked.APIC_EXT_PORT,
+            mocked.APIC_EXT_ENCAP, mocked.APIC_EXT_CIDR_EXPOSED,
+            transaction='transaction')
+        mgr.ensure_static_route_created.assert_called_once_with(
+            mocked.APIC_NETWORK_NO_NAT, mocked.APIC_EXT_SWITCH,
+            mocked.APIC_EXT_GATEWAY_IP, transaction='transaction')
+
+        mgr.ensure_external_epg_created.assert_called_once_with(
+            mocked.APIC_NETWORK_NO_NAT, external_epg=mocked.APIC_EXT_EPG,
+            transaction=mock.ANY)
+
+        mgr.ensure_external_epg_consumed_contract.assert_called_once_with(
+            mocked.APIC_NETWORK_NO_NAT,
+            mgr.get_router_contract.return_value,
+            external_epg=mocked.APIC_EXT_EPG,
+            transaction=mock.ANY)
+
+        mgr.ensure_external_epg_provided_contract.assert_called_once_with(
+            mocked.APIC_NETWORK_NO_NAT,
+            mgr.get_router_contract.return_value,
+            external_epg=mocked.APIC_EXT_EPG,
+            transaction=mock.ANY)
+
     def test_delete_unrelated_gw_port_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
                                             'unrelated',
@@ -837,6 +880,15 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.driver.delete_network_postcommit(ctx)
         mgr.delete_external_routed_network.assert_called_once_with(
             "Shd-%s" % ctx.current['name'], 'common', transaction=mock.ANY)
+
+    def test_delete_external_no_nat_network_postcommit(self):
+        ctx = self._get_network_context(mocked.APIC_TENANT,
+                                        mocked.APIC_NETWORK_NO_NAT,
+                                        TEST_SEGMENT1, external=True)
+        mgr = self.driver.apic_manager
+        self.driver.delete_network_postcommit(ctx)
+        mgr.delete_external_routed_network.assert_called_once_with(
+            mocked.APIC_NETWORK_NO_NAT)
 
     def test_create_subnet_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
