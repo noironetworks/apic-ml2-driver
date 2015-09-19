@@ -13,6 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import copy
+
 from apicapi import apic_manager
 from keystoneclient.v2_0 import client as keyclient
 import netaddr
@@ -190,8 +192,9 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
         details = {
             'l3_policy_id': vrf_id,
-            'vrf_tenant': self.apic_manager.apic.fvTenant.name(
-                str(self.name_mapper.tenant(context, vrf_id))),
+            'vrf_tenant': (self.tenant_common or
+                           self.apic_manager.apic.fvTenant.name(
+                               str(self.name_mapper.tenant(context, vrf_id)))),
             'vrf_name': str(apic_manager.CONTEXT_SHARED),
             'vrf_subnets': subnets
         }
@@ -589,8 +592,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             pass
 
     def notify_subnet_update(self, subnet, context=None):
+        sub_copy = copy.deepcopy(subnet)
+        sub_copy['tenant_id'] = self.tenant_common or sub_copy['tenant_id']
         context = context or nctx.get_admin_context()
-        self.notifier.subnet_update(context, subnet)
+        self.notifier.subnet_update(context, sub_copy)
 
     def _get_nat_epg_for_ext_net(self, l3out_name):
         return "NAT-epg-%s" % l3out_name
