@@ -186,13 +186,13 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         if subnets:
             subnets = netaddr.IPSet([x['cidr'] for x in subnets])
             subnets.compact()
-            subnets = [x for x in subnets.iter_cidrs()]
+            subnets = [str(x) for x in subnets.iter_cidrs()]
 
         details = {
             'l3_policy_id': vrf_id,
             'vrf_tenant': self.apic_manager.apic.fvTenant.name(
-                self.name_mapper.tenant(context, vrf_id)),
-            'vrf_name': apic_manager.CONTEXT_SHARED,
+                str(self.name_mapper.tenant(context, vrf_id))),
+            'vrf_name': str(apic_manager.CONTEXT_SHARED),
             'vrf_subnets': subnets
         }
         return details
