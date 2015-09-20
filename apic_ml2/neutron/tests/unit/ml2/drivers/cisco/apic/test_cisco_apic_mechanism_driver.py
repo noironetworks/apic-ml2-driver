@@ -914,6 +914,69 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.driver.create_subnet_postcommit(subnet_ctx)
         self.assertFalse(mgr.ensure_subnet_created_on_apic.called)
 
+    def test_create_external_subnet_postcommit(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK,
+                                            external=True)
+        subnet_ctx = self._get_subnet_context(SUBNET_GATEWAY,
+                                              SUBNET_CIDR,
+                                              net_ctx)
+        mgr = self.driver.apic_manager
+        self.driver.create_subnet_postcommit(subnet_ctx)
+        mgr.ensure_subnet_created_on_apic.assert_called_once_with(
+            'common', "NAT-bd-%s" % mocked.APIC_NETWORK,
+            '%s/%s' % (SUBNET_GATEWAY, SUBNET_NETMASK))
+
+    def test_delete_external_subnet_postcommit(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK,
+                                            external=True)
+        subnet_ctx = self._get_subnet_context(SUBNET_GATEWAY,
+                                              SUBNET_CIDR,
+                                              net_ctx)
+        mgr = self.driver.apic_manager
+        self.driver.delete_subnet_postcommit(subnet_ctx)
+        mgr.ensure_subnet_deleted_on_apic.assert_called_once_with(
+            'common', "NAT-bd-%s" % mocked.APIC_NETWORK,
+            '%s/%s' % (SUBNET_GATEWAY, SUBNET_NETMASK))
+
+    def test_update_external_subnet_postcommit(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK,
+                                            external=True)
+        subnet_ctx1 = self._get_subnet_context(SUBNET_GATEWAY,
+                                               SUBNET_CIDR,
+                                               net_ctx)
+        subnet_ctx2 = self._get_subnet_context('10.3.1.1',
+                                               SUBNET_CIDR,
+                                               net_ctx)
+        subnet_ctx2.original = subnet_ctx1.current
+        mgr = self.driver.apic_manager
+        self.driver.update_subnet_postcommit(subnet_ctx2)
+        mgr.ensure_subnet_deleted_on_apic.assert_called_once_with(
+            'common', "NAT-bd-%s" % mocked.APIC_NETWORK,
+            '%s/%s' % (SUBNET_GATEWAY, SUBNET_NETMASK),
+            transaction=mock.ANY)
+        mgr.ensure_subnet_created_on_apic.assert_called_once_with(
+            'common', "NAT-bd-%s" % mocked.APIC_NETWORK,
+            '%s/%s' % ('10.3.1.1', SUBNET_NETMASK),
+            transaction=mock.ANY)
+
+    def test_create_external_subnet_overlap(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK,
+                                            external=True)
+        subnet_ctx = self._get_subnet_context(mocked.APIC_EXT_GATEWAY_IP,
+                                              mocked.APIC_EXT_CIDR_EXPOSED,
+                                              net_ctx)
+        mgr = self.driver.apic_manager
+        raised = False
+        try:
+            self.driver.create_subnet_precommit(subnet_ctx)
+        except md.CidrOverlapsApicExternalSubnet:
+            raised = True
+        self.assertTrue(raised)
+
     def _get_network_context(self, tenant_id, net_id, seg_id=None,
                              seg_type='vlan', external=False):
         network = {'id': net_id,
@@ -980,8 +1043,7 @@ class FakeSubnetContext(object):
         self._network = network
         self._plugin = mock.Mock()
         self._plugin_context = mock.Mock()
-        self._plugin.get_network.return_value = {
-            'tenant_id': subnet['tenant_id']}
+        self._plugin.get_network.return_value = network.current
 
     @property
     def current(self):
