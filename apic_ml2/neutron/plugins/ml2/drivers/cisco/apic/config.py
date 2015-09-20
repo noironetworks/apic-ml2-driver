@@ -95,6 +95,9 @@ apic_opts = [
                 help=_("If True, one L3 CTX per tenant will be created "
                        "instead of a global one. This will enable overlapping "
                        "IPs across tenants (but not within the same one).")),
+    cfg.BoolOpt('single_tenant_mode', default=True,
+                help=_("All the Openstack tenants will be described by a "
+                       "single ACI tenant.")),
 ]
 
 

@@ -101,6 +101,34 @@ class ControllerMixin(object):
     def __init__(self):
         self.response = None
 
+    def _tenant(self, ext_nat=False, vrf=False, neutron_tenant=None):
+        if self.driver.single_tenant_mode:
+            return APIC_SYSTEM_ID
+        if self.driver.per_tenant_context and not ext_nat:
+            return neutron_tenant or APIC_TENANT
+        if not self.driver.per_tenant_context and vrf:
+            return 'common'
+        if ext_nat:
+            return 'common'
+        return neutron_tenant or APIC_TENANT
+
+    def _network_vrf_name(self, nat_vrf=False, net_name=None):
+        if nat_vrf:
+            return "NAT-vrf-%s" % (net_name or APIC_NETWORK)
+        if self.driver.single_tenant_mode:
+            return APIC_TENANT
+        return 'shared'
+
+    def _router_tenant(self):
+        if self.driver.single_tenant_mode:
+            return APIC_SYSTEM_ID
+        return 'common'
+
+    def _app_profile(self, neutron_tenant=None):
+        if self.driver.single_tenant_mode:
+            return neutron_tenant or APIC_TENANT
+        return APIC_SYSTEM_ID
+
     def set_up_mocks(self):
         # The mocked responses from the server are lists used by
         # mock.side_effect, which means each call to post or get will
