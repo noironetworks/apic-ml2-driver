@@ -46,6 +46,11 @@ LOG = log.getLogger(__name__)
 _apic_driver_instance = None
 
 
+class CidrOverlapsApicExternalSubnet(n_exc.BadRequest):
+    message = _("Subnet CIDR %(subnet_cidr)s overlaps with "
+                "APIC external network or host-pool subnet for %(ext_net)s.")
+
+
 class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     apic_manager = None
@@ -407,15 +412,20 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             network = context._plugin.get_network(context._plugin_context,
                                                   network_id)
             tenant_id = network['tenant_id']
+            cidr = netaddr.IPNetwork(subnet['cidr'])
+            gateway_ip = '%s/%s' % (subnet['gateway_ip'],
+                                    str(cidr.prefixlen))
             if not network.get('router:external'):
-                cidr = netaddr.IPNetwork(subnet['cidr'])
-                gateway_ip = '%s/%s' % (subnet['gateway_ip'],
-                                        str(cidr.prefixlen))
-
                 # Convert to APIC IDs
                 tenant_id = self.name_mapper.tenant(context, tenant_id)
-                network_id = self.name_mapper.network(context, network_id)
-                return tenant_id, network_id, gateway_ip
+                bd_id = self.name_mapper.network(context, network_id)
+                return tenant_id, bd_id, gateway_ip
+            elif self._is_nat_enabled_on_ext_net(network):
+                l3out_name = self.name_mapper.network(context,
+                                                      network['id'])
+                tenant_id = apic_manager.TENANT_COMMON
+                bd_id = self._get_nat_bd_for_ext_net(l3out_name)
+                return tenant_id, bd_id, gateway_ip
 
     @sync_init
     def create_port_postcommit(self, context):
@@ -493,6 +503,24 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                         context, network_name)
                 if self._is_nat_enabled_on_ext_net(context.current):
                     self._delete_nat_epg_for_ext_net(l3out_name)
+
+    def create_subnet_precommit(self, context):
+        subnet = context.current
+        network = context._plugin.get_network(context._plugin_context,
+                                              subnet['network_id'])
+        if network.get('router:external'):
+            ext_info = self.apic_manager.ext_net_dict.get(network['name'])
+            if ext_info:
+                cidr = netaddr.IPSet([subnet['cidr']])
+                exposed = netaddr.IPSet([])
+                if ext_info.get('cidr_exposed'):
+                    exposed.add(ext_info['cidr_exposed'])
+                if ext_info.get('host_pool_cidr'):
+                    exposed.add(ext_info['host_pool_cidr'])
+                # Subnet cannot overlap with APIC external network
+                if exposed & cidr:
+                    raise CidrOverlapsApicExternalSubnet(
+                        subnet_cidr=cidr, ext_net=network['name'])
 
     @sync_init
     def create_subnet_postcommit(self, context):
