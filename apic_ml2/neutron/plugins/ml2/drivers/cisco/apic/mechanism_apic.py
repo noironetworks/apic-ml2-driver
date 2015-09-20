@@ -146,6 +146,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         self.apic_manager.ensure_bgp_pod_policy_created_on_apic()
         self.nat_enabled = self.apic_manager.use_vmm
         self.per_tenant_context = cfg.CONF.ml2_cisco_apic.per_tenant_context
+        self.enable_dhcp_opt = self.apic_manager.enable_optimized_dhcp
         global _apic_driver_instance
         _apic_driver_instance = self
 
@@ -218,6 +219,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         if port['device_owner'].startswith('compute:') and port['device_id']:
             details['vm-name'] = port['device_id']
             self._add_ip_mapping_details(context, port, details)
+        self._add_network_details(context, port, details)
         return details
 
     def _add_ip_mapping_details(self, context, port, details):
@@ -268,6 +270,13 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         router_sn = self._get_router_interface_subnets(
             context, [x['device_id'] for x in router_gw_ports])
         return bool(port_sn & router_sn)
+
+    def _add_network_details(self, context, port, details):
+        details['allowed_address_pairs'] = port['allowed_address_pairs']
+        details['enable_dhcp_optimization'] = self.enable_dhcp_opt
+        details['subnets'] = context._plugin.get_subnets(
+            context,
+            filters={'id': [ip['subnet_id'] for ip in port['fixed_ips']]})
 
     def sync_init(f):
         def inner(inst, *args, **kwargs):
@@ -547,6 +556,19 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                     # Create subnet
                     self.apic_manager.ensure_subnet_created_on_apic(
                         tenant_id, network_id, gateway_ip, transaction=trs)
+        # Notify ports that are in the subnet
+        network = context._plugin.get_network(
+            context._plugin_context,
+            context.current['network_id'])
+        if self._is_apic_network(network):
+            ports = context._plugin.get_ports(
+                context._plugin_context,
+                filters={'network_id': [network['id']]})
+            for p in ports:
+                port_sn_ids = self._get_port_subnets(p)
+                if (context.current['id'] in port_sn_ids and
+                        self._is_port_bound(p)):
+                    self.notifier.port_update(context._plugin_context, p)
 
     def delete_subnet_postcommit(self, context):
         info = self._get_subnet_info(context, context.current)
@@ -561,8 +583,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             portbindings.VIF_TYPE_BINDING_FAILED]
 
     def _is_apic_network_type(self, port_context):
-        return (port_context.network.current['provider:network_type'] ==
-                ofcst.TYPE_OPFLEX)
+        return self._is_apic_network(port_context.network.current)
+
+    def _is_apic_network(self, network):
+        return network['provider:network_type'] == ofcst.TYPE_OPFLEX
 
     def notify_port_update(self, port_id, context=None):
         context = context or nctx.get_admin_context()
