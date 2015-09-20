@@ -220,6 +220,9 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             details = self._get_gbp_details(p1['id'], 'h1')
             self.assertEqual('onetenant', details['ptg_tenant'])
             self.assertEqual('onetenant', details['tenant_id'])
+            self.assertTrue(details['enable_dhcp_optimization'])
+            self.assertEqual(1, len(details['subnets']))
+            self.assertEqual(sub['subnet']['id'], details['subnets'][0]['id'])
 
     def test_add_router_interface_on_shared_net_by_port(self):
         net = self.create_network(
@@ -969,13 +972,33 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         subnet_ctx = self._get_subnet_context(mocked.APIC_EXT_GATEWAY_IP,
                                               mocked.APIC_EXT_CIDR_EXPOSED,
                                               net_ctx)
-        mgr = self.driver.apic_manager
         raised = False
         try:
             self.driver.create_subnet_precommit(subnet_ctx)
         except md.CidrOverlapsApicExternalSubnet:
             raised = True
         self.assertTrue(raised)
+
+    def test_port_notify_on_subnet_update(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK,
+                                            seg_type='opflex')
+        subnet_ctx1 = self._get_subnet_context(SUBNET_GATEWAY,
+                                               SUBNET_CIDR,
+                                               net_ctx)
+        subnet_ctx2 = self._get_subnet_context('10.3.1.1',
+                                               SUBNET_CIDR,
+                                               net_ctx)
+        subnet_ctx2.original = subnet_ctx1.current
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK,
+                                          'vm1', net_ctx, HOST_ID1)
+        port_ctx.current['fixed_ips'] = [
+            {'subnet_id': subnet_ctx2.current['id'],
+             'ip_address': '10.3.1.42'}]
+        subnet_ctx2._plugin.get_ports.return_value = [port_ctx.current]
+        self.driver.update_subnet_postcommit(subnet_ctx2)
+        self.assertTrue(self.driver.notifier.port_update.called)
 
     def _get_network_context(self, tenant_id, net_id, seg_id=None,
                              seg_type='vlan', external=False):
