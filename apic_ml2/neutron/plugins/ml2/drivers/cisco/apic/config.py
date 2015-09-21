@@ -91,7 +91,7 @@ apic_opts = [
     cfg.BoolOpt('integrated_topology_service', default=False,
                 help=_("Use integrated topology service for better host "
                        "mobility in ACI.")),
-    cfg.BoolOpt('per_tenant_context', default=False,
+    cfg.BoolOpt('per_tenant_context', default=True,
                 help=_("If True, one L3 CTX per tenant will be created "
                        "instead of a global one. This will enable overlapping "
                        "IPs across tenants (but not within the same one).")),

@@ -82,6 +82,8 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
         mocked.ConfigMixin.set_up_mocks(self)
         self.override_conf('integrated_topology_service', True,
                            'ml2_cisco_apic')
+        self.override_conf('per_tenant_context', False,
+                           'ml2_cisco_apic')
         plugin_name = plugin_name or PLUGIN_NAME
         service_plugins = service_plugins or {'L3_ROUTER_NAT': 'cisco_apic_l3'}
         super(ApicML2IntegratedTestBase, self).setUp(
@@ -771,7 +773,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         mgr.ensure_external_routed_network_created.assert_called_once_with(
             mocked.APIC_NETWORK_NO_NAT, transaction=mock.ANY,
             owner=self._tenant(),
-            context=self._network_vrf_name(net_name=net_ctx.current['name']))
+            context=self._network_vrf_name(net_name=net_ctx.current['id']))
 
         mgr.ensure_logical_node_profile_created.assert_called_once_with(
             mocked.APIC_NETWORK_NO_NAT, mocked.APIC_EXT_SWITCH,
@@ -1054,13 +1056,12 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         return FakePortContext(port, network_ctx)
 
 
-class ApicML2IntegratedTestCasePerTenantVRF(ApicML2IntegratedTestCase):
+class ApicML2IntegratedTestCaseSingleVRF(ApicML2IntegratedTestCase):
 
     def setUp(self, plugin_name=None, service_plugins=None):
-        self.override_conf('per_tenant_context', True,
-                           'ml2_cisco_apic')
-        super(ApicML2IntegratedTestCasePerTenantVRF, self).setUp(
+        super(ApicML2IntegratedTestCaseSingleVRF, self).setUp(
             plugin_name, service_plugins)
+        self.driver.per_tenant_context = True
 
     def test_add_router_interface_on_shared_net_by_subnet(self):
         pass
@@ -1104,14 +1105,14 @@ class ApicML2IntegratedTestCaseNoSingleTenant(ApicML2IntegratedTestCase):
             plugin_name, service_plugins)
 
 
-class ApicML2IntegratedTestCaseNoSingleTenantPTC(
-        ApicML2IntegratedTestCasePerTenantVRF):
+class ApicML2IntegratedTestCaseNoSingleTenantSingleContext(
+        ApicML2IntegratedTestCaseSingleVRF):
 
     def setUp(self, plugin_name=None, service_plugins=None):
         self.override_conf('single_tenant_mode', False,
                            'ml2_cisco_apic')
-        super(ApicML2IntegratedTestCaseNoSingleTenantPTC, self).setUp(
-            plugin_name, service_plugins)
+        super(ApicML2IntegratedTestCaseNoSingleTenantSingleContext,
+              self).setUp(plugin_name, service_plugins)
 
 
 class TestCiscoApicMechDriverPerTenantVRF(TestCiscoApicMechDriver):
