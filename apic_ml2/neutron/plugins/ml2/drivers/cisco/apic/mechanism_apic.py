@@ -384,17 +384,21 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                     anetwork_id = self.name_mapper.network(context,
                                                            network['id'])
                     self.apic_manager.ensure_external_routed_network_created(
-                        anetwork_id, owner=vrf['aci_tenant'],
+                        anetwork_id,
+                        owner=self._get_network_aci_tenant(network),
                         context=vrf['aci_name'], transaction=trs)
                     self.apic_manager.ensure_logical_node_profile_created(
                         anetwork_id, switch, module, sport, encap,
-                        address, owner=vrf['aci_tenant'], transaction=trs)
+                        address, owner=self._get_network_aci_tenant(network),
+                        transaction=trs)
                     self.apic_manager.ensure_static_route_created(
                         anetwork_id, switch, next_hop,
-                        owner=vrf['aci_tenant'], transaction=trs)
+                        owner=self._get_network_aci_tenant(network),
+                        transaction=trs)
                     self.apic_manager.ensure_external_epg_created(
                         anetwork_id, external_epg=external_epg,
-                        owner=vrf['aci_tenant'], transaction=trs)
+                        owner=self._get_network_aci_tenant(network),
+                        transaction=trs)
                 elif 'external_epg' in router_info:
                     anetwork_id = self.name_mapper.pre_existing(
                         context, network['name'])
@@ -411,10 +415,12 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 with self.apic_manager.apic.transaction() as trs:
                     self.apic_manager.ensure_external_epg_consumed_contract(
                         anetwork_id, cid, external_epg=external_epg,
-                        owner=vrf['aci_tenant'], transaction=trs)
+                        owner=self._get_network_aci_tenant(network),
+                        transaction=trs)
                     self.apic_manager.ensure_external_epg_provided_contract(
                         anetwork_id, cid, external_epg=external_epg,
-                        owner=vrf['aci_tenant'], transaction=trs)
+                        owner=self._get_network_aci_tenant(network),
+                        transaction=trs)
 
     def _perform_port_operations(self, context):
         # Get port
@@ -542,7 +548,6 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     def delete_network_postcommit(self, context):
         if not context.current.get('router:external'):
-            tenant_id = context.current['tenant_id']
             network_id = context.current['id']
 
             # Convert to APIC IDs
@@ -563,10 +568,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 network_id = self.name_mapper.network(context,
                                                       context.current['id'])
                 router_info = self.apic_manager.ext_net_dict.get(network_name)
-                real_vrf = self._get_network_vrf(context, context.current)
                 if not router_info.get('preexisting'):
                     self.apic_manager.delete_external_routed_network(
-                        network_id, owner=real_vrf['aci_tenant'])
+                        network_id, owner=self._get_network_aci_tenant(
+                            context.current))
                     l3out_name = network_id
                 else:
                     l3out_name = self.name_mapper.pre_existing(
@@ -689,32 +694,32 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         nat_contract = "NAT-allow-all"
         shadow_ext_epg = self._get_shadow_name_for_nat(ext_epg_name)
         shadow_l3out = self._get_shadow_name_for_nat(l3out_name)
+        original_network_tenant = self._get_network_aci_tenant(network)
         try:
             with self.apic_manager.apic.transaction(None) as trs:
                 # create NAT EPG and allow-everything contract
                 self.apic_manager.ensure_nat_epg_contract_created(
-                    nat_vrf['aci_tenant'], nat_epg_name, nat_bd_name,
+                    original_network_tenant, nat_epg_name, nat_bd_name,
                     nat_vrf['aci_name'], nat_contract,
                     app_profile_name=self._get_network_app_profile(network),
-                    transaction=trs)
+                    transaction=trs, ctx_owner=nat_vrf['aci_tenant'])
                 # make external EPG use NAT contract
                 self.apic_manager.ensure_external_epg_consumed_contract(
                     l3out_name, nat_contract, external_epg=ext_epg_name,
-                    owner=nat_vrf['aci_tenant'], transaction=trs)
+                    owner=original_network_tenant, transaction=trs)
                 self.apic_manager.ensure_external_epg_provided_contract(
                     l3out_name, nat_contract, external_epg=ext_epg_name,
-                    owner=nat_vrf['aci_tenant'], transaction=trs)
+                    owner=original_network_tenant, transaction=trs)
 
                 # Move L3Out to NAT VRF
                 self.apic_manager.ensure_external_routed_network_created(
-                    l3out_name, owner=nat_vrf['aci_tenant'],
+                    l3out_name, owner=original_network_tenant,
                     context=nat_vrf['aci_name'], transaction=trs)
                 # create shadow L3-out and shadow external-epg
                 # This goes on the no-nat VRF (original L3 context)
                 # Note: Only NAT l3Out may exist in a different tenant
                 # (eg. COMMON). NO NAT L3Outs always exists in the original
                 # network tenant
-                original_network_tenant = self._get_network_aci_tenant(network)
                 self.apic_manager.ensure_external_routed_network_created(
                     shadow_l3out, owner=original_network_tenant,
                     context=no_nat_vrf['aci_name'], transaction=trs)
@@ -734,7 +739,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 # link up shadow external-EPG to NAT EPG
                 self.apic_manager.associate_external_epg_to_nat_epg(
                     original_network_tenant, shadow_l3out, shadow_ext_epg,
-                    nat_epg_name, target_owner=nat_vrf['aci_tenant'],
+                    nat_epg_name, target_owner=original_network_tenant,
                     app_profile_name=self._get_network_app_profile(network),
                     transaction=trs)
 
@@ -742,7 +747,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 gw, plen = ext_info.get('host_pool_cidr', '/').split('/', 1)
                 if gw and plen:
                     self.apic_manager.ensure_subnet_created_on_apic(
-                        nat_vrf['aci_tenant'], nat_bd_name, gw + '/' + plen,
+                        original_network_tenant, nat_bd_name, gw + '/' + plen,
                         transaction=trs)
             return True
         except Exception as e:

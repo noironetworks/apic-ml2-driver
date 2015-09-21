@@ -101,14 +101,17 @@ class ControllerMixin(object):
     def __init__(self):
         self.response = None
 
-    def _tenant(self, ext_nat=False, vrf=False, neutron_tenant=None):
+    def _tenant(self, ext_nat=False, vrf=False, shared=False,
+                neutron_tenant=None):
         if self.driver.single_tenant_mode:
             return APIC_SYSTEM_ID
         if self.driver.per_tenant_context and not ext_nat:
             return neutron_tenant or APIC_TENANT
         if not self.driver.per_tenant_context and vrf:
             return 'common'
-        if ext_nat:
+        if not self.driver.per_tenant_context and ext_nat:
+            return 'common'
+        if ext_nat and shared:
             return 'common'
         return neutron_tenant or APIC_TENANT
 
@@ -128,6 +131,13 @@ class ControllerMixin(object):
         if self.driver.single_tenant_mode:
             return neutron_tenant or APIC_TENANT
         return APIC_SYSTEM_ID
+
+    def _nat_vrf_tenant(self, net_shared=False, neutron_tenant=None):
+        if self.driver.single_tenant_mode:
+            return APIC_SYSTEM_ID
+        elif net_shared:
+            return 'common'
+        return neutron_tenant or APIC_TENANT
 
     def set_up_mocks(self):
         # The mocked responses from the server are lists used by
