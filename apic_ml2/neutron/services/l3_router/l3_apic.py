@@ -159,9 +159,11 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
             self.manager.create_router(arouter_id, owner=tenant_id,
                                        transaction=trs)
             if router['admin_state_up']:
-                self.manager.enable_router(arouter_id, transaction=trs)
+                self.manager.enable_router(arouter_id, owner=tenant_id,
+                                           transaction=trs)
             else:
-                self.manager.disable_router(arouter_id, transaction=trs)
+                self.manager.disable_router(arouter_id, owner=tenant_id,
+                                            transaction=trs)
 
     # Router API
 

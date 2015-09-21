@@ -118,7 +118,7 @@ class ControllerMixin(object):
     def _network_vrf_name(self, nat_vrf=False, net_name=None):
         if nat_vrf:
             return "NAT-vrf-%s" % (net_name or APIC_NETWORK)
-        if self.driver.single_tenant_mode:
+        if self.driver.single_tenant_mode and self.driver.per_tenant_context:
             return APIC_TENANT
         return 'shared'
 

@@ -846,7 +846,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         if self._is_nat_enabled_on_ext_net(network):
             vrf['aci_name'] = self._get_nat_vrf_for_ext_net(
                 self.name_mapper.network(context, network['id']))
-        elif not self.single_tenant_mode:
+        elif not self.single_tenant_mode or not self.per_tenant_context:
             vrf['aci_name'] = apic_manager.CONTEXT_SHARED
 
         if not self.single_tenant_mode:
