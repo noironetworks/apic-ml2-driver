@@ -235,7 +235,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                    'port_id': port_id,
                    'mac_address': port['mac_address'],
                    'app_profile_name': str(
-                       self.apic_manager.app_profile_name),
+                       self._get_network_app_profile(network)),
                    'segment': segment,
                    'segmentation_id': segment.get('segmentation_id'),
                    'network_type': segment.get('network_type'),

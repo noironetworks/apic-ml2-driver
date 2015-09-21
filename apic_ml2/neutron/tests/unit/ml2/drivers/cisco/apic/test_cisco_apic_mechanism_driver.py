@@ -225,6 +225,8 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             details = self._get_gbp_details(p1['id'], 'h1')
             self.assertEqual(self._tenant(neutron_tenant='onetenant'),
                              details['ptg_tenant'])
+            self.assertEqual(self._app_profile(neutron_tenant='onetenant'),
+                             details['app_profile_name'])
             self.assertEqual('onetenant',
                              details['tenant_id'])
             self.assertTrue(details['enable_dhcp_optimization'])
