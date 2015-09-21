@@ -19,6 +19,7 @@ Requires:	openstack-neutron-ml2 < 2015.2
 Requires:	lldpad
 Requires:	apicapi
 Requires:	python-oslo-concurrency
+Requires:	neutron-opflex-agent
 Requires(post): systemd-units
 Requires(preun): systemd-units
 Requires(postun): systemd-units

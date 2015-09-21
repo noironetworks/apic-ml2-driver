@@ -9,6 +9,7 @@ Vcs-Browser: https://github.com/noironetworks/apic-ml2-driver
 
 Package: neutron-ml2-driver-apic
 Architecture: all
-Depends: lldpd, neutron-plugin-ml2, ${misc:Depends}, ${python:Depends}
+Depends: lldpd, neutron-plugin-ml2, ${misc:Depends}, apicapi,
+         python-oslo.concurrency, neutron-opflex-agent
 Description: Neutron ML2 driver for Cisco APIC
  Standalone Openstack Neutron ML2 driver for working with Cisco APIC
