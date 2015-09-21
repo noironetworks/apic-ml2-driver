@@ -298,7 +298,9 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             ipms.append({'external_segment_name': net['name'],
                          'nat_epg_name':
                          self._get_nat_epg_for_ext_net(l3out_name),
-                         'nat_epg_tenant': vrf['aci_tenant']})
+                         'nat_epg_tenant': vrf['aci_tenant'],
+                         'nat_epg_app_profile': self._get_network_app_profile(
+                             network)})
         details['floating_ip'] = fips
         details['ip_mapping'] = ipms
 
