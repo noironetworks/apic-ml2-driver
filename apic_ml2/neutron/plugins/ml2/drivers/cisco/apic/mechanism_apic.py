@@ -284,6 +284,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             vrf = self._get_network_vrf(context, network)
             l3out_name = self.name_mapper.network(context, net['id'])
             f['nat_epg_name'] = self._get_nat_epg_for_ext_net(l3out_name)
+            f['nat_epg_app_profile'] = self._get_network_app_profile(network)
             f['nat_epg_tenant'] = vrf['aci_tenant']
             fip_ext_nets.add(net['id'])
         ipms = []
