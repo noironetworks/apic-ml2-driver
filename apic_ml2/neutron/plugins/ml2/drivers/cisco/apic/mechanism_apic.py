@@ -727,5 +727,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     def _is_nat_enabled_on_ext_net(self, network):
         ext_info = self.apic_manager.ext_net_dict.get(network['name'])
-        return (self.nat_enabled and ext_info and
-                ext_info.get('enable_nat', True))
+        if (self.nat_enabled and ext_info and
+                network.get('router:external')):
+            opt = ext_info.get('enable_nat', 'true')
+            return opt.lower() in ['true', 'yes', '1']
+        return False
