@@ -624,7 +624,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             mocked.APIC_CONTRACT)
         self.driver.update_port_postcommit(port_ctx)
         mgr.get_router_contract.assert_called_once_with(
-            port_ctx.current['device_id'])
+            port_ctx.current['device_id'], owner=self._tenant(vrf=True))
 
         expected_calls = [
             mock.call("Shd-%s" % mocked.APIC_NETWORK, owner=self._tenant(),
@@ -673,7 +673,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             mocked.APIC_CONTRACT)
         self.driver.update_port_postcommit(port_ctx)
         mgr.get_router_contract.assert_called_once_with(
-            port_ctx.current['device_id'])
+            port_ctx.current['device_id'], owner=self._tenant(vrf=True))
         mgr.ensure_context_enforced.assert_called_once()
 
         expected_calls = [
@@ -738,7 +738,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
 
         self.driver.update_port_postcommit(port_ctx)
         mgr.get_router_contract.assert_called_once_with(
-            port_ctx.current['device_id'])
+            port_ctx.current['device_id'], owner=self._tenant(vrf=True))
 
         mgr.ensure_external_epg_consumed_contract.assert_called_once_with(
             mocked.APIC_NETWORK_NO_NAT, mgr.get_router_contract.return_value,

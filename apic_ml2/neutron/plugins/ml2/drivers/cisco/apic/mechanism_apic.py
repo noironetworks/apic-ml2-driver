@@ -377,12 +377,15 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         ext_epg_name = self._get_ext_epg_for_ext_net(anetwork_id)
         network_tenant = self._get_network_aci_tenant(network)
         app_profile = self._get_network_app_profile(network)
+        router = self.l3_plugin.get_router(context._plugin_context, router_id)
 
+        vrf = self._get_tenant_vrf(router['tenant_id'])
         if router_id and router_info:
             external_epg = apic_manager.EXT_EPG
             # Get/Create contract
             arouter_id = self.name_mapper.router(context, router_id)
-            cid = self.apic_manager.get_router_contract(arouter_id)
+            cid = self.apic_manager.get_router_contract(
+                arouter_id, owner=vrf['aci_tenant'])
             if router_info.get('preexisting') and ('external_epg' in
                                                    router_info):
                 anetwork_id = self.name_mapper.pre_existing(
@@ -392,8 +395,6 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
             ok = False
             if self._is_nat_enabled_on_ext_net(network):
-                router = self.l3_plugin.get_router(context._plugin_context,
-                                                   router_id)
                 ok = self._create_shadow_ext_net_for_nat(
                     anetwork_id, external_epg, cid, network, router)
 
