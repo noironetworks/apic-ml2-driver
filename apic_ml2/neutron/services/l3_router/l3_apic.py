@@ -156,8 +156,10 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
             tenant_id = self.aci_mech_driver._get_router_aci_tenant(router)
 
         with self.manager.apic.transaction() as trs:
-            self.manager.create_router(arouter_id, owner=tenant_id,
-                                       transaction=trs)
+            vrf = self.aci_mech_driver._get_tenant_vrf(router['tenant_id'])
+            self.manager.create_router(arouter_id, owner=vrf['aci_tenant'],
+                                       transaction=trs,
+                                       context=vrf['aci_name'])
             if router['admin_state_up']:
                 self.manager.enable_router(arouter_id, owner=tenant_id,
                                            transaction=trs)
