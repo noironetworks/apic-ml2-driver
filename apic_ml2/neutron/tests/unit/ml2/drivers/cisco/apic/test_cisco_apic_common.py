@@ -139,11 +139,13 @@ class ControllerMixin(object):
             return 'common'
         return neutron_tenant or APIC_TENANT
 
-    def _scoped_name(self, name, tenant=None, preexisting=False):
+    def _scoped_name(self, name, tenant=None, preexisting=False, prefix=None):
         tenant = tenant or APIC_TENANT
+        if prefix:
+            tenant = prefix + '-' + tenant
         if self.driver.single_tenant_mode and not preexisting:
             return tenant + '-' + name
-        return name
+        return ('%s-%s' % (prefix, name)) if prefix else name
 
     def set_up_mocks(self):
         # The mocked responses from the server are lists used by
