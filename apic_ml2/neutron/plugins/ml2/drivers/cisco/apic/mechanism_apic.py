@@ -94,7 +94,11 @@ class NameMapper(object):
                     current_scope = '-' + current_scope
                     if tenant:
                         tenant = self.aci_mapper.tenant(None, tenant)
-                        kwargs['prefix'] = str(tenant)[:str(tenant).rindex('_')] + current_scope
+                        try:
+                            kwargs['prefix'] = str(tenant)[
+                                :str(tenant).rindex('_')] + current_scope
+                        except ValueError:
+                            kwargs['prefix'] = str(tenant) + current_scope
             kwargs.pop('openstack_owner', None)
             return getattr(self.aci_mapper, new_item)(*args, **kwargs)
         return name_wrapper
