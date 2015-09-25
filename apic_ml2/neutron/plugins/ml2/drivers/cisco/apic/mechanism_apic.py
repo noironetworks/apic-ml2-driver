@@ -40,6 +40,7 @@ from oslo.config import cfg
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_sync
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import nova_client
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import rpc as t_rpc
 
 
@@ -311,7 +312,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                            context, port['network_id'])),
                    'promiscuous_mode': is_port_promiscuous(port)}
         if port['device_owner'].startswith('compute:') and port['device_id']:
-            details['vm-name'] = port['device_id']
+            vm = nova_client.NovaClient().get_server(port['device_id'])
+            details['vm-name'] = vm.name if vm else port['device_id']
             self._add_ip_mapping_details(context, port, details)
         self._add_network_details(context, port, details)
         if self._is_nat_enabled_on_ext_net(network):
