@@ -44,8 +44,24 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import rpc as t_rpc
 
 
 LOG = log.getLogger(__name__)
-
 _apic_driver_instance = None
+
+
+# REVISIT(ivar): Since our database class is in Neutron, we need to monkey
+# patch this class in order to add required features. This will have to be
+# reverted in Liberty where we have control over out Database
+def get_filtered_apic_names(self, neutron_id=None, neutron_type=None,
+                            apic_name=None):
+    query = self.session.query(apic_model.ApicName.apic_name)
+    if neutron_id:
+        query = query.filter_by(neutron_id=neutron_id)
+    if neutron_type:
+        query = query.filter_by(neutron_type=neutron_type)
+    if apic_name:
+        query = query.filter_by(apic_name=apic_name)
+    return query.all()
+
+apic_model.ApicDbModel.get_filtered_apic_names = get_filtered_apic_names
 
 
 class CidrOverlapsApicExternalSubnet(n_exc.BadRequest):
@@ -75,11 +91,10 @@ class NameMapper(object):
                 if new_item in self.scope_with_tenant_name:
                     tenant = kwargs.get('openstack_owner')
                     current_scope = kwargs.get('prefix', '')
-                    if current_scope:
-                        current_scope = '_' + current_scope
+                    current_scope = '-' + current_scope
                     if tenant:
                         tenant = self.aci_mapper.tenant(None, tenant)
-                        kwargs['prefix'] = tenant + current_scope
+                        kwargs['prefix'] = str(tenant)[:str(tenant).rindex('_')] + current_scope
             kwargs.pop('openstack_owner', None)
             return getattr(self.aci_mapper, new_item)(*args, **kwargs)
         return name_wrapper
