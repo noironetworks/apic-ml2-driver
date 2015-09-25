@@ -289,7 +289,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 continue
             network = core_plugin.get_network(context._plugin_context,
                                               net['id'])
-            epg_tenant = self._get_network_aci_tenant(network)
+            epg_tenant =  self.apic_manager.apic.fvTenant.name(
+                str(self._get_network_aci_tenant(network)))
             l3out_name = self.name_mapper.network(context, net['id'])
             f['nat_epg_name'] = self._get_ext_epg_for_ext_net(l3out_name)
             f['nat_epg_app_profile'] = str(
@@ -302,7 +303,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                     not self._is_connected_to_ext_net(context, port, net)):
                 continue
             network = core_plugin.get_network(context._plugin_context, net_id)
-            epg_tenant = self._get_network_aci_tenant(network)
+            epg_tenant = self.apic_manager.apic.fvTenant.name(
+                str(self._get_network_aci_tenant(network)))
             l3out_name = self.name_mapper.network(context, net_id)
             ipms.append({'external_segment_name': net['name'],
                          'nat_epg_name':
