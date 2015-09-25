@@ -139,6 +139,12 @@ class ControllerMixin(object):
             return 'common'
         return neutron_tenant or APIC_TENANT
 
+    def _scoped_name(self, name, tenant=None, preexisting=False):
+        tenant = tenant or APIC_TENANT
+        if self.driver.single_tenant_mode and not preexisting:
+            return tenant + '_' + name
+        return name
+
     def set_up_mocks(self):
         # The mocked responses from the server are lists used by
         # mock.side_effect, which means each call to post or get will
