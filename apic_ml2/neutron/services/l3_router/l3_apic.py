@@ -43,7 +43,7 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
     def __init__(self):
         super(ApicL3ServicePlugin, self).__init__()
         self.manager = mechanism_apic.APICMechanismDriver.get_apic_manager()
-        self.name_mapper = self.manager.apic_mapper
+        self.name_mapper = mechanism_apic.NameMapper(self.manager.apic_mapper)
         self.synchronizer = None
         self.manager.ensure_infra_created_on_apic()
         self.manager.ensure_bgp_pod_policy_created_on_apic()
@@ -57,14 +57,16 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
                 'cisco_apic_ml2'].obj
         return self._aci_mech_driver
 
-    def _map_names(self, context,
-                   tenant_id, router_id, net_id, subnet_id):
+    def _map_names(self, context, tenant_id, router, network, subnet):
         context._plugin = self
         with apic_mapper.mapper_context(context) as ctx:
             atenant_id = tenant_id and self.name_mapper.tenant(ctx, tenant_id)
-            arouter_id = router_id and self.name_mapper.router(ctx, router_id)
-            anet_id = net_id and self.name_mapper.network(ctx, net_id)
-            asubnet_id = subnet_id and self.name_mapper.subnet(ctx, subnet_id)
+            arouter_id = router and router['id'] and self.name_mapper.router(
+                ctx, router['id'], openstack_owner=router['tenant_id'])
+            anet_id = (network and network['id'] and
+                       self.name_mapper.endpoint_group(ctx, network['id']))
+            asubnet_id = subnet and subnet['id'] and self.name_mapper.subnet(
+                ctx, subnet['id'])
         return atenant_id, arouter_id, anet_id, asubnet_id
 
     @staticmethod
@@ -110,7 +112,7 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
 
         # Map openstack IDs to APIC IDs
         atenant_id, arouter_id, anetwork_id, _ = self._map_names(
-            context, tenant_id, router_id, network_id, None)
+            context, tenant_id, router, network, None)
 
         # Program APIC
         self.manager.add_router_interface(
@@ -131,9 +133,10 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         network = self.get_network(context, network_id)
         tenant_id = network['tenant_id']
 
+        router = self.get_router(context, router_id)
         # Map openstack IDs to APIC IDs
         atenant_id, arouter_id, anetwork_id, _ = self._map_names(
-            context, tenant_id, router_id, network_id, None)
+            context, tenant_id, router, network, None)
 
         # Program APIC
         self.manager.remove_router_interface(
@@ -144,15 +147,17 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
 
     def delete_router_precommit(self, context, router_id):
         context._plugin = self
+        router = self.get_router(context, router_id)
         with apic_mapper.mapper_context(context) as ctx:
-            arouter_id = router_id and self.name_mapper.router(ctx, router_id)
+            arouter_id = router_id and self.name_mapper.router(
+                ctx, router, openstack_owner=router['id'])
         self.manager.delete_router(arouter_id)
 
     def update_router_postcommit(self, context, router):
         context._plugin = self
         with apic_mapper.mapper_context(context) as ctx:
-            arouter_id = router['id'] and self.name_mapper.router(ctx,
-                                                                  router['id'])
+            arouter_id = router['id'] and self.name_mapper.router(
+                ctx, router['id'], openstack_owner=router['tenant_id'])
             tenant_id = self.aci_mech_driver._get_router_aci_tenant(router)
 
         with self.manager.apic.transaction() as trs:
