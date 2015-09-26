@@ -66,7 +66,7 @@ AGENT_CONF = {'alive': True, 'binary': 'somebinary',
 
 
 def echo(context, id, prefix=''):
-    return id if not prefix else (prefix + '_' + id)
+    return id if not prefix else (prefix + id)
 
 
 def name(name):

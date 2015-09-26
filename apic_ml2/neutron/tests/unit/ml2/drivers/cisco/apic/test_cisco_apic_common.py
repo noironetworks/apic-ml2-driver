@@ -142,7 +142,7 @@ class ControllerMixin(object):
     def _scoped_name(self, name, tenant=None, preexisting=False):
         tenant = tenant or APIC_TENANT
         if self.driver.single_tenant_mode and not preexisting:
-            return tenant + '_' + name
+            return tenant + '-' + name
         return name
 
     def set_up_mocks(self):

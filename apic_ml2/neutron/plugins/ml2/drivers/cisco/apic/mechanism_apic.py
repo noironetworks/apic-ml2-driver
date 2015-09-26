@@ -255,6 +255,14 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             # need to retrieve the whole world
             subnets = core_plugin.get_subnets(ctx)
 
+        # Exclude external subnets
+        networks = core_plugin.get_networks(
+            ctx, {'id': set([x['network_id'] for x in subnets])})
+        external_networks = [x['id'] for x in networks if
+                             x.get('router:external')]
+        subnets = [x for x in subnets if
+                   x['network_id'] not in external_networks]
+
         if subnets:
             subnets = netaddr.IPSet([x['cidr'] for x in subnets])
             subnets.compact()
