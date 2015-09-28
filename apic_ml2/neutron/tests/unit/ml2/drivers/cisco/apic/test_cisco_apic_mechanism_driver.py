@@ -875,11 +875,22 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
                                           'vm1', net_ctx, HOST_ID1, gw=True)
         mgr = self.driver.apic_manager
         self.driver._delete_path_if_last = mock.Mock()
+        self.driver._query_l3out_info = mock.Mock()
+        self.driver._query_l3out_info.return_value = {
+            'l3out_tenant': 'bar_tenant'}
         self.driver.delete_port_postcommit(port_ctx)
-        mgr.delete_external_epg_contract.assert_called_once_with(
-            self._scoped_name(mocked.APIC_ROUTER),
-            self._scoped_name(net_ctx.current['name'], preexisting=True),
-            external_epg=mocked.APIC_EXT_EPG)
+        contract_name = "contract-%s" % mocked.APIC_ROUTER
+        l3out = self._scoped_name(net_ctx.current['name'], preexisting=True)
+        expected_calls = [
+            mock.call(l3out, contract_name,
+                      external_epg=mocked.APIC_EXT_EPG, provided=True,
+                      owner='bar_tenant'),
+            mock.call(l3out, contract_name,
+                      external_epg=mocked.APIC_EXT_EPG, provided=False,
+                      owner='bar_tenant')]
+        self._check_call_list(
+            expected_calls,
+            mgr.unset_contract_for_external_epg.call_args_list)
         mgr.delete_external_routed_network.assert_called_once_with(
             "Shd-%s" % self._scoped_name(mocked.APIC_NETWORK_PRE),
             owner=self._tenant())
