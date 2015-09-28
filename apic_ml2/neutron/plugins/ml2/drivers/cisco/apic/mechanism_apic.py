@@ -534,28 +534,36 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     def _delete_contract(self, context):
         port = context.current
+        network = context.network.current
         l3out_name = self.name_mapper.l3_out(
-            context, context.network.current['id'],
-            openstack_owner=context.network.current['tenant_id'])
+            context, network['id'],
+            openstack_owner=network['tenant_id'])
         router = self.l3_plugin.get_router(
             context._plugin_context, port.get('device_id'))
         arouter_id = self.name_mapper.router(
             context, port.get('device_id'),
             openstack_owner=router['tenant_id'])
-        router_info = self.apic_manager.ext_net_dict.get(
-            context.network.current['name'], {})
+        router_info = self.apic_manager.ext_net_dict.get(network['name'], {})
 
         if router_info:
             if 'external_epg' not in router_info:
                 self.apic_manager.delete_external_epg_contract(arouter_id,
                                                                l3out_name)
             else:
-                anetwork_id = self.name_mapper.pre_existing(
-                    context, context.network.current['name'])
+                l3out_name_pre = self.name_mapper.pre_existing(
+                    context, network['name'])
                 external_epg = self.name_mapper.pre_existing(
                     context, router_info['external_epg'])
-                self.apic_manager.delete_external_epg_contract(
-                    arouter_id, anetwork_id, external_epg=external_epg)
+                tenant_id = self._get_network_aci_tenant(network)
+                l3out_info = self._query_l3out_info(l3out_name_pre, tenant_id)
+                contract_id = 'contract-%s' % router['id']
+                if l3out_info:
+                    self.apic_manager.unset_contract_for_external_epg(
+                        l3out_name_pre, contract_id, external_epg=external_epg,
+                        owner=l3out_info['l3out_tenant'], provided=True)
+                    self.apic_manager.unset_contract_for_external_epg(
+                        l3out_name_pre, contract_id, external_epg=external_epg,
+                        owner=l3out_info['l3out_tenant'], provided=False)
 
     def _get_active_path_count(self, context, host=None):
         return context._plugin_context.session.query(
