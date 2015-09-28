@@ -480,7 +480,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             nat_ok = False
             if nat_reqd and nat_enabled:
                 nat_ok = self._create_shadow_ext_net_for_nat(
-                    l3out_name, external_epg, cid, network, router)
+                    context, l3out_name, external_epg, cid, network, router)
 
             if not nat_ok:      # Use non-NAT config
                 # Set contract for L3Out EPGs
@@ -638,7 +638,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         if port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
             self._delete_contract(context)
             if self._is_nat_enabled_on_ext_net(network):
-                self._delete_shadow_ext_net_for_nat(context, network)
+                self._delete_shadow_ext_net_for_nat(context, port, network)
         if self._is_nat_enabled_on_ext_net(network):
             self._notify_ports_due_to_router_update(port)
 
@@ -800,12 +800,15 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
     def _get_ext_allow_all_contract(self, network):
         return "EXT-%s-allow-all" % network['id']
 
-    def _create_shadow_ext_net_for_nat(self, l3out_name, ext_epg_name,
+    def _create_shadow_ext_net_for_nat(self, context, l3out_name, ext_epg_name,
                                        router_contract, network, router):
         no_nat_vrf = self._get_tenant_vrf(router['tenant_id'])
         nat_epg_name = self._get_ext_epg_for_ext_net(l3out_name)
         shadow_ext_epg = self._get_shadow_name_for_nat(ext_epg_name)
-        shadow_l3out = self._get_shadow_name_for_nat(l3out_name)
+        shadow_l3out = self.name_mapper.l3_out(
+            context, network['id'],
+            openstack_owner=router['tenant_id'])
+        shadow_l3out = self._get_shadow_name_for_nat(shadow_l3out)
         router_tenant = self._get_tenant(router)
         nat_epg_tenant = self._get_network_aci_tenant(network)
 
@@ -842,15 +845,18 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             LOG.info(_("Unable to create Shadow EPG: %s"), e)
             return False
 
-    def _delete_shadow_ext_net_for_nat(self, context, network):
+    def _delete_shadow_ext_net_for_nat(self, context, port, network):
         ext_info = self.apic_manager.ext_net_dict.get(network['name'])
         if not ext_info:
             return
 
-        l3out_name = self.name_mapper.l3_out(
-            context, network['id'], openstack_owner=network['tenant_id'])
+        router = self.l3_plugin.get_router(
+            context._plugin_context, port.get('device_id'))
+        shadow_l3out = self.name_mapper.l3_out(
+            context, network['id'],
+            openstack_owner=router['tenant_id'])
         # delete shadow L3-out and shadow external-EPG
-        shadow_l3out = self._get_shadow_name_for_nat(l3out_name)
+        shadow_l3out = self._get_shadow_name_for_nat(shadow_l3out)
         self.apic_manager.delete_external_routed_network(
             shadow_l3out, owner=self._get_network_aci_tenant(network))
 
