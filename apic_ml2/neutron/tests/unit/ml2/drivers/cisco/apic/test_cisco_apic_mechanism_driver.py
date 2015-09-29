@@ -618,8 +618,8 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         mgr = self.driver.apic_manager
         self.assertFalse(mgr.ensure_path_created_for_port.called)
 
-    def test_update_gw_port_postcommit(self):
-        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+    def _test_update_gw_port_postcommit(self, net_tenant=mocked.APIC_TENANT):
+        net_ctx = self._get_network_context(net_tenant,
                                             mocked.APIC_NETWORK,
                                             TEST_SEGMENT1, external=True)
         port_ctx = self._get_port_context(mocked.APIC_TENANT,
@@ -669,8 +669,15 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             expected_calls,
             mgr.ensure_external_epg_provided_contract.call_args_list)
 
-    def test_update_pre_gw_port_postcommit(self):
-        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+    def test_update_gw_port_postcommit(self):
+        self._test_update_gw_port_postcommit()
+
+    def test_update_cross_tenant_gw_port_postcommit(self):
+        self._test_update_gw_port_postcommit('admin_tenant')
+
+    def _test_update_pre_gw_port_postcommit(self,
+                                            net_tenant=mocked.APIC_TENANT):
+        net_ctx = self._get_network_context(net_tenant,
                                             mocked.APIC_NETWORK_PRE,
                                             TEST_SEGMENT1, external=True)
         port_ctx = self._get_port_context(mocked.APIC_TENANT,
@@ -728,6 +735,12 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self._check_call_list(
             expected_calls,
             mgr.ensure_external_epg_provided_contract.call_args_list)
+
+    def test_update_pre_gw_port_postcommit(self):
+        self._test_update_pre_gw_port_postcommit()
+
+    def test_update_cross_tenant_pre_gw_port_postcommit(self):
+        self._test_update_pre_gw_port_postcommit('admin_tenant')
 
     def test_update_pre_no_nat_gw_port_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
