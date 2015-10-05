@@ -1074,6 +1074,9 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             self.apic_manager.ensure_bd_created_on_apic(
                 tenant_id, ext_bd_name, ctx_owner=external_vrf_tenant,
                 ctx_name=external_vrf, transaction=trs)
+            self.apic_manager.set_l3out_for_bd(tenant_id,
+                ext_bd_name, l3out_name_pre or l3out_name,
+                transaction=trs)
             self.apic_manager.ensure_epg_created(
                 tenant_id, ext_epg_name, bd_name=ext_bd_name,
                 app_profile_name=app_profile_name, transaction=trs)
