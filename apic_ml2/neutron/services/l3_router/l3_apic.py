@@ -14,6 +14,7 @@
 #    under the License.
 
 from apicapi import apic_mapper
+from neutron.common import constants as q_const
 from neutron.common import exceptions as n_exc
 from neutron.db import db_base_plugin_v2
 from neutron.db import extraroute_db
@@ -48,13 +49,16 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         self.manager.ensure_infra_created_on_apic()
         self.manager.ensure_bgp_pod_policy_created_on_apic()
         self._aci_mech_driver = None
+        self.ml2_plugin = None
 
     @property
     def aci_mech_driver(self):
+        if not self.ml2_plugin:
+            self.ml2_plugin = manager.NeutronManager.get_plugin()
         if not self._aci_mech_driver:
-            plugin = manager.NeutronManager.get_plugin()
-            self._aci_mech_driver = plugin.mechanism_manager.mech_drivers[
-                'cisco_apic_ml2'].obj
+            self._aci_mech_driver = (
+                self.ml2_plugin.mechanism_manager.mech_drivers[
+                    'cisco_apic_ml2'].obj)
         return self._aci_mech_driver
 
     def _map_names(self, context, tenant_id, router, network, subnet):
@@ -68,6 +72,24 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
             asubnet_id = subnet and subnet['id'] and self.name_mapper.subnet(
                 ctx, subnet['id'])
         return atenant_id, arouter_id, anet_id, asubnet_id
+
+    def _get_port_id_for_router_interface(self, context, router_id, subnet_id):
+        filters = {'device_id': [router_id],
+                   'device_owner': [q_const.DEVICE_OWNER_ROUTER_INTF],
+                   'fixed_ips': {'subnet_id': [subnet_id]}}
+        ports = self.get_ports(context, filters=filters)
+        return ports[0]['id']
+
+    def _update_router_gw_info(self, context, router_id, info, router=None):
+        super(ApicL3ServicePlugin, self)._update_router_gw_info(
+            context, router_id, info, router)
+        if 'network_id' in info:
+            filters = {'device_id': [router_id],
+                       'device_owner': [q_const.DEVICE_OWNER_ROUTER_GW],
+                       'network_id': [info['network_id']]}
+            ports = self.get_ports(context, filters=filters)
+            manager.NeutronManager.get_plugin().update_port_status(
+                context, ports[0]['id'], q_const.PORT_STATUS_ACTIVE)
 
     @staticmethod
     def get_plugin_type():
@@ -98,6 +120,8 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         if 'subnet_id' in interface_info:
             subnet = self.get_subnet(context, interface_info['subnet_id'])
             network_id = subnet['network_id']
+            port = self._get_port_id_for_router_interface(
+                context, router_id, interface_info['subnet_id'])
         else:
             port = self.get_port(context, interface_info['port_id'])
             network_id = port['network_id']
@@ -120,12 +144,16 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
             arouter_id, anetwork_id,
             app_profile_name=self.aci_mech_driver._get_network_app_profile(
                 network))
+        self.ml2_plugin.update_port_status(context, port,
+                                           q_const.PORT_STATUS_ACTIVE)
 
     def remove_router_interface_precommit(self, context, router_id,
                                           interface_info):
         if 'subnet_id' in interface_info:
             subnet = self.get_subnet(context, interface_info['subnet_id'])
             network_id = subnet['network_id']
+            port = self._get_port_id_for_router_interface(
+                context, router_id, interface_info['subnet_id'])
         else:
             port = self.get_port(context, interface_info['port_id'])
             network_id = port['network_id']
@@ -144,6 +172,8 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
             arouter_id, anetwork_id,
             app_profile_name=self.aci_mech_driver._get_network_app_profile(
                 network))
+        self.ml2_plugin.update_port_status(context, port,
+                                           q_const.PORT_STATUS_DOWN)
 
     def delete_router_precommit(self, context, router_id):
         context._plugin = self
