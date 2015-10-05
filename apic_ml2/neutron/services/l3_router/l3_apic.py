@@ -150,7 +150,7 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         router = self.get_router(context, router_id)
         with apic_mapper.mapper_context(context) as ctx:
             arouter_id = router_id and self.name_mapper.router(
-                ctx, router, openstack_owner=router['id'])
+                ctx, router['id'], openstack_owner=router['id'])
         self.manager.delete_router(arouter_id)
 
     def update_router_postcommit(self, context, router):

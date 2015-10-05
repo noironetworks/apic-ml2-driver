@@ -957,6 +957,9 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             self._tenant(), bd_name,
             ctx_name=ctx_name, ctx_owner=self._tenant(vrf=True),
             transaction=mock.ANY)
+        mgr.set_l3out_for_bd(
+            self._tenant(), bd_name, self._scoped_name(mocked.APIC_NETWORK),
+            transaction=mock.ANY)
 
         expected_calls = [
             mock.call(self._scoped_name(mocked.APIC_NETWORK),
@@ -1027,6 +1030,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.assertFalse(mgr.ensure_external_epg_created.called)
 
         bd_name = "EXT-bd-%s" % self._scoped_name(mocked.APIC_NETWORK_PRE)
+        l3out = self._scoped_name(net_ctx.current['name'], preexisting=True)
         mgr.ensure_epg_created.assert_called_once_with(
             self._tenant(),
             "EXT-epg-%s" % self._scoped_name(mocked.APIC_NETWORK_PRE),
@@ -1035,6 +1039,9 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         mgr.ensure_bd_created_on_apic.assert_called_once_with(
             self._tenant(), bd_name,
             ctx_name='bar_ctx', ctx_owner='bar_tenant',
+            transaction=mock.ANY)
+        mgr.set_l3out_for_bd.assert_called_once_with(
+            self._tenant(), bd_name, l3out,
             transaction=mock.ANY)
 
         contract_name = "EXT-%s-allow-all" % mocked.APIC_NETWORK_PRE
@@ -1045,7 +1052,6 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             contract_name, contract_name, contract_name,
             owner='bar_tenant', transaction=mock.ANY)
 
-        l3out = self._scoped_name(net_ctx.current['name'], preexisting=True)
         expected_calls = [
             mock.call(l3out, contract_name,
                       external_epg=mocked.APIC_EXT_EPG, provided=True,
@@ -1076,6 +1082,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.assertFalse(mgr.create_tenant_filter.called)
         self.assertFalse(mgr.manage_contract_subject_bi_filter.called)
         self.assertFalse(mgr.set_contract_for_external_epg.called)
+        self.assertFalse(mgr.set_l3out_for_bd.called)
 
     def test_delete_network_postcommit(self):
         ctx = self._get_network_context(mocked.APIC_TENANT,
