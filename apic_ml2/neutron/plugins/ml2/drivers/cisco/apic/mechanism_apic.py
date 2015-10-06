@@ -437,6 +437,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                     subnet['host_routes'].append(
                         {'destination': dhcp.METADATA_DEFAULT_CIDR,
                          'nexthop': dhcp_ips[0]})
+            subnet['dhcp_server_ips'] = dhcp_ips
 
     def sync_init(f):
         def inner(inst, *args, **kwargs):
