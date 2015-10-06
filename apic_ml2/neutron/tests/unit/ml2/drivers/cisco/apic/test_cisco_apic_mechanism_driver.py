@@ -86,6 +86,8 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
                            'ml2_cisco_apic')
         plugin_name = plugin_name or PLUGIN_NAME
         service_plugins = service_plugins or {'L3_ROUTER_NAT': 'cisco_apic_l3'}
+        mock.patch('apic_ml2.neutron.plugins.ml2.drivers.'
+                   'cisco.apic.nova_client.NovaClient').start()
         super(ApicML2IntegratedTestBase, self).setUp(
             plugin_name, service_plugins=service_plugins)
         ext_mgr = extensions.PluginAwareExtensionManager.get_instance()
@@ -234,6 +236,46 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             self.assertTrue(details['enable_dhcp_optimization'])
             self.assertEqual(1, len(details['subnets']))
             self.assertEqual(sub['subnet']['id'], details['subnets'][0]['id'])
+
+    def test_enhanced_subnet_options(self):
+        net = self.create_network(
+            tenant_id='onetenant', expected_res_status=201, shared=True,
+            is_admin_context=True)['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4, is_admin_context=True)
+        with self.port(subnet=sub, tenant_id='onetenant') as p1:
+            with self.port(subnet=sub, device_owner='network:dhcp',
+                           tenant_id='onetenant') as dhcp:
+                p1 = p1['port']
+                dhcp = dhcp['port']
+                self.assertEqual(net['id'], p1['network_id'])
+                # Bind port to trigger path binding
+                self._bind_port_to_host(p1['id'], 'h1')
+                self.driver._add_ip_mapping_details = mock.Mock()
+                self.driver.enable_metadata_opt = False
+                details = self._get_gbp_details(p1['id'], 'h1')
+
+                self.assertEqual(1, len(details['subnets']))
+                # Verify that DNS nameservers are correctly set
+                self.assertEqual([dhcp['fixed_ips'][0]['ip_address']],
+                                 details['subnets'][0]['dns_nameservers'])
+                # Verify Default route via GW
+                self.assertTrue({'destination': '0.0.0.0/0',
+                                 'nexthop': '192.168.0.1'} in
+                                details['subnets'][0]['host_routes'])
+
+                # Verify Metadata route via DHCP
+                self.assertTrue(
+                    {'destination': '169.254.169.254/16',
+                     'nexthop': dhcp['fixed_ips'][0]['ip_address']} in
+                    details['subnets'][0]['host_routes'])
+
+                # Verify no extra routes are leaking inside
+                self.assertEqual(2, len(details['subnets'][0]['host_routes']))
+
+                self.assertEqual([dhcp['fixed_ips'][0]['ip_address']],
+                                 details['subnets'][0]['dhcp_server_ips'])
 
     def test_add_router_interface_on_shared_net_by_port(self):
         net = self.create_network(
