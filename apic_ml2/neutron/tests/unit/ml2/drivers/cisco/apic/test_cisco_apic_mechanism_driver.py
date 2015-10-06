@@ -274,6 +274,9 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                 # Verify no extra routes are leaking inside
                 self.assertEqual(2, len(details['subnets'][0]['host_routes']))
 
+                self.assertEqual([dhcp['fixed_ips'][0]['ip_address']],
+                                 details['subnets'][0]['dhcp_server_ips'])
+
     def test_add_router_interface_on_shared_net_by_port(self):
         net = self.create_network(
             tenant_id='onetenant', expected_res_status=201, shared=True,
