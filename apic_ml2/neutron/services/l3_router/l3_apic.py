@@ -120,11 +120,12 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         if 'subnet_id' in interface_info:
             subnet = self.get_subnet(context, interface_info['subnet_id'])
             network_id = subnet['network_id']
-            port = self._get_port_id_for_router_interface(
+            port_id = self._get_port_id_for_router_interface(
                 context, router_id, interface_info['subnet_id'])
         else:
             port = self.get_port(context, interface_info['port_id'])
             network_id = port['network_id']
+            port_id = interface_info['port_id']
 
         network = self.get_network(context, network_id)
         tenant_id = network['tenant_id']
@@ -144,7 +145,7 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
             arouter_id, anetwork_id,
             app_profile_name=self.aci_mech_driver._get_network_app_profile(
                 network))
-        self.ml2_plugin.update_port_status(context, port,
+        self.ml2_plugin.update_port_status(context, port_id,
                                            q_const.PORT_STATUS_ACTIVE)
 
     def remove_router_interface_precommit(self, context, router_id,
@@ -152,11 +153,12 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         if 'subnet_id' in interface_info:
             subnet = self.get_subnet(context, interface_info['subnet_id'])
             network_id = subnet['network_id']
-            port = self._get_port_id_for_router_interface(
+            port_id = self._get_port_id_for_router_interface(
                 context, router_id, interface_info['subnet_id'])
         else:
             port = self.get_port(context, interface_info['port_id'])
             network_id = port['network_id']
+            port_id = interface_info['port_id']
 
         network = self.get_network(context, network_id)
         tenant_id = network['tenant_id']
@@ -172,7 +174,7 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
             arouter_id, anetwork_id,
             app_profile_name=self.aci_mech_driver._get_network_app_profile(
                 network))
-        self.ml2_plugin.update_port_status(context, port,
+        self.ml2_plugin.update_port_status(context, port_id,
                                            q_const.PORT_STATUS_DOWN)
 
     def delete_router_precommit(self, context, router_id):
