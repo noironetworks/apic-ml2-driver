@@ -87,6 +87,7 @@ install -p -D -m 0644 rpm/%{service_agent} %{buildroot}/%{_unitdir}/%{service_ag
 %{_bindir}/apic-ml2-db-manage
 %{_bindir}/neutron-cisco-apic-host-agent
 %{_bindir}/neutron-cisco-apic-service-agent
+%{_bindir}/apic-ns-metadata-proxy
 %{_unitdir}/%{host_agent}
 %{_unitdir}/%{service_agent}
 %{_sysconfdir}/neutron/plugins/ml2/ml2_conf_cisco_apic.ini
