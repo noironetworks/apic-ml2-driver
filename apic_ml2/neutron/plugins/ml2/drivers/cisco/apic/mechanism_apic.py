@@ -32,6 +32,7 @@ from neutron.openstack.common import log
 from neutron.plugins.common import constants
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers.cisco.apic import apic_model
+from neutron.plugins.ml2 import driver_context
 from neutron.plugins.ml2.drivers import mech_agent
 from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron.plugins.ml2 import models
@@ -46,6 +47,7 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import rpc as t_rpc
 
 
 LOG = log.getLogger(__name__)
+APIC_SYNC_NETWORK = 'apic-sync-network'
 _apic_driver_instance = None
 
 
@@ -74,6 +76,11 @@ class CidrOverlapsApicExternalSubnet(n_exc.BadRequest):
 class WouldRequireNAT(n_exc.BadRequest):
     message = _("Setting gateway on router would require address translation, "
                 "but NAT-ing is disabled for external network %(ext_net)s.")
+
+
+class ReservedSynchronizationName(n_exc.BadRequest):
+    message = _("The name used for this network is reserved for on demand "
+                "synchronization.")
 
 
 class NameMapper(object):
@@ -445,6 +452,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 inst.synchronizer = (
                     APICMechanismDriver.get_base_synchronizer(inst))
                 inst.synchronizer.sync_base()
+            if args and isinstance(args[0], driver_context.NetworkContext):
+                if (args[0]._plugin_context.is_admin and
+                        args[0].current['name'] == APIC_SYNC_NETWORK):
+                    inst.synchronizer._sync_base()
             return f(inst, *args, **kwargs)
         return inner
 
@@ -677,6 +688,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     @sync_init
     def create_network_postcommit(self, context):
+        # The following validation is not happening in the precommit to avoid
+        # database lock timeout
+        if context.current['name'] == APIC_SYNC_NETWORK:
+            raise ReservedSynchronizationName()
         tenant_id = self._get_network_aci_tenant(context.current)
         network_id = context.current['id']
         # Convert to APIC IDs

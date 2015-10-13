@@ -97,6 +97,9 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
         self.plugin.is_agent_down = mock.Mock(return_value=False)
         self.driver = self.plugin.mechanism_manager.mech_drivers[
             'cisco_apic_ml2'].obj
+        self.synchronizer = mock.Mock()
+        md.APICMechanismDriver.get_base_synchronizer = mock.Mock(
+            return_value=self.synchronizer)
         self.driver.name_mapper.aci_mapper.tenant = echo
         self.driver.name_mapper.aci_mapper.network = echo
         self.driver.name_mapper.aci_mapper.subnet = echo
@@ -336,6 +339,24 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                 router['id'], tenant=self._tenant_id), net['id'],
             app_profile_name=self._app_profile(neutron_tenant='onetenant'))
 
+    def test_sync_on_demand(self):
+        self.synchronizer.reset_mock()
+        self.create_network(name=md.APIC_SYNC_NETWORK, is_admin_context=True,
+                            expected_res_status=500)
+        self.assertTrue(self.synchronizer._sync_base.called)
+
+    def test_sync_on_demand_no_admin(self):
+        self.synchronizer.reset_mock()
+        self.create_network(name=md.APIC_SYNC_NETWORK,
+                            expected_res_status=500)
+        self.assertFalse(self.synchronizer._sync_base.called)
+
+    def test_sync_on_demand_not(self):
+        self.synchronizer.reset_mock()
+        self.create_network(name='some_name', is_admin_context=True,
+                            expected_res_status=201)
+        self.assertFalse(self.synchronizer._sync_base.called)
+
 
 class MechanismRpcTestCase(ApicML2IntegratedTestBase):
 
@@ -517,7 +538,9 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.mock_apic_manager_login_responses()
         self.driver = md.APICMechanismDriver()
         self.driver.synchronizer = None
-        md.APICMechanismDriver.get_base_synchronizer = mock.Mock()
+        self.synchronizer = mock.Mock()
+        md.APICMechanismDriver.get_base_synchronizer = mock.Mock(
+            return_value=self.synchronizer)
         self.driver.initialize()
         self.driver.vif_type = 'test-vif_type'
         self.driver.cap_port_filter = 'test-cap_port_filter'
