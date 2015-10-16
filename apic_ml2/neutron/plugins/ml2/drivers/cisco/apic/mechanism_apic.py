@@ -573,8 +573,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         elif self._is_port_bound(port) and not self._is_apic_network_type(
                 context):
             self._perform_path_port_operations(context, port)
-        if self._is_nat_enabled_on_ext_net(context.network.current):
-            self._notify_ports_due_to_router_update(port)
+        self._notify_ports_due_to_router_update(port)
 
     def _delete_contract(self, context):
         port = context.current
@@ -683,8 +682,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             self._delete_contract(context)
             if self._is_nat_enabled_on_ext_net(network):
                 self._delete_shadow_ext_net_for_nat(context, port, network)
-        if self._is_nat_enabled_on_ext_net(network):
-            self._notify_ports_due_to_router_update(port)
+        self._notify_ports_due_to_router_update(port)
 
     @sync_init
     def create_network_postcommit(self, context):
