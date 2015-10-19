@@ -52,6 +52,7 @@ install -p -D -m 0644 rpm/%{service_agent} %{buildroot}/%{_unitdir}/%{service_ag
         /bin/systemctl daemon-reload >dev/null || :
     fi
 %endif
+apic-ml2-db-manage --config-file /etc/neutron/neutron.conf upgrade head
 
 %preun
 %if 0%{?systemd_preun:1}
