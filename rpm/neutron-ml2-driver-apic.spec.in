@@ -1,5 +1,6 @@
 %global release_name kilo
 %define host_agent neutron-cisco-apic-host-agent.service
+%define service_agent neutron-cisco-apic-service-agent.service
 %define version_py @VERSION_PY@
 
 Name:		neutron-ml2-driver-apic
@@ -85,6 +86,7 @@ install -p -D -m 0644 rpm/%{service_agent} %{buildroot}/%{_unitdir}/%{service_ag
 %{python2_sitelib}/neutron_ml2_driver_apic-%%{version_py}*.egg-info
 %{_bindir}/apic-ml2-db-manage
 %{_bindir}/neutron-cisco-apic-host-agent
+%{_bindir}/neutron-cisco-apic-service-agent
 %{_bindir}/apic-ns-metadata-proxy
 %{_unitdir}/%{host_agent}
 %{_unitdir}/%{service_agent}
