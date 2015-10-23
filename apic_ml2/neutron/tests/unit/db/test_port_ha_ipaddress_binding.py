@@ -10,7 +10,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import mock
 from neutron import context
+from neutron import manager
 from neutron.openstack.common import importutils
 from neutron.tests.unit import testlib_api
 from oslo.db import exception as exc
@@ -61,6 +63,8 @@ class PortToHAIPAddressBindingTestCase(testlib_api.SqlTestCase):
         self.port1 = self.plugin.create_port(self.context, self.port1_data)
         self.port2 = self.plugin.create_port(self.context, self.port2_data)
         self.port_haip = ha.PortForHAIPAddress()
+        manager.NeutronManager.get_plugin = mock.Mock()
+        manager.NeutronManager.get_plugin.return_value = self.plugin
 
     def test_set_and_get_port_to_ha_ip_binding(self):
         # Test new HA IP address to port binding can be created
@@ -134,3 +138,27 @@ class PortToHAIPAddressBindingTestCase(testlib_api.SqlTestCase):
         result = self.port_haip.delete_port_id_for_ha_ipaddress("fake",
             self.ha_ip1)
         self.assertEqual(0, result)
+
+    def test_ip_owner_update(self):
+        mixin = ha.HAIPOwnerDbMixin()
+        ip_owner_info = {'port': self.port1['id'],
+                         'ip_address_v4': self.ha_ip1}
+
+        # set new owner
+        ports = mixin.update_ip_owner(ip_owner_info)
+        obj = mixin.ha_ip_handler.get_port_for_ha_ipaddress(
+            self.ha_ip1, self.port1['network_id'])
+        self.assertEqual(self.port1['id'], obj['port_id'])
+        self.assertTrue(self.port1['id'] in ports)
+
+        # update owner
+        self.port2_data['port']['id'] = 'fake-port3-id'
+        self.port2_data['port']['network_id'] = self.port1['network_id']
+        self.port2_data['port']['mac_address'] = 'fake-mac-3'
+        port3 = self.plugin.create_port(self.context, self.port2_data)
+
+        ip_owner_info['port'] = port3['id']
+        ports = mixin.update_ip_owner(ip_owner_info)
+        obj = mixin.ha_ip_handler.get_port_for_ha_ipaddress(
+            self.ha_ip1, port3['network_id'])
+        self.assertEqual(port3['id'], obj['port_id'])
