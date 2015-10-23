@@ -22,9 +22,9 @@ from neutron.db import l3_db
 from neutron.db import l3_dvr_db
 from neutron.extensions import l3
 from neutron import manager
-from neutron.openstack.common import excutils
-from neutron.openstack.common import log as logging
 from neutron.plugins.common import constants
+from oslo_log import log as logging
+from oslo_utils import excutils
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import mechanism_apic
 

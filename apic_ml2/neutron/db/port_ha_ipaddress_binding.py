@@ -20,10 +20,10 @@ from neutron.db import api as db_api
 from neutron.db import model_base
 from neutron.db import models_v2
 from neutron import manager
-from neutron.openstack.common import log
-from oslo.db import exception as db_exc
+from oslo_db import exception as db_exc
+from oslo_log import log as logging
 
-LOG = log.getLogger(__name__)
+LOG = logging.getLogger(__name__)
 
 
 class HAIPAddressToPortAssocation(model_base.BASEV2):

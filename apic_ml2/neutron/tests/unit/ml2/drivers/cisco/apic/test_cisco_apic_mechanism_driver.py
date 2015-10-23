@@ -31,9 +31,9 @@ from neutron import manager
 from neutron.plugins.ml2.drivers.cisco.apic import apic_model
 from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron.tests import base
-from neutron.tests.unit import test_db_plugin as test_plugin
-from neutron.tests.unit import test_extensions
-from oslo.db import exception as db_exc
+from neutron.tests.unit.api import test_extensions
+from neutron.tests.unit.db import test_db_base_plugin_v2 as test_plugin
+from oslo_db import exception as db_exc
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
     mechanism_apic as md)

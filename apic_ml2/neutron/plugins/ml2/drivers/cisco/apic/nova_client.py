@@ -10,10 +10,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron.openstack.common import log as logging
+import novaclient.client as nclient
 from novaclient import exceptions as nova_exceptions
-import novaclient.v1_1.client as nclient
-from oslo.config import cfg
+from oslo_config import cfg
+from oslo_log import log as logging
 
 LOG = logging.getLogger(__name__)
 

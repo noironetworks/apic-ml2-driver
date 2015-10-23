@@ -27,8 +27,6 @@ from neutron.common import topics
 from neutron import context as nctx
 from neutron.extensions import portbindings
 from neutron import manager
-from neutron.openstack.common import lockutils
-from neutron.openstack.common import log
 from neutron.plugins.common import constants
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers.cisco.apic import apic_model
@@ -38,7 +36,9 @@ from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron.plugins.ml2 import models
 from opflexagent import constants as ofcst
 from opflexagent import rpc as o_rpc
-from oslo.config import cfg
+from oslo_concurrency import lockutils
+from oslo_config import cfg
+from oslo_log import log as logging
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_sync
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config
@@ -46,7 +46,7 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import nova_client
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import rpc as t_rpc
 
 
-LOG = log.getLogger(__name__)
+LOG = logging.getLogger(__name__)
 APIC_SYNC_NETWORK = 'apic-sync-network'
 _apic_driver_instance = None
 
@@ -141,7 +141,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             # Force scope names to False
             apic_config.scope_names = False
         APICMechanismDriver.apic_manager = apic_manager.APICManager(
-            apic_model.ApicDbModel(), log, network_config, apic_config,
+            apic_model.ApicDbModel(), logging, network_config, apic_config,
             keyclient_param, keystone_authtoken, apic_system_id)
         return APICMechanismDriver.apic_manager
 

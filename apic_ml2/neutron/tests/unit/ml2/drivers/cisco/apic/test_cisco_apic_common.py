@@ -20,7 +20,7 @@ import requests
 from neutron import context
 from neutron.plugins.ml2 import config  # noqa
 from neutron.tests import base
-from oslo.config import cfg
+from oslo_config import cfg
 import webob
 
 OK = requests.codes.ok

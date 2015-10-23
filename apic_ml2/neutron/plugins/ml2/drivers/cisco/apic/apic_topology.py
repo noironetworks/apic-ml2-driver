@@ -19,7 +19,8 @@ import sys
 import eventlet
 
 eventlet.monkey_patch()
-from oslo.config import cfg
+from oslo_config import cfg
+from oslo_log import log as logging
 
 from neutron.agent.common import config
 from neutron.agent.linux import ip_lib
@@ -28,9 +29,8 @@ from neutron.common import config as common_cfg
 from neutron.common import rpc
 from neutron.common import utils as neutron_utils
 from neutron.db import agents_db
+from neutron.i18n import _LE, _LI
 from neutron import manager
-from neutron.openstack.common.gettextutils import _LE, _LI
-from neutron.openstack.common import log as logging
 from neutron.openstack.common import periodic_task
 from neutron.openstack.common import service as svc
 from neutron import service

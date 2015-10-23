@@ -13,9 +13,9 @@
 import mock
 from neutron import context
 from neutron import manager
-from neutron.openstack.common import importutils
 from neutron.tests.unit import testlib_api
-from oslo.db import exception as exc
+from oslo_db import exception as exc
+from oslo_utils import importutils
 
 from apic_ml2.neutron.db import port_ha_ipaddress_binding as ha
 

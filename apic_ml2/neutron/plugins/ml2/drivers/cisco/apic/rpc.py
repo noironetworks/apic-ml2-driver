@@ -16,16 +16,15 @@
 import eventlet
 
 eventlet.monkey_patch()
-from oslo.concurrency import lockutils
-from oslo.db import exception as db_exc
 from oslo import messaging
+from oslo_concurrency import lockutils
+from oslo_db import exception as db_exc
+from oslo_log import log as logging
 
-from neutron.common import rpc
 from neutron import context as nctx
 from neutron.db import api as db_api
 from neutron.extensions import providernet as api
 from neutron import manager
-from neutron.openstack.common import log as logging
 from neutron.plugins.common import constants
 from neutron.plugins.ml2.drivers.cisco.apic import apic_model
 from neutron.plugins.ml2.drivers import type_vlan  # noqa
@@ -180,7 +179,7 @@ class ApicTopologyRpcCallbackMechanism(ApicTopologyRpcCallback):
             host=host, module=module, port=port).all()
 
 
-class ApicTopologyServiceNotifierApi(rpc.RpcProxy):
+class ApicTopologyServiceNotifierApi(object):
 
     RPC_API_VERSION = '1.1'
 
