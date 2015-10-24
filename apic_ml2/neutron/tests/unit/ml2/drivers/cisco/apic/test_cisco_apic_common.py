@@ -34,6 +34,7 @@ APIC_TENANT = 'citizen14'
 APIC_NETWORK = 'network99'
 APIC_NETWORK_PRE = 'network_pre'
 APIC_NETWORK_NO_NAT = 'network_no_nat'
+APIC_NETWORK_HOST_SNAT = 'network-host-snat'
 APIC_EXT_EPG = 'external_epg'
 APIC_NETNAME = 'net99name'
 APIC_SUBNET = '10.3.2.1/24'
@@ -92,6 +93,8 @@ SERVICE_PEER_CHASSIS = 'topology/pod-1/node-' + APIC_EXT_SWITCH
 SERVICE_PEER_PORT_LOCAL = 'Eth%s/%s' % (APIC_EXT_MODULE, APIC_EXT_PORT)
 SERVICE_PEER_PORT_DESC = ('topology/pod-1/paths-%s/pathep-[%s]' %
                           (APIC_EXT_SWITCH, SERVICE_PEER_PORT_LOCAL.lower()))
+
+HOST_POOL_CIDR = "192.168.0.1/24"
 
 
 class ControllerMixin(object):
@@ -284,6 +287,14 @@ class ConfigMixin(object):
                 'cidr_exposed': APIC_EXT_CIDR_EXPOSED,
                 'gateway_ip': APIC_EXT_GATEWAY_IP,
                 'enable_nat': 'False',
+            },
+            APIC_NETWORK_HOST_SNAT + '-name': {
+                'switch': APIC_EXT_SWITCH,
+                'port': APIC_EXT_MODULE + '/' + APIC_EXT_PORT,
+                'encap': APIC_EXT_ENCAP,
+                'cidr_exposed': APIC_EXT_CIDR_EXPOSED,
+                'gateway_ip': APIC_EXT_GATEWAY_IP,
+                'host_pool_cidr': HOST_POOL_CIDR,
             },
         }
         self.mocked_parser = mock.patch.object(
