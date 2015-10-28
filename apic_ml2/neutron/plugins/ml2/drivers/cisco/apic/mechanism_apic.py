@@ -505,8 +505,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 context, router_id, openstack_owner=router['tenant_id'])
             cid = self.apic_manager.get_router_contract(
                 arouter_id, owner=vrf['aci_tenant'])
-            if router_info.get('preexisting') and ('external_epg' in
-                                                   router_info):
+            if self._is_pre_existing(router_info) and ('external_epg' in
+                                                       router_info):
                 l3out_name_pre = self.name_mapper.pre_existing(
                     context, network['name'])
                 external_epg = self.name_mapper.pre_existing(
@@ -1035,7 +1035,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         if not net_info:
             return
 
-        if net_info.get('preexisting'):
+        if self._is_pre_existing(net_info):
             l3out_name_pre = self.name_mapper.pre_existing(
                 context, network['name'])
             # determine l3-out tenant and private VRF by querying ACI
@@ -1062,7 +1062,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             external_vrf = vrf['aci_name']
             external_vrf_tenant = vrf['aci_tenant']
 
-        if not net_info.get('preexisting'):
+        if not self._is_pre_existing(net_info):
             self.apic_manager.ensure_context_enforced(
                 owner=external_vrf_tenant, ctx_id=external_vrf)
             with self.apic_manager.apic.transaction() as trs:
@@ -1152,7 +1152,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         if not net_info:
             return
 
-        if net_info.get('preexisting'):
+        if self._is_pre_existing(net_info):
             l3out_name_pre = self.name_mapper.pre_existing(
                 context, network['name'])
             # determine l3-out tenant and private VRF by querying ACI
@@ -1186,7 +1186,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             # Also delete L3Out and VRF if not pre-existing
             contract_name = self._get_ext_allow_all_contract(network)
 
-            if not net_info.get('preexisting'):
+            if not self._is_pre_existing(net_info):
                 # delete external VRF and L3Out+children
                 self.apic_manager.delete_external_routed_network(
                     l3out_name, owner=l3out_tenant)
@@ -1211,7 +1211,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         l3out_name = self.name_mapper.l3_out(
             context, network['id'], openstack_owner=network['tenant_id'])
         network_tenant = self._get_network_aci_tenant(network)
-        if ext_info and ext_info.get('preexisting'):
+        if ext_info and self._is_pre_existing(ext_info):
             l3out_name_pre = self.name_mapper.pre_existing(
                 context, network['name'])
             l3out_info = self._query_l3out_info(
@@ -1253,3 +1253,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 if ctx_dn[2].startswith('ctx-'):
                     info['vrf_name'] = ctx_dn[2][4:]
         return info
+
+    def _is_pre_existing(self, ext_info):
+        opt = ext_info.get('preexisting', 'false')
+        return opt.lower() in ['true', 'yes', '1']

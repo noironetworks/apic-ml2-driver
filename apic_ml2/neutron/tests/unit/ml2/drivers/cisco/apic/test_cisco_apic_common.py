@@ -274,7 +274,7 @@ class ConfigMixin(object):
                 'encap': APIC_EXT_ENCAP,
                 'cidr_exposed': APIC_EXT_CIDR_EXPOSED,
                 'gateway_ip': APIC_EXT_GATEWAY_IP,
-                'preexisting': True,
+                'preexisting': 'True',
                 'external_epg': APIC_EXT_EPG,
             },
             APIC_NETWORK_NO_NAT + '-name': {

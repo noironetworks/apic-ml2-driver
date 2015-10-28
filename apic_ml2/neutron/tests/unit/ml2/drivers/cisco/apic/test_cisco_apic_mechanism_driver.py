@@ -1380,7 +1380,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
 
     def test_no_nat_gw_port_precommit(self):
         self.external_network_dict[mocked.APIC_NETWORK_NO_NAT + '-name'][
-            'preexisting'] = True
+            'preexisting'] = 'True'
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
                                             mocked.APIC_NETWORK_NO_NAT,
                                             TEST_SEGMENT1, external=True)
