@@ -336,7 +336,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         if port['device_owner'].startswith('compute:') and port['device_id']:
             vm = nova_client.NovaClient().get_server(port['device_id'])
             details['vm-name'] = vm.name if vm else port['device_id']
-            self._add_ip_mapping_details(context, port, details)
+        self._add_ip_mapping_details(context, port, details)
         self._add_network_details(context, port, details)
         if self._is_nat_enabled_on_ext_net(network):
             # PTG name is different
