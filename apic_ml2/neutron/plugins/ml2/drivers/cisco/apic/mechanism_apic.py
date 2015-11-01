@@ -329,7 +329,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         def is_port_promiscuous(port):
             return port['device_owner'] == n_constants.DEVICE_OWNER_DHCP
 
-        segment = port_context.bound_segment or {}
+        segment = port_context.top_bound_segment or {}
         details = {'device': kwargs.get('device'),
                    'port_id': port_id,
                    'mac_address': port['mac_address'],
@@ -563,13 +563,13 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 context, network['id'], openstack_owner=network['tenant_id'])
             epg_name = self._get_ext_epg_for_ext_net(l3out_name)
         # Get segmentation id
-        if not context.bound_segment:
+        if not context.top_bound_segment:
             LOG.debug("Port %s is not bound to a segment", port)
             return
         seg = None
-        if (context.bound_segment.get(api.NETWORK_TYPE)
+        if (context.top_bound_segment.get(api.NETWORK_TYPE)
                 in [constants.TYPE_VLAN]):
-            seg = context.bound_segment.get(api.SEGMENTATION_ID)
+            seg = context.top_bound_segment.get(api.SEGMENTATION_ID)
         # hosts on which this vlan is provisioned
         host = context.host
         # Create a static path attachment for the host/epg/switchport combo
