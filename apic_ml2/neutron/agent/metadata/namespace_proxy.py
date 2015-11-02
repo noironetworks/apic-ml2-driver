@@ -28,6 +28,7 @@ from neutron.common import config
 from neutron.common import utils
 from neutron.openstack.common import log as logging
 from neutron import wsgi
+from oslo.serialization import jsonutils
 
 LOG = logging.getLogger(__name__)
 
@@ -53,12 +54,14 @@ class NetworkMetadataProxyHandler(object):
     accessible within the isolated tenant context.
     """
 
-    def __init__(self, network_id=None, router_id=None):
+    def __init__(self, network_id=None, router_id=None, domain_id=None):
         self.network_id = network_id
         self.router_id = router_id
+        self.domain_id = domain_id
 
-        if network_id is None and router_id is None:
-            msg = _('network_id and router_id are None. One must be provided.')
+        if network_id is None and router_id is None and domain_id is None:
+            msg = _('network_id, router_id, and domain_id are None. '
+                    'One of them must be provided.')
             raise ValueError(msg)
 
     @webob.dec.wsgify(RequestClass=webob.Request)
@@ -76,13 +79,39 @@ class NetworkMetadataProxyHandler(object):
                     'Please try your request again.')
             return webob.exc.HTTPInternalServerError(explanation=unicode(msg))
 
+    def get_network_id(self, domain_id, remote_address):
+        filedir = '/var/lib/neutron/opflex_agent'
+        filename = 'domain_nets.state'
+        fqfn = '%s/%s.state' % (filedir, filename)
+
+        nets = None
+        try:
+            with open(fqfn, "r") as f:
+                nets = jsonutils.load(f)
+        except Exception as e:
+            LOG.warn("Exception in reading file: %s" % str(e))
+
+        if nets:
+            if domain_id in nets:
+                if remote_address in nets[domain_id]:
+                    return nets[domain_id][remote_address]
+        LOG.warn("IP address not found: domain=%s, addr=%s" % (
+                 domain_id, remote_address))
+        return None
+
     def _proxy_request(self, remote_address, method, path_info,
                        query_string, body):
         headers = {
             'X-Forwarded-For': remote_address,
         }
 
-        if self.router_id:
+        if self.domain_id:
+            network_id = self.get_network_id(self.domain_id, remote_address)
+            if network_id:
+                headers['X-Neutron-Network-ID'] = network_id
+            else:
+                return webob.exc.HTTPNotFound()
+        elif self.router_id:
             headers['X-Neutron-Router-ID'] = self.router_id
         else:
             headers['X-Neutron-Network-ID'] = self.network_id
@@ -127,19 +156,22 @@ class NetworkMetadataProxyHandler(object):
 
 
 class ProxyDaemon(daemon.Daemon):
-    def __init__(self, pidfile, port, network_id=None, router_id=None, host="0.0.0.0"):
-        uuid = network_id or router_id
+    def __init__(self, pidfile, port, network_id=None, router_id=None,
+                 domain_id=None, host="0.0.0.0"):
+        uuid = domain_id or network_id or router_id
         super(ProxyDaemon, self).__init__(pidfile, uuid=uuid)
         self.network_id = network_id
         self.router_id = router_id
+        self.domain_id = domain_id
         self.port = port
         self.host = host
 
     def run(self):
         handler = NetworkMetadataProxyHandler(
             self.network_id,
-            self.router_id)
-        proxy = wsgi.Server('neutron-network-metadata-proxy')
+            self.router_id,
+            self.domain_id)
+        proxy = wsgi.Server('opflex-network-metadata-proxy')
         proxy.start(handler, self.port, host=self.host)
         proxy.wait()
 
@@ -151,6 +183,9 @@ def main():
                           'proxied.')),
         cfg.StrOpt('router_id',
                    help=_('Router that will have connected instances\' '
+                          'metadata proxied.')),
+        cfg.StrOpt('domain_id',
+                   help=_('L3 domain that will have connected instances\' '
                           'metadata proxied.')),
         cfg.StrOpt('pid_file',
                    help=_('Location of pid file of this process.')),
@@ -180,6 +215,7 @@ def main():
                         cfg.CONF.metadata_port,
                         network_id=cfg.CONF.network_id,
                         router_id=cfg.CONF.router_id,
+                        domain_id=cfg.CONF.domain_id,
                         host=cfg.CONF.metadata_host)
 
     if cfg.CONF.daemonize:
