@@ -18,8 +18,10 @@ import copy
 from apicapi import apic_manager
 from keystoneclient.v2_0 import client as keyclient
 import netaddr
+from neutron.api.v2 import attributes
 from neutron.agent.linux import dhcp
 from neutron.agent import securitygroups_rpc
+from neutron.db import db_base_plugin_v2 as n_db
 from neutron.common import constants as n_constants
 from neutron.common import exceptions as n_exc
 from neutron.common import rpc as n_rpc
@@ -48,6 +50,11 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import rpc as t_rpc
 
 LOG = log.getLogger(__name__)
 APIC_SYNC_NETWORK = 'apic-sync-network'
+HOST_SNAT_POOL = 'host-snat-pool-for-internal-use'
+HOST_SNAT_POOL_PORT = 'host-snat-pool-port-for-internal-use'
+DEVICE_OWNER_SNAT_PORT = 'host-snat-pool-port-device-owner-internal-use'
+n_db.AUTO_DELETE_PORT_OWNERS.append(DEVICE_OWNER_SNAT_PORT)
+DEVICE_ID_SNAT_PORT = 'host-snat-pool-port-device-id-internal-use'
 _apic_driver_instance = None
 
 
@@ -168,6 +175,12 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             self._l3_plugin = plugins.get('L3_ROUTER_NAT')
         return self._l3_plugin
 
+    @property
+    def db_plugin(self):
+        if not self._db_plugin:
+            self._db_plugin = n_db.NeutronDbPluginV2()
+        return self._db_plugin
+
     def __init__(self):
         sg_enabled = securitygroups_rpc.is_firewall_enabled()
         self.vif_details = {portbindings.CAP_PORT_FILTER: sg_enabled,
@@ -230,6 +243,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         global _apic_driver_instance
         _apic_driver_instance = self
         self._l3_plugin = None
+        self._db_plugin = None
 
     def _setup_opflex_rpc_listeners(self):
         self.opflex_endpoints = [o_rpc.GBPServerRpcCallback(self)]
@@ -346,6 +360,70 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             self.get_vrf_details(context, vrf_id=network['tenant_id']))
         return details
 
+    def _allocate_snat_ip_for_host_and_ext_net(self, context, host, network):
+        """Allocate SNAT IP for a host for an external network."""
+        snat_subnets = self.db_plugin.get_subnets(context,
+                filters={'name': [HOST_SNAT_POOL],
+                         'network_id': [network['id']]})
+        if not snat_subnets:
+            LOG.info(_("Subnet for host-SNAT-pool could not be found "
+                        "for external network %(net_id)s. SNAT will not "
+                        "function on this network"), {'net_id': network['id']})
+        else:
+            snat_ports = self.db_plugin.get_ports(context,
+                    filters={'name': [HOST_SNAT_POOL_PORT],
+                             'network_id': [network['id']],
+                             'binding:host_id': [host]})
+            snat_ip = None
+            if not snat_ports:
+                # Note that the following port is created for only getting
+                # an IP assignment in the
+                attrs = {'port': {'device_id': DEVICE_ID_SNAT_PORT,
+                                 'device_owner': DEVICE_OWNER_SNAT_PORT,
+                                 'binding:host_id': host,
+                                 'binding:vif_type':
+                                 portbindings.VIF_TYPE_UNBOUND,
+                                 'tenant_id': network['tenant_id'],
+                                 'name': HOST_SNAT_POOL_PORT,
+                                 'network_id': network['id'],
+                                 'mac_address': attributes.ATTR_NOT_SPECIFIED,
+                                 'fixed_ips': [{'subnet_id':
+                                                snat_subnets[0]['id']}],
+                                 'admin_state_up': False,
+                                }
+                        }
+                port = self.db_plugin.create_port(context, attrs)
+                # The auto deletion of port logic looks for the port binding
+                # hence we populate the port binding info here
+                binding = models.PortBinding(host=host,
+                                             vnic_type=
+                                             portbindings.VNIC_NORMAL,
+                                             profile={},
+                                             vif_type=
+                                             portbindings.VIF_TYPE_UNBOUND,
+                                             vif_details='')
+                port_context = driver_context.PortContext(
+                    manager.NeutronManager.get_plugin(), context, port,
+                    network, binding)
+                self.bind_port(port_context)
+                if port and port['fixed_ips'][0]:
+                    snat_ip = port['fixed_ips'][0]['ip_address']
+                else:
+                    LOG.warning(_("SNAT-port creation failed for subnet "
+                                  "%(subnet_id)s on external network "
+                                  "%(net_id)s. SNAT will not function on"
+                                  "host %(host)s for this network"),
+                                {'subnet_id': snat_subnets[0]['id'],
+                                 'net_id': network['id'], 'host': host})
+            else:
+                snat_ip = snat_ports[0]['fixed_ips'][0]['ip_address']
+
+            return {'external_segment_name': network['name'],
+                    'host_snat_ip': snat_ip,
+                    'gateway_ip': snat_subnets[0]['gateway_ip'],
+                    'prefixlen':
+                    netaddr.IPNetwork(snat_subnets[0]['cidr']).prefixlen}
+
     def _add_ip_mapping_details(self, context, port, details):
         """Add information about IP mapping for DNAT/SNAT."""
         l3plugin = manager.NeutronManager.get_service_plugins().get(
@@ -377,6 +455,12 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             f['nat_epg_tenant'] = epg_tenant
             fip_ext_nets.add(net['id'])
         ipms = []
+        # Populate host_snat_ips in the format:
+        # [ {'external_segment_name': <ext_segment_name1>,
+        #    'host_snat_ip': <ip_addr>, 'gateway_ip': <gateway_ip>,
+        #    'prefixlen': <prefix_length_of_host_snat_pool_subnet>},
+        #    {..}, ... ]
+        host_snat_ips = []
         for net_id, net in ext_nets.iteritems():
             if (net_id in fip_ext_nets or
                     not self._is_connected_to_ext_net(context, port, net)):
@@ -392,7 +476,14 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                          'nat_epg_tenant': epg_tenant,
                          'nat_epg_app_profile': str(
                              self._get_network_app_profile(network))})
+            host_snat_ip_allocation = (
+                self._allocate_snat_ip_for_host_and_ext_net(
+                    context, details['host'], network))
+            if host_snat_ip_allocation:
+                host_snat_ips.append(host_snat_ip_allocation)
+
         details['floating_ip'] = fips
+        details['host_snat_ips'] = host_snat_ips
         details['ip_mapping'] = ipms
 
     def _is_connected_to_ext_net(self, context, port, ext_net):
@@ -1133,6 +1224,35 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                     self.apic_manager.ensure_subnet_created_on_apic(
                         tenant_id, ext_bd_name, gw + '/' + plen,
                         transaction=trs)
+                    # Create a new Neutron subnet corresponding to the
+                    # host_pool_cidr.
+                    # Each host that needs to provide SNAT for this
+                    # external network will get port allocation and IP
+                    # from this subnet.
+                    host_cidr = net_info.get('host_pool_cidr')
+                    host_cidir_ver = netaddr.IPNetwork(host_cidr).version
+                    attrs = {'subnet': {'name': HOST_SNAT_POOL,
+                                        'cidr': host_cidr,
+                                        'network_id': network['id'],
+                                        'ip_version': host_cidir_ver,
+                                        'enable_dhcp': False,
+                                        'gateway_ip': gw,
+                                        'allocation_pools':
+                                        attributes.ATTR_NOT_SPECIFIED,
+                                        'dns_nameservers':
+                                        attributes.ATTR_NOT_SPECIFIED,
+                                        'host_routes':
+                                        attributes.ATTR_NOT_SPECIFIED,
+                                        }
+                            }
+                    subnet = self.db_plugin.create_subnet(context, attrs)
+                    if not subnet:
+                        LOG.warning(_("Subnet %(pool) creation failed for "
+                                      "external network %(net_id)s. SNAT "
+                                      "will not function for this network"),
+                                    {'pool': HOST_SNAT_POOL,
+                                     'net_id': network['id']})
+
             # make EPG use allow-everything contract
             self.apic_manager.set_contract_for_epg(
                 tenant_id, ext_epg_name, contract_name,
