@@ -13,6 +13,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import base64
+import hashlib
+import hmac
 import sys
 
 import mock
@@ -34,6 +37,7 @@ from neutron.tests import base
 from neutron.tests.unit.api import test_extensions
 from neutron.tests.unit.db import test_db_base_plugin_v2 as test_plugin
 from oslo_db import exception as db_exc
+from oslo_serialization import jsonutils as json
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
     mechanism_apic as md)
@@ -125,6 +129,10 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
         self.l3_plugin = manager.NeutronManager.get_service_plugins()[
             'L3_ROUTER_NAT']
         l3_apic.apic_mapper.mapper_context = self.fake_transaction
+        self.driver.apic_manager.db.get_switch_and_port_for_host = (
+                mock.Mock(return_value=[(201, 5, 31)]))
+        sys.modules['apicapi'].exceptions.ApicHostNotConfigured = Exception
+        self.driver.apic_manager.vmm_shared_secret = 'dirtylittlesecret'
         self.addCleanup(self.mgr.reset_mock)
 
     def _bind_port_to_host(self, port_id, host):
@@ -356,6 +364,46 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
         self.create_network(name='some_name', is_admin_context=True,
                             expected_res_status=201)
         self.assertFalse(self.synchronizer._sync_base.called)
+
+    def test_attestation(self):
+        net = self.create_network(
+            tenant_id='onetenant', expected_res_status=201)['network']
+        expected_attestation = {'ports': [{'switch': '201', 'port': '5/31'}],
+                                'endpoint-group': {
+                                    'policy-space-name': self._tenant(
+                                        neutron_tenant='onetenant'),
+                                    'endpoint-group-name': net['id']}}
+        sub = self.create_subnet(
+            tenant_id='onetenant', network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4)
+        with self.port(subnet=sub, tenant_id='onetenant') as p1:
+            p1 = p1['port']
+            self._bind_port_to_host(p1['id'], 'h1')
+            self.driver._add_ip_mapping_details = mock.Mock()
+            # Mock switch, module and port for host
+            details = self._get_gbp_details(p1['id'], 'h1')
+            # Test attestation exists
+            self.assertTrue('attestation' in details)
+            self.assertEqual(1, len(details['attestation']))
+            observed_attestation = base64.b64decode(
+                details['attestation'][0]['validator'])
+            # It's a json string
+            observed_attestation_copy = observed_attestation
+            # Unmarshal
+            observed_attestation = json.loads(observed_attestation)
+            del observed_attestation['timestamp']
+            del observed_attestation['validity']
+            self.assertEqual(expected_attestation, observed_attestation)
+            self.assertEqual(details['attestation'][0]['name'], p1['id'])
+
+            # Validate decrypting
+            observed_mac = base64.b64decode(
+                details['attestation'][0]['validator-mac'])
+            expected_mac =hmac.new(
+                'dirtylittlesecret', msg=observed_attestation_copy,
+                digestmod=hashlib.sha256).digest()
+            # Validation succeeded
+            self.assertEqual(expected_mac, observed_mac)
 
 
 class MechanismRpcTestCase(ApicML2IntegratedTestBase):
@@ -1447,9 +1495,9 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
 
 class ApicML2IntegratedTestCaseSingleVRF(ApicML2IntegratedTestCase):
 
-    def setUp(self, plugin_name=None, service_plugins=None):
+    def setUp(self, service_plugins=None):
         super(ApicML2IntegratedTestCaseSingleVRF, self).setUp(
-            plugin_name, service_plugins)
+            PLUGIN_NAME, service_plugins)
         self.driver.per_tenant_context = True
 
     def test_add_router_interface_on_shared_net_by_subnet(self):
@@ -1497,11 +1545,11 @@ class ApicML2IntegratedTestCaseNoSingleTenant(ApicML2IntegratedTestCase):
 class ApicML2IntegratedTestCaseNoSingleTenantSingleContext(
         ApicML2IntegratedTestCaseSingleVRF):
 
-    def setUp(self, plugin_name=None, service_plugins=None):
+    def setUp(self, service_plugins=None):
         self.override_conf('single_tenant_mode', False,
                            'ml2_cisco_apic')
         super(ApicML2IntegratedTestCaseNoSingleTenantSingleContext,
-              self).setUp(plugin_name, service_plugins)
+              self).setUp(service_plugins)
 
 
 class TestCiscoApicMechDriverPerTenantVRF(TestCiscoApicMechDriver):
