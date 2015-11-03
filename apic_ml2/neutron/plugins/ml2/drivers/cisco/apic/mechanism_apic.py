@@ -43,6 +43,7 @@ from opflexagent import rpc as o_rpc
 from oslo.config import cfg
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_sync
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import attestation
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import nova_client
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import rpc as t_rpc
@@ -244,6 +245,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         _apic_driver_instance = self
         self._l3_plugin = None
         self._db_plugin = None
+        self.attestator = attestation.EndpointAttestator(self.apic_manager)
 
     def _setup_opflex_rpc_listeners(self):
         self.opflex_endpoints = [o_rpc.GBPServerRpcCallback(self)]
@@ -358,6 +360,13 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 details['endpoint_group_name'])
         details.update(
             self.get_vrf_details(context, vrf_id=network['tenant_id']))
+        try:
+            details['attestation'] = self.attestator.get_endpoint_attestation(
+                port_id, details['host'], details['endpoint_group_name'],
+                details['ptg_tenant'])
+        except KeyError as e:
+            LOG.debug(e.message)
+            LOG.warning("EP attestation not supported by APICAPI.")
         return details
 
     def _allocate_snat_ip_for_host_and_ext_net(self, context, host, network):
