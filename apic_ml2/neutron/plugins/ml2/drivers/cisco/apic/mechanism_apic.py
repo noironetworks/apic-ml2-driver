@@ -361,11 +361,11 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         details.update(
             self.get_vrf_details(context, vrf_id=network['tenant_id']))
         try:
-            self.apic_manager.vmm_shared_secred
             details['attestation'] = self.attestator.get_endpoint_attestation(
                 port_id, details['host'], details['endpoint_group_name'],
                 details['ptg_tenant'])
-        except KeyError:
+        except KeyError as e:
+            LOG.debug(e.message)
             LOG.warning("EP attestation not supported by APICAPI.")
         return details
 
