@@ -83,7 +83,7 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
     def _update_router_gw_info(self, context, router_id, info, router=None):
         super(ApicL3ServicePlugin, self)._update_router_gw_info(
             context, router_id, info, router)
-        if 'network_id' in info:
+        if info and 'network_id' in info:
             filters = {'device_id': [router_id],
                        'device_owner': [q_const.DEVICE_OWNER_ROUTER_GW],
                        'network_id': [info['network_id']]}
