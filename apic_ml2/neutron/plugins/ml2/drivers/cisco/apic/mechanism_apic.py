@@ -364,9 +364,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             details['attestation'] = self.attestator.get_endpoint_attestation(
                 port_id, details['host'], details['endpoint_group_name'],
                 details['ptg_tenant'])
-        except KeyError as e:
-            LOG.debug(e.message)
-            LOG.warning("EP attestation not supported by APICAPI.")
+        except AttributeError:
+            pass    # EP attestation not supported by APICAPI
         return details
 
     def _allocate_snat_ip_for_host_and_ext_net(self, context, host, network):
@@ -1254,7 +1253,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                                         attributes.ATTR_NOT_SPECIFIED,
                                         }
                             }
-                    subnet = self.db_plugin.create_subnet(context, attrs)
+                    subnet = self.db_plugin.create_subnet(context._plugin_context,
+                                                          attrs)
                     if not subnet:
                         LOG.warning(_("Subnet %(pool) creation failed for "
                                       "external network %(net_id)s. SNAT "
