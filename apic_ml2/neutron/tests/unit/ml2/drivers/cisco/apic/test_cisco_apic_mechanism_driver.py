@@ -26,9 +26,12 @@ sys.modules["opflexagent"].constants.TYPE_OPFLEX = 'opflex'
 sys.modules["apicapi"].apic_manager.TENANT_COMMON = 'common'
 sys.modules["apicapi"].apic_manager.CONTEXT_SHARED = 'shared'
 
+import netaddr
 from neutron.api import extensions
 from neutron.common import constants as n_constants
 from neutron import context
+from neutron.db import db_base_plugin_v2  # noqa
+from neutron.db import models_v2  # noqa
 from neutron.extensions import portbindings
 from neutron import manager
 from neutron.plugins.ml2.drivers.cisco.apic import apic_model
@@ -1575,6 +1578,166 @@ class TestCiscoApicMechDriverMultiTenantPerTenantVRF(
         self.override_conf('single_tenant_mode', False,
                            'ml2_cisco_apic')
         super(TestCiscoApicMechDriverMultiTenantPerTenantVRF, self).setUp()
+
+
+class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
+
+    def setUp(self):
+        super(TestCiscoApicMechDriverHostSNAT, self).setUp()
+        mocked.ControllerMixin.set_up_mocks(self)
+        mocked.ConfigMixin.set_up_mocks(self)
+        self.mock_apic_manager_login_responses()
+        self.driver = md.APICMechanismDriver()
+        self.driver.synchronizer = None
+        self.synchronizer = mock.Mock()
+        md.APICMechanismDriver.get_base_synchronizer = mock.Mock(
+            return_value=self.synchronizer)
+        self.driver.initialize()
+        self.driver.vif_type = 'test-vif_type'
+        self.driver.cap_port_filter = 'test-cap_port_filter'
+        self.driver.name_mapper.aci_mapper.tenant = echo
+        self.driver.name_mapper.aci_mapper.network = echo
+        self.driver.name_mapper.aci_mapper.subnet = echo
+        self.driver.name_mapper.aci_mapper.port = echo
+        self.driver.name_mapper.aci_mapper.router = echo
+        self.driver.name_mapper.aci_mapper.pre_existing = echo
+        self.driver.name_mapper.aci_mapper.echo = echo
+        self.driver.name_mapper.aci_mapper.app_profile.return_value = (
+            mocked.APIC_AP)
+        self.driver.apic_manager = mock.Mock(
+            name_mapper=mock.Mock(), ext_net_dict=self.external_network_dict)
+
+        self.driver.apic_manager.apic.transaction = self.fake_transaction
+        self.agent = {'configurations': {
+            'opflex_networks': None,
+            'bridge_mappings': {'physnet1': 'br-eth1'}}}
+        self.actual_core_plugin = manager.NeutronManager.get_plugin()
+        mock.patch('neutron.manager.NeutronManager').start()
+        self.driver._l3_plugin = mock.Mock()
+
+        def get_resource(context, resource_id):
+            return {'id': resource_id, 'tenant_id': mocked.APIC_TENANT}
+
+        self.driver._l3_plugin.get_router = get_resource
+
+    def _get_network_context(self, tenant_id, net_id, seg_id=None,
+                             seg_type='vlan', external=False, shared=False):
+        ctx = context.get_admin_context()
+        network = {'id': net_id,
+                   'name': mocked.APIC_NETWORK_HOST_SNAT + '-name',
+                   'tenant_id': tenant_id,
+                   'provider:segmentation_id': seg_id,
+                   'provider:network_type': seg_type,
+                   'shared': shared}
+        if external:
+            network['router:external'] = True
+        ctx.current = network
+        return ctx
+
+    def test_1_port_created_for_host(self):
+        ctx = context.get_admin_context()
+        agent = {'host': 'h1'}
+        agent.update(AGENT_CONF)
+        self.actual_core_plugin.create_or_update_agent(ctx, agent)
+        args = {'network': {'name': mocked.APIC_NETWORK_HOST_SNAT + '-name',
+            'admin_state_up': True, 'shared': True,
+            'status': n_constants.NET_STATUS_ACTIVE,
+            'router:external': True}}
+        db_net = self.driver.db_plugin.create_network(ctx, args)
+        net_ctx = self._get_network_context(ctx.tenant_id,
+                                            db_net['id'],
+                                            TEST_SEGMENT1, external=True)
+        self.driver.create_network_postcommit(net_ctx)
+        net = self.create_network(
+            tenant_id='onetenant', expected_res_status=201, shared=True,
+            is_admin_context=True)['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='10.0.0.0/24',
+            ip_version=4, is_admin_context=True)
+        host_arg = {'binding:host_id': 'h1'}
+        with self.port(subnet=sub, tenant_id='anothertenant',
+                device_owner='compute:', device_id='someid',
+                arg_list=(portbindings.HOST_ID,), **host_arg) as p1:
+            p1 = p1['port']
+            self.assertEqual(net['id'], p1['network_id'])
+            # We need the db_plugin to get invoked from the code being
+            # tested. However, this was earlier mocked out in the setup,
+            # hence we reset it here.
+            manager.NeutronManager.get_plugin.return_value = (
+                    self.driver.db_plugin)
+            self.driver.db_plugin._device_to_port_id = (
+                    self.actual_core_plugin._device_to_port_id)
+            self.driver.db_plugin.get_bound_port_context = (
+                    self.actual_core_plugin.get_bound_port_context)
+            self.driver.db_plugin.get_agents = (
+                    self.actual_core_plugin.get_agents)
+            self.driver.db_plugin.create_or_update_agent = (
+                    self.actual_core_plugin.create_or_update_agent)
+            self.driver.db_plugin._create_or_update_agent = (
+                    self.actual_core_plugin._create_or_update_agent)
+            self.driver._is_nat_enabled_on_ext_net = mock.Mock()
+            self.driver._is_connected_to_ext_net = mock.Mock()
+            self.driver.agent_type = 'Open vSwitch agent'
+            details = self.driver.get_gbp_details(
+                    ctx, device='tap%s' % p1['id'], host='h1')
+            host_snat_ips = details['host_snat_ips']
+            self.assertEqual(1, len(host_snat_ips))
+            self.assertEqual(db_net['name'],
+                    host_snat_ips[0]['external_segment_name'])
+            self.assertEqual('192.168.0.2',
+                    host_snat_ips[0]['host_snat_ip'])
+            self.assertEqual('192.168.0.1',
+                    host_snat_ips[0]['gateway_ip'])
+            self.assertEqual(
+                    netaddr.IPNetwork(mocked.HOST_POOL_CIDR).prefixlen,
+                    host_snat_ips[0]['prefixlen'])
+            snat_ports = self.driver.db_plugin.get_ports(ctx,
+                        filters={'name': [md.HOST_SNAT_POOL_PORT],
+                                 'network_id': [db_net['id']],
+                                 'binding:host_id': ['h1']})
+            self.assertEqual(1, len(snat_ports))
+            # Simulate a second event on the same host for the same external
+            # network to check if the earlier allocated SNAT IP is returned
+            with self.port(subnet=sub, tenant_id='anothertenant',
+                    device_owner='compute:', device_id='someid',
+                    arg_list=(portbindings.HOST_ID,), **host_arg) as p2:
+                p2 = p2['port']
+                self.assertEqual(net['id'], p2['network_id'])
+                details = self.driver.get_gbp_details(
+                        ctx, device='tap%s' % p2['id'], host='h1')
+                host_snat_ips = details['host_snat_ips']
+                self.assertEqual(1, len(host_snat_ips))
+                self.assertEqual(db_net['name'],
+                        host_snat_ips[0]['external_segment_name'])
+                self.assertEqual('192.168.0.2',
+                        host_snat_ips[0]['host_snat_ip'])
+                self.assertEqual('192.168.0.1',
+                    host_snat_ips[0]['gateway_ip'])
+                self.assertEqual(
+                        netaddr.IPNetwork(mocked.HOST_POOL_CIDR).prefixlen,
+                        host_snat_ips[0]['prefixlen'])
+                snat_ports = self.driver.db_plugin.get_ports(ctx,
+                            filters={'name': [md.HOST_SNAT_POOL_PORT],
+                                     'network_id': [db_net['id']],
+                                     'binding:host_id': ['h1']})
+                self.assertEqual(1, len(snat_ports))
+
+    def test_create_external_network_postcommit(self):
+        ctx = context.get_admin_context()
+        args = {'network': {'name': mocked.APIC_NETWORK_HOST_SNAT + '-name',
+            'admin_state_up': True, 'shared': True,
+            'status': n_constants.NET_STATUS_ACTIVE,}}
+        db_net = self.driver.db_plugin.create_network(ctx, args)
+        net_ctx = self._get_network_context(ctx.tenant_id,
+                                            db_net['id'],
+                                            TEST_SEGMENT1, external=True)
+        self.driver.create_network_postcommit(net_ctx)
+        subnets = self.driver.db_plugin.get_subnets(
+                ctx, filters={'name': [md.HOST_SNAT_POOL]})
+        self.assertEqual(1, len(subnets))
+        self.driver.db_plugin.delete_subnet(ctx, subnets[0]['id'])
+        self.driver.delete_network_postcommit(net_ctx)
+        self.driver.db_plugin.delete_network(ctx, db_net['id'])
 
 
 class FakeNetworkContext(object):
