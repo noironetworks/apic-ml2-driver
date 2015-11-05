@@ -34,6 +34,7 @@ from neutron.db import db_base_plugin_v2  # noqa
 from neutron.db import models_v2  # noqa
 from neutron.extensions import portbindings
 from neutron import manager
+from neutron.plugins.ml2 import driver_context
 from neutron.plugins.ml2.drivers.cisco.apic import apic_model
 from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron.tests import base
@@ -1620,7 +1621,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
 
         self.driver._l3_plugin.get_router = get_resource
 
-    def _get_network_context(self, tenant_id, net_id, seg_id=None,
+    def _get_network_context(self, plugin, tenant_id, net_id, seg_id=None,
                              seg_type='vlan', external=False, shared=False):
         ctx = context.get_admin_context()
         network = {'id': net_id,
@@ -1631,8 +1632,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                    'shared': shared}
         if external:
             network['router:external'] = True
-        ctx.current = network
-        return ctx
+        return driver_context.NetworkContext(plugin, ctx, network)
 
     def test_1_port_created_for_host(self):
         ctx = context.get_admin_context()
@@ -1644,7 +1644,8 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
             'status': n_constants.NET_STATUS_ACTIVE,
             'router:external': True}}
         db_net = self.driver.db_plugin.create_network(ctx, args)
-        net_ctx = self._get_network_context(ctx.tenant_id,
+        net_ctx = self._get_network_context(self.actual_core_plugin,
+                                            ctx.tenant_id,
                                             db_net['id'],
                                             TEST_SEGMENT1, external=True)
         self.driver.create_network_postcommit(net_ctx)
@@ -1694,7 +1695,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
             snat_ports = self.driver.db_plugin.get_ports(ctx,
                         filters={'name': [md.HOST_SNAT_POOL_PORT],
                                  'network_id': [db_net['id']],
-                                 'binding:host_id': ['h1']})
+                                 'device_id': ['h1']})
             self.assertEqual(1, len(snat_ports))
             # Simulate a second event on the same host for the same external
             # network to check if the earlier allocated SNAT IP is returned
@@ -1719,8 +1720,38 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                 snat_ports = self.driver.db_plugin.get_ports(ctx,
                             filters={'name': [md.HOST_SNAT_POOL_PORT],
                                      'network_id': [db_net['id']],
-                                     'binding:host_id': ['h1']})
+                                     'device_id': ['h1']})
                 self.assertEqual(1, len(snat_ports))
+            # Now simulate event of a second host
+            host_arg = {'binding:host_id': 'h2'}
+            with self.port(subnet=sub, tenant_id='anothertenant',
+                    device_owner='compute:', device_id='someid',
+                    arg_list=(portbindings.HOST_ID,), **host_arg) as p3:
+                p3 = p3['port']
+                self.assertEqual(net['id'], p3['network_id'])
+                details = self.driver.get_gbp_details(
+                        ctx, device='tap%s' % p3['id'], host='h2')
+                host_snat_ips = details['host_snat_ips']
+                self.assertEqual(1, len(host_snat_ips))
+                self.assertEqual(db_net['name'],
+                        host_snat_ips[0]['external_segment_name'])
+                self.assertEqual('192.168.0.3',
+                        host_snat_ips[0]['host_snat_ip'])
+                self.assertEqual('192.168.0.1',
+                    host_snat_ips[0]['gateway_ip'])
+                self.assertEqual(
+                        netaddr.IPNetwork(mocked.HOST_POOL_CIDR).prefixlen,
+                        host_snat_ips[0]['prefixlen'])
+                snat_ports = self.driver.db_plugin.get_ports(ctx,
+                            filters={'name': [md.HOST_SNAT_POOL_PORT],
+                                     'network_id': [db_net['id']],
+                                     'device_id': ['h2']})
+                self.assertEqual(1, len(snat_ports))
+        snat_ports = self.driver.db_plugin.get_ports(
+            ctx, filters={'name': [md.HOST_SNAT_POOL_PORT],
+                          'network_id': [db_net['id']]})
+        self.assertEqual(2, len(snat_ports))
+        self.driver.db_plugin.delete_network(ctx, db_net['id'])
 
     def test_create_external_network_postcommit(self):
         ctx = context.get_admin_context()
@@ -1728,7 +1759,8 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
             'admin_state_up': True, 'shared': True,
             'status': n_constants.NET_STATUS_ACTIVE,}}
         db_net = self.driver.db_plugin.create_network(ctx, args)
-        net_ctx = self._get_network_context(ctx.tenant_id,
+        net_ctx = self._get_network_context(self.actual_core_plugin,
+                                            ctx.tenant_id,
                                             db_net['id'],
                                             TEST_SEGMENT1, external=True)
         self.driver.create_network_postcommit(net_ctx)
