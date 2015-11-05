@@ -87,7 +87,7 @@ apic-ml2-db-manage --config-file /etc/neutron/neutron.conf upgrade head
 %{_bindir}/apic-ml2-db-manage
 %{_bindir}/neutron-cisco-apic-host-agent
 %{_bindir}/neutron-cisco-apic-service-agent
-%{_bindir}/apic-ns-metadata-proxy
+%{_bindir}/opflex-ns-proxy
 %{_unitdir}/%{host_agent}
 %{_unitdir}/%{service_agent}
 %{_sysconfdir}/neutron/plugins/ml2/ml2_conf_cisco_apic.ini
