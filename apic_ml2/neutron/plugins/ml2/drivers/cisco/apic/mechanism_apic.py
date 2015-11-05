@@ -55,7 +55,6 @@ HOST_SNAT_POOL = 'host-snat-pool-for-internal-use'
 HOST_SNAT_POOL_PORT = 'host-snat-pool-port-for-internal-use'
 DEVICE_OWNER_SNAT_PORT = 'host-snat-pool-port-device-owner-internal-use'
 n_db.AUTO_DELETE_PORT_OWNERS.append(DEVICE_OWNER_SNAT_PORT)
-DEVICE_ID_SNAT_PORT = 'host-snat-pool-port-device-id-internal-use'
 _apic_driver_instance = None
 
 
@@ -368,6 +367,14 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             pass    # EP attestation not supported by APICAPI
         return details
 
+    def _add_port_binding(self, session, port_id, host):
+        with session.begin(subtransactions=True):
+            record = models.PortBinding(port_id=port_id,
+                                        host=host,
+                                        vif_type=portbindings.VIF_TYPE_UNBOUND)
+            session.add(record)
+            return record
+
     def _allocate_snat_ip_for_host_and_ext_net(self, context, host, network):
         """Allocate SNAT IP for a host for an external network."""
         snat_subnets = self.db_plugin.get_subnets(context,
@@ -381,16 +388,15 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             snat_ports = self.db_plugin.get_ports(context,
                     filters={'name': [HOST_SNAT_POOL_PORT],
                              'network_id': [network['id']],
-                             'binding:host_id': [host]})
+                             'device_id': [host]})
             snat_ip = None
             if not snat_ports:
                 # Note that the following port is created for only getting
-                # an IP assignment in the
-                attrs = {'port': {'device_id': DEVICE_ID_SNAT_PORT,
+                # an IP assignment in the subnet used for SNAT IPs.
+                # The host for which this SNAT IP is allocated is used
+                # coded in the device_id.
+                attrs = {'port': {'device_id': host,
                                  'device_owner': DEVICE_OWNER_SNAT_PORT,
-                                 'binding:host_id': host,
-                                 'binding:vif_type':
-                                 portbindings.VIF_TYPE_UNBOUND,
                                  'tenant_id': network['tenant_id'],
                                  'name': HOST_SNAT_POOL_PORT,
                                  'network_id': network['id'],
@@ -401,20 +407,11 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                                 }
                         }
                 port = self.db_plugin.create_port(context, attrs)
-                # The auto deletion of port logic looks for the port binding
-                # hence we populate the port binding info here
-                binding = models.PortBinding(host=host,
-                                             vnic_type=
-                                             portbindings.VNIC_NORMAL,
-                                             profile={},
-                                             vif_type=
-                                             portbindings.VIF_TYPE_UNBOUND,
-                                             vif_details='')
-                port_context = driver_context.PortContext(
-                    manager.NeutronManager.get_plugin(), context, port,
-                    network, binding)
-                self.bind_port(port_context)
                 if port and port['fixed_ips'][0]:
+                    # The auto deletion of port logic looks for the port binding
+                    # hence we populate the port binding info here
+                    binding = self._add_port_binding(context.session,
+                                                     port['id'], host)
                     snat_ip = port['fixed_ips'][0]['ip_address']
                 else:
                     LOG.warning(_("SNAT-port creation failed for subnet "
@@ -1253,8 +1250,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                                         attributes.ATTR_NOT_SPECIFIED,
                                         }
                             }
-                    subnet = self.db_plugin.create_subnet(context._plugin_context,
-                                                          attrs)
+                    subnet = self.db_plugin.create_subnet(
+                        context._plugin_context, attrs)
                     if not subnet:
                         LOG.warning(_("Subnet %(pool) creation failed for "
                                       "external network %(net_id)s. SNAT "
