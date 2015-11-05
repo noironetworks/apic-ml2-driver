@@ -310,62 +310,71 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
     # RPC Method
     def get_gbp_details(self, context, **kwargs):
-        core_plugin = manager.NeutronManager.get_plugin()
-        port_id = core_plugin._device_to_port_id(
-            kwargs['device'])
-        port_context = core_plugin.get_bound_port_context(
-            context, port_id, kwargs['host'])
-        if not port_context:
-            LOG.warning(_("Device %(device)s requested by agent "
-                          "%(agent_id)s not found in database"),
-                        {'device': port_id,
-                         'agent_id': kwargs.get('agent_id')})
-            return
-        port = port_context.current
-
-        context._plugin = core_plugin
-        context._plugin_context = context
-
-        network = core_plugin.get_network(context, port['network_id'])
-
-        def is_port_promiscuous(port):
-            return port['device_owner'] == n_constants.DEVICE_OWNER_DHCP
-
-        segment = port_context.bound_segment or {}
-        details = {'device': kwargs.get('device'),
-                   'port_id': port_id,
-                   'mac_address': port['mac_address'],
-                   'app_profile_name': str(
-                       self._get_network_app_profile(network)),
-                   'segment': segment,
-                   'segmentation_id': segment.get('segmentation_id'),
-                   'network_type': segment.get('network_type'),
-                   'tenant_id': network['tenant_id'],
-                   'l3_policy_id': network['tenant_id'],
-                   'host': port[portbindings.HOST_ID],
-                   'ptg_tenant': self.apic_manager.apic.fvTenant.name(
-                       str(self._get_network_aci_tenant(network))),
-                   'endpoint_group_name': str(
-                       self.name_mapper.endpoint_group(
-                           context, port['network_id'])),
-                   'promiscuous_mode': is_port_promiscuous(port)}
-        if port['device_owner'].startswith('compute:') and port['device_id']:
-            vm = nova_client.NovaClient().get_server(port['device_id'])
-            details['vm-name'] = vm.name if vm else port['device_id']
-        self._add_ip_mapping_details(context, port, details)
-        self._add_network_details(context, port, details)
-        if self._is_nat_enabled_on_ext_net(network):
-            # PTG name is different
-            details['endpoint_group_name'] = self._get_ext_epg_for_ext_net(
-                details['endpoint_group_name'])
-        details.update(
-            self.get_vrf_details(context, vrf_id=network['tenant_id']))
         try:
-            details['attestation'] = self.attestator.get_endpoint_attestation(
-                port_id, details['host'], details['endpoint_group_name'],
-                details['ptg_tenant'])
-        except AttributeError:
-            pass    # EP attestation not supported by APICAPI
+            core_plugin = manager.NeutronManager.get_plugin()
+            port_id = core_plugin._device_to_port_id(
+                kwargs['device'])
+            port_context = core_plugin.get_bound_port_context(
+                context, port_id, kwargs['host'])
+            if not port_context:
+                LOG.warning(_("Device %(device)s requested by agent "
+                              "%(agent_id)s not found in database"),
+                            {'device': port_id,
+                             'agent_id': kwargs.get('agent_id')})
+                return
+            port = port_context.current
+
+            context._plugin = core_plugin
+            context._plugin_context = context
+
+            network = core_plugin.get_network(context, port['network_id'])
+
+            def is_port_promiscuous(port):
+                return port['device_owner'] == n_constants.DEVICE_OWNER_DHCP
+
+            segment = port_context.bound_segment or {}
+            details = {'device': kwargs.get('device'),
+                       'port_id': port_id,
+                       'mac_address': port['mac_address'],
+                       'app_profile_name': str(
+                           self._get_network_app_profile(network)),
+                       'segment': segment,
+                       'segmentation_id': segment.get('segmentation_id'),
+                       'network_type': segment.get('network_type'),
+                       'tenant_id': network['tenant_id'],
+                       'l3_policy_id': network['tenant_id'],
+                       'host': port[portbindings.HOST_ID],
+                       'ptg_tenant': self.apic_manager.apic.fvTenant.name(
+                           str(self._get_network_aci_tenant(network))),
+                       'endpoint_group_name': str(
+                           self.name_mapper.endpoint_group(
+                               context, port['network_id'])),
+                       'promiscuous_mode': is_port_promiscuous(port)}
+            if port['device_owner'].startswith('compute:') and port[
+                    'device_id']:
+                vm = nova_client.NovaClient().get_server(port['device_id'])
+                details['vm-name'] = vm.name if vm else port['device_id']
+            self._add_ip_mapping_details(context, port, details)
+            self._add_network_details(context, port, details)
+            if self._is_nat_enabled_on_ext_net(network):
+                # PTG name is different
+                details['endpoint_group_name'] = self._get_ext_epg_for_ext_net(
+                    details['endpoint_group_name'])
+            details.update(
+                self.get_vrf_details(context, vrf_id=network['tenant_id']))
+            try:
+                details['attestation'] = (
+                    self.attestator.get_endpoint_attestation(
+                        port_id, details['host'],
+                        details['endpoint_group_name'], details['ptg_tenant']))
+            except KeyError as e:
+                LOG.debug(e.message)
+                LOG.warning("EP attestation not supported by APICAPI.")
+        except Exception as e:
+            LOG.error("An exception has occurred while retrieving device "
+                      "gbp details for %s with error %s",
+                      kwargs.get('device'), e.message)
+            details = {'device': kwargs.get('device')}
         return details
 
     def _allocate_snat_ip_for_host_and_ext_net(self, context, host, network):

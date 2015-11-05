@@ -408,6 +408,27 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             # Validation succeeded
             self.assertEqual(expected_mac, observed_mac)
 
+    def test_get_gbp_details_error(self):
+        details = self._get_gbp_details('randomid', 'h1')
+        # device was not found
+        self.assertEqual(None, details)
+
+        net = self.create_network(
+            tenant_id='onetenant', expected_res_status=201, shared=True,
+            is_admin_context=True)['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4, is_admin_context=True)
+        with self.port(subnet=sub, tenant_id='onetenant') as p1:
+            with self.port(subnet=sub, device_owner='network:dhcp',
+                           tenant_id='onetenant') as dhcp:
+                p1 = p1['port']
+                self._bind_port_to_host(p1['id'], 'h1')
+                self.driver._add_ip_mapping_details = mock.Mock(
+                    side_effect=Exception)
+                details = self._get_gbp_details(p1['id'], 'h1')
+                self.assertEqual({'device': 'tap%s' % p1['id']}, details)
+
 
 class MechanismRpcTestCase(ApicML2IntegratedTestBase):
 
