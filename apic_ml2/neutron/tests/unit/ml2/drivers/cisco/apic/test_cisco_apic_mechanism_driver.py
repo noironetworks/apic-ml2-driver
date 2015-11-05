@@ -614,6 +614,9 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             'bridge_mappings': {'physnet1': 'br-eth1'}}}
         mock.patch('neutron.manager.NeutronManager').start()
         self.driver._l3_plugin = mock.Mock()
+        self.driver._allocate_snat_ip_for_host_and_ext_net = echo
+        self.driver._create_snat_ip_allocation_subnet = echo
+        self.driver._delete_snat_ip_allocation_network = echo
 
         def get_resource(context, resource_id):
             return {'id': resource_id, 'tenant_id': mocked.APIC_TENANT}
@@ -1594,17 +1597,6 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
         md.APICMechanismDriver.get_base_synchronizer = mock.Mock(
             return_value=self.synchronizer)
         self.driver.initialize()
-        self.driver.vif_type = 'test-vif_type'
-        self.driver.cap_port_filter = 'test-cap_port_filter'
-        self.driver.name_mapper.aci_mapper.tenant = echo
-        self.driver.name_mapper.aci_mapper.network = echo
-        self.driver.name_mapper.aci_mapper.subnet = echo
-        self.driver.name_mapper.aci_mapper.port = echo
-        self.driver.name_mapper.aci_mapper.router = echo
-        self.driver.name_mapper.aci_mapper.pre_existing = echo
-        self.driver.name_mapper.aci_mapper.echo = echo
-        self.driver.name_mapper.aci_mapper.app_profile.return_value = (
-            mocked.APIC_AP)
         self.driver.apic_manager = mock.Mock(
             name_mapper=mock.Mock(), ext_net_dict=self.external_network_dict)
 
@@ -1621,6 +1613,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
 
         self.driver._l3_plugin.get_router = get_resource
 
+
     def _get_network_context(self, plugin, tenant_id, net_id, seg_id=None,
                              seg_type='vlan', external=False, shared=False):
         ctx = context.get_admin_context()
@@ -1635,6 +1628,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
         return driver_context.NetworkContext(plugin, ctx, network)
 
     def test_1_port_created_for_host(self):
+        # This test case is more of a functional test and should be revisited.
         ctx = context.get_admin_context()
         agent = {'host': 'h1'}
         agent.update(AGENT_CONF)
@@ -1649,6 +1643,10 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                                             db_net['id'],
                                             TEST_SEGMENT1, external=True)
         self.driver.create_network_postcommit(net_ctx)
+        snat_networks = self.driver.db_plugin.get_networks(
+            ctx, filters={'name': [self.driver._get_snat_db_network_name(
+                db_net)]})
+        snat_network_id = snat_networks[0]['id']
         net = self.create_network(
             tenant_id='onetenant', expected_res_status=201, shared=True,
             is_admin_context=True)['network']
@@ -1694,7 +1692,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                     host_snat_ips[0]['prefixlen'])
             snat_ports = self.driver.db_plugin.get_ports(ctx,
                         filters={'name': [md.HOST_SNAT_POOL_PORT],
-                                 'network_id': [db_net['id']],
+                                 'network_id': [snat_network_id],
                                  'device_id': ['h1']})
             self.assertEqual(1, len(snat_ports))
             # Simulate a second event on the same host for the same external
@@ -1719,7 +1717,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                         host_snat_ips[0]['prefixlen'])
                 snat_ports = self.driver.db_plugin.get_ports(ctx,
                             filters={'name': [md.HOST_SNAT_POOL_PORT],
-                                     'network_id': [db_net['id']],
+                                     'network_id': [snat_network_id],
                                      'device_id': ['h1']})
                 self.assertEqual(1, len(snat_ports))
             # Now simulate event of a second host
@@ -1744,14 +1742,25 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                         host_snat_ips[0]['prefixlen'])
                 snat_ports = self.driver.db_plugin.get_ports(ctx,
                             filters={'name': [md.HOST_SNAT_POOL_PORT],
-                                     'network_id': [db_net['id']],
+                                     'network_id': [snat_network_id],
                                      'device_id': ['h2']})
                 self.assertEqual(1, len(snat_ports))
         snat_ports = self.driver.db_plugin.get_ports(
             ctx, filters={'name': [md.HOST_SNAT_POOL_PORT],
-                          'network_id': [db_net['id']]})
+                          'network_id': [snat_network_id]})
         self.assertEqual(2, len(snat_ports))
-        self.driver.db_plugin.delete_network(ctx, db_net['id'])
+        self.driver.delete_network_postcommit(net_ctx)
+        snat_ports = self.driver.db_plugin.get_ports(
+            ctx, filters={'name': [md.HOST_SNAT_POOL_PORT],
+                          'network_id': [snat_network_id]})
+        self.assertEqual(0, len(snat_ports))
+        snat_networks = self.driver.db_plugin.get_networks(
+            ctx, filters={'name': [self.driver._get_snat_db_network_name(
+                db_net)]})
+        self.assertEqual(0, len(snat_networks))
+        subnets = self.driver.db_plugin.get_subnets(
+                ctx, filters={'name': [md.HOST_SNAT_POOL]})
+        self.assertEqual(0, len(subnets))
 
     def test_create_external_network_postcommit(self):
         ctx = context.get_admin_context()
@@ -1764,12 +1773,21 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                                             db_net['id'],
                                             TEST_SEGMENT1, external=True)
         self.driver.create_network_postcommit(net_ctx)
+        snat_networks = self.driver.db_plugin.get_networks(
+            ctx, filters={'name': [self.driver._get_snat_db_network_name(
+                db_net)]})
+        self.assertEqual(1, len(snat_networks))
         subnets = self.driver.db_plugin.get_subnets(
                 ctx, filters={'name': [md.HOST_SNAT_POOL]})
         self.assertEqual(1, len(subnets))
-        self.driver.db_plugin.delete_subnet(ctx, subnets[0]['id'])
         self.driver.delete_network_postcommit(net_ctx)
-        self.driver.db_plugin.delete_network(ctx, db_net['id'])
+        snat_networks = self.driver.db_plugin.get_networks(
+            ctx, filters={'name': [self.driver._get_snat_db_network_name(
+                db_net)]})
+        self.assertEqual(0, len(snat_networks))
+        subnets = self.driver.db_plugin.get_subnets(
+                ctx, filters={'name': [md.HOST_SNAT_POOL]})
+        self.assertEqual(0, len(subnets))
 
 
 class FakeNetworkContext(object):
@@ -1778,6 +1796,7 @@ class FakeNetworkContext(object):
     def __init__(self, network, segments):
         self._network = network
         self._segments = segments
+        self._plugin_context = mock.Mock()
 
     @property
     def current(self):
