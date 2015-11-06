@@ -1823,7 +1823,7 @@ class FakePortContext(object):
 
         self.current = self._port
         self.network = self._network
-        self.bound_segment = self._bound_segment
+        self.top_bound_segment = self._bound_segment
         self.host = self._port.get(portbindings.HOST_ID)
         self.original_host = None
         self._binding = mock.Mock()
