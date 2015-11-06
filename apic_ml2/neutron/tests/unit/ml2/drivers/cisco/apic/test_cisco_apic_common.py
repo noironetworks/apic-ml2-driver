@@ -297,10 +297,6 @@ class ConfigMixin(object):
                 'host_pool_cidr': HOST_POOL_CIDR,
             },
         }
-        self.mocked_parser = mock.patch.object(
-            cfg, 'MultiConfigParser').start()
-        self.mocked_parser.return_value.read.return_value = [apic_switch_cfg]
-        self.mocked_parser.return_value.parsed = [apic_switch_cfg]
 
     def override_conf(self, opt, val, group):
         cfg.CONF.set_override(opt, val, group)

@@ -16,10 +16,10 @@
 import eventlet
 
 eventlet.monkey_patch()
-from oslo import messaging
 from oslo_concurrency import lockutils
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
+from oslo_messaging import target
 
 from neutron import context as nctx
 from neutron.db import api as db_api
@@ -96,7 +96,7 @@ class ApicTopologyRpcCallbackMechanism(ApicTopologyRpcCallback):
     disabled.
     """
     RPC_API_VERSION = "1.1"
-    target = messaging.Target(version=RPC_API_VERSION)
+    target = target.Target(version=RPC_API_VERSION)
 
     def __init__(self, apic_manager, driver):
         self.mech_apic = driver
