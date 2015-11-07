@@ -3,4 +3,4 @@
 # process, which may cause wedges in the gate later.
 
 -e git+https://github.com/noironetworks/apicapi.git@master#egg=apicapi
--e git+https://github.com/noironetworks/python-opflex-agent.git@stable/juno#egg=python-opflexagent-agent
+-e git+https://github.com/noironetworks/python-opflex-agent.git@master#egg=python-opflexagent-agent
