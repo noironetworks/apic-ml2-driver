@@ -997,11 +997,12 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                     external_epg=shadow_ext_epg,
                     owner=router_tenant, transaction=trs)
 
-            # link up shadow external-EPG to NAT EPG
-            self.apic_manager.associate_external_epg_to_nat_epg(
-                router_tenant, shadow_l3out, shadow_ext_epg,
-                nat_epg_name, target_owner=nat_epg_tenant,
-                app_profile_name=self._get_network_app_profile(network))
+                # link up shadow external-EPG to NAT EPG
+                self.apic_manager.associate_external_epg_to_nat_epg(
+                    router_tenant, shadow_l3out, shadow_ext_epg,
+                    nat_epg_name, target_owner=nat_epg_tenant,
+                    app_profile_name=self._get_network_app_profile(network),
+                    transaction=trs)
             return True
         except Exception as e:
             LOG.info(_("Unable to create Shadow EPG: %s"), e)
