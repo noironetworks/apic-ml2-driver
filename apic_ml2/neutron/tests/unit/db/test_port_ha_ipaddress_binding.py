@@ -12,7 +12,6 @@
 
 import mock
 from neutron import context
-from neutron import manager
 from neutron.tests.unit import testlib_api
 from oslo_db import exception as exc
 from oslo_utils import importutils
@@ -63,8 +62,6 @@ class PortToHAIPAddressBindingTestCase(testlib_api.SqlTestCase):
         self.port1 = self.plugin.create_port(self.context, self.port1_data)
         self.port2 = self.plugin.create_port(self.context, self.port2_data)
         self.port_haip = ha.PortForHAIPAddress()
-        manager.NeutronManager.get_plugin = mock.Mock()
-        manager.NeutronManager.get_plugin.return_value = self.plugin
 
     def test_set_and_get_port_to_ha_ip_binding(self):
         # Test new HA IP address to port binding can be created
@@ -88,9 +85,9 @@ class PortToHAIPAddressBindingTestCase(testlib_api.SqlTestCase):
 
     def test_port_to_multiple_ha_ip_binding(self):
         self.port_haip.set_port_id_for_ha_ipaddress(self.port1['id'],
-            self.ha_ip1)
+                                                    self.ha_ip1)
         self.port_haip.set_port_id_for_ha_ipaddress(self.port1['id'],
-            self.ha_ip2)
+                                                    self.ha_ip2)
         obj = self.port_haip.get_port_for_ha_ipaddress(
             self.ha_ip1, self.port1['network_id'])
         self.assertEqual(self.port1['id'], obj['port_id'])
@@ -100,7 +97,7 @@ class PortToHAIPAddressBindingTestCase(testlib_api.SqlTestCase):
 
     def test_delete_port_for_ha_ip_binding(self):
         self.port_haip.set_port_id_for_ha_ipaddress(self.port1['id'],
-            self.ha_ip1)
+                                                    self.ha_ip1)
         result = self.port_haip.delete_port_id_for_ha_ipaddress(
             self.port1['id'], self.ha_ip1)
         self.assertEqual(1, result)
@@ -110,17 +107,17 @@ class PortToHAIPAddressBindingTestCase(testlib_api.SqlTestCase):
 
     def test_get_ha_ip_addresses_for_port(self):
         self.port_haip.set_port_id_for_ha_ipaddress(self.port1['id'],
-            self.ha_ip1)
+                                                    self.ha_ip1)
         self.port_haip.set_port_id_for_ha_ipaddress(self.port1['id'],
-            self.ha_ip2)
+                                                    self.ha_ip2)
         ha_ips = self.port_haip.get_ha_ipaddresses_for_port(self.port1['id'])
         self.assertEqual(sorted([self.ha_ip1, self.ha_ip2]), ha_ips)
 
     def test_idempotent(self):
         self.port_haip.set_port_id_for_ha_ipaddress(self.port1['id'],
-            self.ha_ip1)
+                                                    self.ha_ip1)
         obj = self.port_haip.set_port_id_for_ha_ipaddress(self.port1['id'],
-            self.ha_ip1)
+                                                          self.ha_ip1)
         self.assertEqual(self.port1['id'], obj['port_id'])
         self.assertEqual(self.ha_ip1, obj['ha_ip_address'])
 
@@ -131,16 +128,17 @@ class PortToHAIPAddressBindingTestCase(testlib_api.SqlTestCase):
 
     def test_delete_non_existing_entry(self):
         self.port_haip.set_port_id_for_ha_ipaddress(self.port1['id'],
-            self.ha_ip1)
+                                                    self.ha_ip1)
         result = self.port_haip.delete_port_id_for_ha_ipaddress(
             self.port1['id'], "fake")
         self.assertEqual(0, result)
         result = self.port_haip.delete_port_id_for_ha_ipaddress("fake",
-            self.ha_ip1)
+                                                                self.ha_ip1)
         self.assertEqual(0, result)
 
     def test_ip_owner_update(self):
         mixin = ha.HAIPOwnerDbMixin()
+        mixin._get_plugin = mock.Mock(return_value=self.plugin)
         ip_owner_info = {'port': self.port1['id'],
                          'ip_address_v4': self.ha_ip1}
 

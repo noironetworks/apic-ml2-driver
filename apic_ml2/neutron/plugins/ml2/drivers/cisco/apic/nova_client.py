@@ -18,7 +18,7 @@ from oslo_log import log as logging
 LOG = logging.getLogger(__name__)
 
 
-class NovaClient:
+class NovaClient(object):
 
     def __init__(self):
 

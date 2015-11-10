@@ -245,11 +245,6 @@ class ConfigMixin(object):
         self.apic_config = cfg.CONF.ml2_cisco_apic
 
         # Configure switch topology
-        apic_switch_cfg = {
-            'apic_switch:101': {'ubuntu1,ubuntu2': ['3/11']},
-            'apic_switch:102': {'rhel01,rhel02': ['4/21'],
-                                'rhel03': ['4/22']},
-        }
         self.switch_dict = {
             '101': {
                 '3/11': ['ubuntu1', 'ubuntu2'],

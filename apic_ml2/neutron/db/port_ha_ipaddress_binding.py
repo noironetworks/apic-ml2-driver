@@ -53,7 +53,7 @@ class PortForHAIPAddress(object):
         """Returns the Neutron Port ID for the HA IP Addresss."""
         port_ha_ip = self.session.query(HAIPAddressToPortAssocation).filter_by(
             ha_ip_address=ipaddress).join(models_v2.Port).filter_by(
-            network_id=network_id).first()
+                network_id=network_id).first()
         return port_ha_ip
 
     def get_ha_ipaddresses_for_port(self, port_id):
@@ -79,7 +79,8 @@ class PortForHAIPAddress(object):
         with self.session.begin(subtransactions=True):
             try:
                 return self.session.query(
-                    HAIPAddressToPortAssocation).filter_by(port_id=port_id,
+                    HAIPAddressToPortAssocation).filter_by(
+                        port_id=port_id,
                         ha_ip_address=ipaddress).delete()
             except orm.exc.NoResultFound:
                 return
@@ -90,6 +91,9 @@ class HAIPOwnerDbMixin(object):
     def __init__(self):
         self.ha_ip_handler = PortForHAIPAddress()
 
+    def _get_plugin(self):
+        return manager.NeutronManager.get_plugin()
+
     def update_ip_owner(self, ip_owner_info):
         ports_to_update = set()
         port_id = ip_owner_info.get('port')
@@ -98,7 +102,7 @@ class HAIPOwnerDbMixin(object):
         if not port_id or (not ipv4 and not ipv6):
             return ports_to_update
         LOG.debug("Got IP owner update: %s", ip_owner_info)
-        core_plugin = manager.NeutronManager.get_plugin()
+        core_plugin = self._get_plugin()
         port = core_plugin.get_port(nctx.get_admin_context(), port_id)
         if not port:
             LOG.debug("Ignoring update for non-existent port: %s", port_id)
@@ -108,8 +112,8 @@ class HAIPOwnerDbMixin(object):
             if not ipa:
                 continue
             try:
-                old_owner = self.ha_ip_handler.get_port_for_ha_ipaddress(ipa,
-                    port['network_id'])
+                old_owner = self.ha_ip_handler.get_port_for_ha_ipaddress(
+                    ipa, port['network_id'])
                 self.ha_ip_handler.set_port_id_for_ha_ipaddress(port_id, ipa)
                 if old_owner and old_owner['port_id'] != port_id:
                     self.ha_ip_handler.delete_port_id_for_ha_ipaddress(

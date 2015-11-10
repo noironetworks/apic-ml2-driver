@@ -21,7 +21,7 @@ import time
 from apicapi import exceptions as aex
 from oslo_serialization import jsonutils as json
 
-BIG_VALIDITY = 1000*60*60*24*365*100 # Just a very long validity for now
+BIG_VALIDITY = 1000 * 60 * 60 * 24 * 365 * 100  # Just a long validity for now
 
 
 class EndpointAttestator(object):
@@ -39,7 +39,7 @@ class EndpointAttestator(object):
                 "policy-space-name": epg_tenant,
                 "endpoint-group-name": epg_name
             },
-            "timestamp": int(round(time.time()*1000)),
+            "timestamp": int(round(time.time() * 1000)),
             "validity": BIG_VALIDITY
         }
 
@@ -50,5 +50,5 @@ class EndpointAttestator(object):
         validator = json.dumps(attestation, sort_keys=True)
         mac = hmac.new(self.apic.vmm_shared_secret, msg=validator,
                        digestmod=hashlib.sha256).digest()
-        return  [{"name": port_id, "validator" : base64.b64encode(validator),
-                  "validator-mac" : base64.b64encode(mac)}]
+        return [{"name": port_id, "validator": base64.b64encode(validator),
+                 "validator-mac": base64.b64encode(mac)}]
