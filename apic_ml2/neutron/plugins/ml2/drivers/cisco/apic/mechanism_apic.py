@@ -18,23 +18,23 @@ import copy
 from apicapi import apic_manager
 from keystoneclient.v2_0 import client as keyclient
 import netaddr
-from neutron.api.v2 import attributes
 from neutron.agent.linux import dhcp
 from neutron.agent import securitygroups_rpc
-from neutron.db import db_base_plugin_v2 as n_db
+from neutron.api.v2 import attributes
 from neutron.common import constants as n_constants
 from neutron.common import exceptions as n_exc
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron import context as nctx
+from neutron.db import db_base_plugin_v2 as n_db
 from neutron.extensions import portbindings
 from neutron import manager
 from neutron.openstack.common import lockutils
 from neutron.openstack.common import log
 from neutron.plugins.common import constants
 from neutron.plugins.ml2 import driver_api as api
-from neutron.plugins.ml2.drivers.cisco.apic import apic_model
 from neutron.plugins.ml2 import driver_context
+from neutron.plugins.ml2.drivers.cisco.apic import apic_model
 from neutron.plugins.ml2.drivers import mech_agent
 from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron.plugins.ml2 import models
@@ -419,9 +419,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                               'mac_address': attributes.ATTR_NOT_SPECIFIED,
                               'fixed_ips': [{'subnet_id':
                                              snat_subnets[0]['id']}],
-                              'admin_state_up': False,
-                             }
-                    }
+                              'admin_state_up': False}}
             port = self.db_plugin.create_port(context, attrs)
             if port and port['fixed_ips'][0]:
                 # The auto deletion of port logic looks for the port binding
@@ -434,8 +432,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                               "%(net_id)s. SNAT will not function on"
                               "host %(host)s for external network %(ext_id)s"),
                             {'subnet_id': snat_subnets[0]['id'],
-                            'net_id': snat_network_id, 'host': host,
-                            'ext_id': network['id']})
+                             'net_id': snat_network_id, 'host': host,
+                             'ext_id': network['id']})
                 return {}
         else:
             snat_ip = snat_ports[0]['fixed_ips'][0]['ip_address']
@@ -1148,9 +1146,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         attrs = {'network': {'name': net_name,
                              'admin_state_up': False,
                              'shared': False,
-                             'status': n_constants.NET_STATUS_DOWN,
-                            }
-                }
+                             'status': n_constants.NET_STATUS_DOWN}}
         snat_network = self.db_plugin.create_network(
             context._plugin_context, attrs)
         if not snat_network:
@@ -1176,11 +1172,9 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                             'dns_nameservers':
                             attributes.ATTR_NOT_SPECIFIED,
                             'host_routes':
-                            attributes.ATTR_NOT_SPECIFIED,
-                           }
-                }
+                            attributes.ATTR_NOT_SPECIFIED}}
         subnet = self.db_plugin.create_subnet(
-        context._plugin_context, attrs)
+            context._plugin_context, attrs)
         if not subnet:
             LOG.warning(_("Subnet %(pool) creation failed for "
                           "external network %(net_id)s. SNAT "
@@ -1287,8 +1281,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             self.apic_manager.ensure_bd_created_on_apic(
                 tenant_id, ext_bd_name, ctx_owner=external_vrf_tenant,
                 ctx_name=external_vrf, transaction=trs)
-            self.apic_manager.set_l3out_for_bd(tenant_id,
-                ext_bd_name, l3out_name_pre or l3out_name,
+            self.apic_manager.set_l3out_for_bd(
+                tenant_id, ext_bd_name, l3out_name_pre or l3out_name,
                 transaction=trs)
             self.apic_manager.ensure_epg_created(
                 tenant_id, ext_epg_name, bd_name=ext_bd_name,
@@ -1313,7 +1307,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 transaction=trs)
 
     def _delete_snat_ip_allocation_network(self, context, network):
-        """ This deletes all the SNAT pool resources we created in the DB """
+        """This deletes all the SNAT pool resources we created in the DB."""
         snat_net_name = self._get_snat_db_network_name(network)
         snat_networks = self.db_plugin.get_networks(
             context, filters={'name': [snat_net_name]})

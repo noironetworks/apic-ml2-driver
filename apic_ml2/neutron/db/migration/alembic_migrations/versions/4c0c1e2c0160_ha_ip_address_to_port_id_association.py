@@ -25,14 +25,16 @@ down_revision = None
 from alembic import op
 import sqlalchemy as sa
 
+
 def upgrade():
-    op.create_table('apic_ml2_ha_ipaddress_to_port_owner',
-    sa.Column('ha_ip_address', sa.String(length=64), nullable=False),
-    sa.Column('port_id', sa.String(length=64), nullable=False),
-    sa.ForeignKeyConstraint(
-        ['port_id'], ['ports.id'], ondelete='CASCADE',
-        name='apic_ml2_ha_ipaddress_to_port_owner_fk_port_id'),
-    sa.PrimaryKeyConstraint('ha_ip_address', 'port_id'))
+    op.create_table(
+        'apic_ml2_ha_ipaddress_to_port_owner',
+        sa.Column('ha_ip_address', sa.String(length=64), nullable=False),
+        sa.Column('port_id', sa.String(length=64), nullable=False),
+        sa.ForeignKeyConstraint(
+            ['port_id'], ['ports.id'], ondelete='CASCADE',
+            name='apic_ml2_ha_ipaddress_to_port_owner_fk_port_id'),
+        sa.PrimaryKeyConstraint('ha_ip_address', 'port_id'))
 
 
 def downgrade():
