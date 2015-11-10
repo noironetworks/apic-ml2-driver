@@ -1,6 +1,7 @@
 %global release_name juno
 %define host_agent neutron-cisco-apic-host-agent.service
 %define service_agent neutron-cisco-apic-service-agent.service
+%define version_py @VERSION_PY@
 
 Name:		neutron-ml2-driver-apic
 Version:	@VERSION@
@@ -27,7 +28,7 @@ Requires(postun): systemd-units
 Standalone Openstack Neutron ML2 driver for working with Cisco APIC
 
 %prep
-%setup -qn neutron-ml2-driver-apic-%{version}
+%setup -qn neutron-ml2-driver-apic-%{version_py}
 rm -f requirements.txt
 
 %build
@@ -83,7 +84,7 @@ apic-ml2-db-manage --config-file /etc/neutron/neutron.conf upgrade head
 %files
 %doc README.rst
 %{python2_sitelib}/apic_ml2
-%{python2_sitelib}/neutron_ml2_driver_apic-%%{version}*.egg-info
+%{python2_sitelib}/neutron_ml2_driver_apic-%%{version_py}*.egg-info
 %{_bindir}/apic-ml2-db-manage
 %{_bindir}/neutron-cisco-apic-host-agent
 %{_bindir}/neutron-cisco-apic-service-agent
