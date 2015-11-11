@@ -171,9 +171,6 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
         routers = self.plugin.get_routers(self.context)
         self.assertEqual(0, len(routers))
 
-    def test_singleton_manager(self):
-        self.assertIs(md.APICMechanismDriver.apic_manager, self.plugin.manager)
-
 
 class TestCiscoApicL3PluginPerTenantVRF(TestCiscoApicL3Plugin):
 

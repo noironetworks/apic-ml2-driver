@@ -18,14 +18,12 @@ import hashlib
 import hmac
 import sys
 
+from apicapi import apic_client
+from apicapi import apic_manager
+from apicapi import apic_mapper
 import mock
-
-sys.modules["apicapi"] = mock.Mock()
 sys.modules["opflexagent"] = mock.Mock()
 sys.modules["opflexagent"].constants.TYPE_OPFLEX = 'opflex'
-sys.modules["apicapi"].apic_manager.TENANT_COMMON = 'common'
-sys.modules["apicapi"].apic_manager.CONTEXT_SHARED = 'shared'
-
 import netaddr
 from neutron.api import extensions
 from neutron.common import constants as n_constants
@@ -35,12 +33,10 @@ from neutron.db import models_v2  # noqa
 from neutron.extensions import portbindings
 from neutron import manager
 from neutron.plugins.ml2 import driver_context
-from neutron.plugins.ml2.drivers.cisco.apic import apic_model
 from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron.tests import base
 from neutron.tests.unit.api import test_extensions
 from neutron.tests.unit.db import test_db_base_plugin_v2 as test_plugin
-from oslo_db import exception as db_exc
 from oslo_serialization import jsonutils as json
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
@@ -81,6 +77,10 @@ def name(name):
     return name
 
 
+def equal(x, y):
+    return str(x) == str(y)
+
+
 class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
                                 mocked.ControllerMixin, mocked.ConfigMixin,
                                 mocked.ApicDBTestBase):
@@ -95,6 +95,11 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
         service_plugins = service_plugins or {'L3_ROUTER_NAT': 'cisco_apic_l3'}
         mock.patch('apic_ml2.neutron.plugins.ml2.drivers.'
                    'cisco.apic.nova_client.NovaClient').start()
+        apic_client.RestClient = mock.Mock()
+        apic_manager.APICManager.ensure_infra_created_on_apic = mock.Mock()
+        apic_manager.APICManager.ensure_bgp_pod_policy_created_on_apic = (
+            mock.Mock())
+        apic_mapper.ApicName.__eq__ = equal
         super(ApicML2IntegratedTestBase, self).setUp(
             PLUGIN_NAME, service_plugins=service_plugins)
         ext_mgr = extensions.PluginAwareExtensionManager.get_instance()
@@ -108,35 +113,24 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
         md.APICMechanismDriver.get_base_synchronizer = mock.Mock(
             return_value=self.synchronizer)
         self.driver.name_mapper.aci_mapper.tenant = echo
-        self.driver.name_mapper.aci_mapper.network = echo
-        self.driver.name_mapper.aci_mapper.subnet = echo
-        self.driver.name_mapper.aci_mapper.port = echo
-        self.driver.name_mapper.aci_mapper.router = echo
-        self.driver.name_mapper.aci_mapper.pre_existing = echo
-        self.driver.name_mapper.aci_mapper.echo = echo
-        self.driver.name_mapper.aci_mapper.app_profile.return_value = (
-            mocked.APIC_AP)
         self.driver.apic_manager.apic.transaction = self.fake_transaction
         self.rpc = self.driver.topology_endpoints[0]
-        self.db = apic_model.ApicDbModel()
+        self.db = self.driver.apic_manager.db
 
-        def remove_hostlink(host, ifname, *args, **kwargs):
-            info = self.db.get_hostlink(host, ifname)
-            self.db.delete_hostlink(host, ifname)
-            return info
+        for switch in self.switch_dict:
+            for module_port in self.switch_dict[switch]:
+                module, port = module_port.split('/')
+                hosts = self.switch_dict[switch][module_port]
+                for host in hosts:
+                    self.driver.apic_manager.add_hostlink(
+                        host, 'static', None, switch, module, port)
 
-        self.driver.apic_manager.remove_hostlink = remove_hostlink
-        self.driver.apic_manager.db = self.db
         self.mgr = self.driver.apic_manager
         self.mgr.apic.fvTenant.name = name
         self.l3_plugin = manager.NeutronManager.get_service_plugins()[
             'L3_ROUTER_NAT']
         l3_apic.apic_mapper.mapper_context = self.fake_transaction
-        self.driver.apic_manager.db.get_switch_and_port_for_host = (
-            mock.Mock(return_value=[(201, 5, 31)]))
-        sys.modules['apicapi'].exceptions.ApicHostNotConfigured = Exception
         self.driver.apic_manager.vmm_shared_secret = 'dirtylittlesecret'
-        self.addCleanup(self.mgr.reset_mock)
 
     def _bind_port_to_host(self, port_id, host):
         plugin = manager.NeutronManager.get_plugin()
@@ -164,8 +158,8 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
     def _add_hosts_to_apic(self, num, vpc=False):
         for x in range(1, num + 1):
             self.db.add_hostlink(
-                'h%s' % x, 'eth0' if vpc else 'static', None, str(x), '1',
-                str(x))
+                'h%s' % x, 'eth0' if vpc else 'static', None, str(x),
+                '1', str(x))
             if vpc:
                 self.db.add_hostlink(
                     'h%s' % x, 'eth1', None, str(x + 1), '1', str(x))
@@ -218,14 +212,15 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
         with self.port(subnet=sub, tenant_id='anothertenant') as p1:
             p1 = p1['port']
             self.assertEqual(net['id'], p1['network_id'])
-            self.mgr.reset_mock()
+            self.mgr.ensure_path_created_for_port = mock.Mock()
             # Bind port to trigger path binding
             self._bind_port_to_host(p1['id'], 'h1')
             # Called on the network's tenant
             self.mgr.ensure_path_created_for_port.assert_called_once_with(
                 self._tenant(neutron_tenant='onetenant'),
                 net['id'], 'h1', mock.ANY, transaction=mock.ANY,
-                app_profile_name=self._app_profile(neutron_tenant='onetenant'))
+                app_profile_name=self._app_profile(
+                    neutron_tenant='onetenant'))
 
     def test_port_on_shared_opflex_network(self):
         net = self.create_network(
@@ -301,23 +296,22 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
         router = self.create_router(api=self.ext_api,
                                     expected_res_status=201)['router']
         with self.port(subnet=sub, tenant_id='anothertenant') as p1:
+            self.mgr.add_router_interface = mock.Mock()
             self.l3_plugin.add_router_interface(
                 context.get_admin_context(), router['id'],
                 {'port_id': p1['port']['id']})
             self.mgr.add_router_interface.assert_called_once_with(
-                self._tenant(neutron_tenant='onetenant'), self._scoped_name(
-                    router['id'], tenant=self._tenant_id),
+                self._tenant(neutron_tenant='onetenant'), router['id'],
                 net['id'],
                 app_profile_name=self._app_profile(neutron_tenant='onetenant'))
 
-            self.mgr.reset_mock()
+            self.mgr.remove_router_interface = mock.Mock()
             # Test removal
             self.l3_plugin.remove_router_interface(
                 context.get_admin_context(), router['id'],
                 {'port_id': p1['port']['id']})
             self.mgr.remove_router_interface.assert_called_once_with(
-                self._tenant(neutron_tenant='onetenant'), self._scoped_name(
-                    router['id'], tenant=self._tenant_id),
+                self._tenant(neutron_tenant='onetenant'), router['id'],
                 net['id'],
                 app_profile_name=self._app_profile(neutron_tenant='onetenant'))
 
@@ -332,22 +326,22 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
         router = self.create_router(api=self.ext_api,
                                     expected_res_status=201)['router']
 
+        self.mgr.add_router_interface = mock.Mock()
+
         self.l3_plugin.add_router_interface(
             context.get_admin_context(), router['id'],
             {'subnet_id': sub['id']})
         self.mgr.add_router_interface.assert_called_once_with(
-            self._tenant(neutron_tenant='onetenant'), self._scoped_name(
-                router['id'], tenant=self._tenant_id), net['id'],
+            self._tenant(neutron_tenant='onetenant'), router['id'], net['id'],
             app_profile_name=self._app_profile(neutron_tenant='onetenant'))
 
-        self.mgr.reset_mock()
+        self.mgr.remove_router_interface = mock.Mock()
         # Test removal
         self.l3_plugin.remove_router_interface(
             context.get_admin_context(), router['id'],
             {'subnet_id': sub['id']})
         self.mgr.remove_router_interface.assert_called_once_with(
-            self._tenant(neutron_tenant='onetenant'), self._scoped_name(
-                router['id'], tenant=self._tenant_id), net['id'],
+            self._tenant(neutron_tenant='onetenant'), router['id'], net['id'],
             app_profile_name=self._app_profile(neutron_tenant='onetenant'))
 
     def test_sync_on_demand(self):
@@ -371,7 +365,7 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
     def test_attestation(self):
         net = self.create_network(
             tenant_id='onetenant', expected_res_status=201)['network']
-        expected_attestation = {'ports': [{'switch': '201', 'port': '5/31'}],
+        expected_attestation = {'ports': [{'switch': '102', 'port': '4/23'}],
                                 'endpoint-group': {
                                     'policy-space-name': self._tenant(
                                         neutron_tenant='onetenant'),
@@ -421,14 +415,13 @@ class MechanismRpcTestCase(ApicML2IntegratedTestBase):
         self._add_hosts_to_apic(2)
 
         peers = self.rpc._load_peers()
-        self.assertEqual(2, len(peers))
         self.assertIn(('h1', 'static'), peers)
         self.assertIn(('h2', 'static'), peers)
 
     def test_remove_hostlink(self):
         # Test removal of one link
         self._add_hosts_to_apic(3)
-
+        self.driver.apic_manager.delete_path = mock.Mock()
         net = self.create_network()['network']
         sub = self.create_subnet(
             network_id=net['id'], cidr='192.168.0.0/24',
@@ -438,7 +431,6 @@ class MechanismRpcTestCase(ApicML2IntegratedTestBase):
             with self.port(subnet=sub) as p2:
                 self._bind_port_to_host(p1['port']['id'], 'h1')
                 self._bind_port_to_host(p2['port']['id'], 'h2')
-                self.driver.apic_manager.reset_mock()
 
                 # Remove H1 interface from ACI
                 self.rpc.update_link(mock.Mock(), 'h1', 'static', None, 0, '1',
@@ -448,8 +440,7 @@ class MechanismRpcTestCase(ApicML2IntegratedTestBase):
                     assert_called_once_with(self._tenant_id, net['id'], '1',
                                             '1', '1'))
 
-                self.driver.apic_manager.reset_mock()
-
+                self.driver.apic_manager.delete_path.reset_mock()
                 # Unbound
                 self.rpc.update_link(mock.Mock(), 'h3', 'static', None, 0, '1',
                                      '3')
@@ -458,7 +449,7 @@ class MechanismRpcTestCase(ApicML2IntegratedTestBase):
 
     def test_remove_hostlink_vpc(self):
         self._add_hosts_to_apic(3, vpc=True)
-
+        self.driver.apic_manager.delete_path = mock.Mock()
         net = self.create_network()['network']
         sub = self.create_subnet(
             network_id=net['id'], cidr='192.168.0.0/24',
@@ -466,7 +457,6 @@ class MechanismRpcTestCase(ApicML2IntegratedTestBase):
         # Create two ports
         with self.port(subnet=sub) as p1:
             self._bind_port_to_host(p1['port']['id'], 'h1')
-            self.driver.apic_manager.reset_mock()
 
             # Remove H1 interface from ACI
             self.rpc.update_link(mock.Mock(), 'h1', 'eth0', None, 0, '1',
@@ -475,6 +465,7 @@ class MechanismRpcTestCase(ApicML2IntegratedTestBase):
             self.assertEqual(
                 0, self.driver.apic_manager.delete_path.call_count)
 
+            self.driver.apic_manager.delete_path.reset_mock()
             self.rpc.update_link(mock.Mock(), 'h1', 'eth1', None, 0, '2',
                                  '1')
 
@@ -485,7 +476,6 @@ class MechanismRpcTestCase(ApicML2IntegratedTestBase):
     def test_add_hostlink(self):
         # Test removal of one link
         self._add_hosts_to_apic(2)
-
         net = self.create_network()['network']
         sub = self.create_subnet(
             network_id=net['id'], cidr='192.168.0.0/24',
@@ -496,9 +486,9 @@ class MechanismRpcTestCase(ApicML2IntegratedTestBase):
                 with self.port(subnet=sub) as p3:
                     self._bind_port_to_host(p1['port']['id'], 'h1')
                     self._bind_port_to_host(p2['port']['id'], 'h2')
-                    self._bind_port_to_host(p3['port']['id'], 'h4')
-                    self.driver.apic_manager.reset_mock()
-
+                    self._bind_port_to_host(p3['port']['id'], 'rhel03')
+                    self.driver.apic_manager.ensure_path_created_for_port = (
+                        mock.Mock())
                     # Add H3 interface from ACI
                     self.rpc.update_link(
                         mock.Mock(), 'h3', 'static', None, '3', '1', '3')
@@ -507,18 +497,18 @@ class MechanismRpcTestCase(ApicML2IntegratedTestBase):
                         0,
                         self.driver.apic_manager.ensure_path_created_for_port.
                         call_count)
-                    self.driver.apic_manager.reset_mock()
-
+                    (self.driver.apic_manager.ensure_path_created_for_port.
+                     reset_mock())
                     # Add H4 interface from ACI
                     self.rpc.update_link(
-                        mock.Mock(), 'h4', 'static', None, '4', '1', '4')
+                        mock.Mock(), 'rhel03', 'static', None, '4', '1', '4')
 
                     # P3 was bound in H4
                     net = self.show_network(net['id'],
                                             is_admin_context=True)['network']
                     (self.driver.apic_manager.ensure_path_created_for_port.
                         assert_called_once_with(
-                            self._tenant_id, net['id'], 'h4',
+                            self._tenant_id, net['id'], 'rhel03',
                             net['provider:segmentation_id']))
 
     def test_update_hostlink(self):
@@ -541,14 +531,15 @@ class MechanismRpcTestCase(ApicML2IntegratedTestBase):
                     self._bind_port_to_host(p1['port']['id'], 'h1')
                     self._bind_port_to_host(p2['port']['id'], 'h1')
                     self._bind_port_to_host(p3['port']['id'], 'h1')
-                    self.driver.apic_manager.reset_mock()
+                    mgr = self.driver.apic_manager
+                    mgr.delete_path = mock.Mock()
+                    mgr.ensure_path_created_for_port = mock.Mock()
                     # Change host interface
                     self.rpc.update_link(
                         mock.Mock(), 'h1', 'static', None, '1', '1', '24')
 
                     # Ports' path have been deleted and reissued two times (one
                     # for network)
-                    mgr = self.driver.apic_manager
                     expected_calls_remove = [
                         mock.call(self._tenant_id, net1['id'], '1', '1', '1'),
                         mock.call(self._tenant_id, net2['id'], '1', '1', '1')]
@@ -571,8 +562,8 @@ class MechanismRpcTestCase(ApicML2IntegratedTestBase):
                         mgr.ensure_path_created_for_port.call_args_list)
 
     def test_duplicate_hostlink(self):
-        self.driver.apic_manager.add_hostlink = mock.Mock(
-            side_effect=db_exc.DBDuplicateEntry)
+        self.driver.apic_manager.add_hostlink(
+            'h1', 'static', None, '1', '1', '1')
         # The below doesn't rise
         self.rpc.update_link(
             mock.Mock(), 'h1', 'static', None, '1', '1', '1')
@@ -592,6 +583,9 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.synchronizer = mock.Mock()
         md.APICMechanismDriver.get_base_synchronizer = mock.Mock(
             return_value=self.synchronizer)
+        md.APICMechanismDriver.get_apic_manager = mock.Mock()
+        self.driver.apic_manager = mock.Mock(
+            name_mapper=mock.Mock(), ext_net_dict=self.external_network_dict)
         self.driver.initialize()
         self.driver.vif_type = 'test-vif_type'
         self.driver.cap_port_filter = 'test-cap_port_filter'
@@ -604,8 +598,6 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.driver.name_mapper.aci_mapper.echo = echo
         self.driver.name_mapper.aci_mapper.app_profile.return_value = (
             mocked.APIC_AP)
-        self.driver.apic_manager = mock.Mock(
-            name_mapper=mock.Mock(), ext_net_dict=self.external_network_dict)
 
         self.driver.apic_manager.apic.transaction = self.fake_transaction
         self.agent = {'configurations': {
