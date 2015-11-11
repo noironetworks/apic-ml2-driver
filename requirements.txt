@@ -3,6 +3,5 @@
 # process, which may cause wedges in the gate later.
 
 oslo.concurrency>=1.8.0,<1.9.0
-
--e git+https://github.com/noironetworks/apicapi.git@master#egg=apicapi
--e git+https://github.com/noironetworks/python-opflex-agent.git@stable/juno#egg=python-opflexagent-agent
+apicapi>=1.0.6
+neutron-opflex-agent>=2014.2.0
