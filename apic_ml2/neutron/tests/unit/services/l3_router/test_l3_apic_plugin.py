@@ -16,6 +16,7 @@
 import sys
 
 import mock
+from neutron.common import constants as q_const
 from neutron.common import exceptions as n_exc
 from neutron import context
 
@@ -41,6 +42,7 @@ TEST_SEGMENT1 = 'test-segment1'
 SUBNET_GATEWAY = '10.3.2.1'
 SUBNET_CIDR = '10.3.1.0/24'
 SUBNET_NETMASK = '24'
+FLOATINGIP = 'fip1'
 
 
 class FakeContract(object):
@@ -71,6 +73,10 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
         mocked.ConfigMixin.set_up_mocks(self)
         self.plugin = l3_apic.ApicL3ServicePlugin()
         md.APICMechanismDriver.get_router_synchronizer = mock.Mock()
+        self.ml2_driver = mock.Mock()
+        md.APICMechanismDriver.get_driver_instance = mock.Mock(
+            return_value=self.ml2_driver)
+#        md.APICMechanismDriver.notify_port_update = mock.Mock()
         self.context = context.get_admin_context()
         self.context.tenant_id = TENANT
         self.interface_info = {'subnet': {'subnet_id': SUBNET},
@@ -82,6 +88,9 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
                      'id': 'port_id'}
         self.network = {'tenant_id': TENANT,
                         'id': 'network_id'}
+        self.floatingip = {'id': FLOATINGIP,
+                           'floating_network_id': NETWORK_NAME,
+                           'port_id': PORT}
         self.plugin.name_mapper = mock.Mock()
         l3_apic.apic_mapper.mapper_context = self.fake_transaction
         self.plugin.name_mapper.tenant.return_value = mocked.APIC_TENANT
@@ -106,6 +115,9 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
         self.plugin.get_ports = mock.Mock(return_value=[self.port])
         self.plugin._aci_mech_driver = mock.Mock()
         self.plugin.ml2_plugin = mock.Mock()
+        self.plugin.get_floatingip = mock.Mock(return_value=self.floatingip)
+        self.plugin.update_floatingip_status = mock.Mock()
+
         mock.patch('neutron.db.l3_dvr_db.L3_NAT_with_dvr_db_mixin.'
                    '_core_plugin').start()
         mock.patch('neutron.db.l3_dvr_db.L3_NAT_with_dvr_db_mixin.'
@@ -114,7 +126,25 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
                    'remove_router_interface').start()
         mock.patch(
             'neutron.manager.NeutronManager.get_service_plugins').start()
+        mock.patch('neutron.db.l3_dvr_db.L3_NAT_with_dvr_db_mixin.'
+                   'update_floatingip',
+                   new=mock.Mock(return_value=self.floatingip)).start()
+        mock.patch('neutron.db.l3_dvr_db.L3_NAT_with_dvr_db_mixin.'
+                   'create_floatingip',
+                   new=mock.Mock(return_value=self.floatingip)).start()
+        mock.patch('neutron.db.l3_dvr_db.L3_NAT_with_dvr_db_mixin.'
+                   'delete_floatingip').start()
         self.addCleanup(self.plugin.manager.reset_mock)
+
+    def _check_call_list(self, expected, observed):
+        for call in expected:
+            self.assertTrue(call in observed,
+                            msg='Call not found, expected:\n%s\nobserved:'
+                                '\n%s' % (str(call), str(observed)))
+            observed.remove(call)
+        self.assertFalse(
+            len(observed),
+            msg='There are more calls than expected: %s' % str(observed))
 
     def _tenant(self):
         return ('common' if not self.plugin.per_tenant_context else
@@ -170,6 +200,64 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
                           self.plugin.create_router, self.context, data)
         routers = self.plugin.get_routers(self.context)
         self.assertEqual(0, len(routers))
+
+    def test_singleton_manager(self):
+        self.assertIs(md.APICMechanismDriver.apic_manager, self.plugin.manager)
+
+    def test_floatingip_port_notify_on_create(self):
+        # create floating-ip with mapped port
+        self.plugin.create_floatingip(self.context,
+                                      {'floatingip': self.floatingip})
+        self.ml2_driver.notify_port_update.assert_called_once_with(PORT)
+
+    def test_floatingip_port_notify_on_reassociate(self):
+        # associate with different port
+        new_fip = {'port_id': 'port-another'}
+        self.ml2_driver.notify_port_update.reset_mock()
+        self.plugin.update_floatingip(self.context, FLOATINGIP,
+                                      {'floatingip': new_fip})
+        self._check_call_list(
+            [mock.call(PORT), mock.call('port-another')],
+            self.ml2_driver.notify_port_update.call_args_list)
+
+    def test_floatingip_port_notify_on_disassociate(self):
+        # dissociate mapped port
+        self.ml2_driver.notify_port_update.reset_mock()
+        self.plugin.update_floatingip(self.context, FLOATINGIP,
+                                      {'floatingip': {}})
+        self.ml2_driver.notify_port_update.assert_called_once_with(PORT)
+
+    def test_floatingip_port_notify_on_delete(self):
+        # delete
+        self.ml2_driver.notify_port_update.reset_mock()
+        self.plugin.delete_floatingip(self.context, FLOATINGIP)
+        self.ml2_driver.notify_port_update.assert_called_once_with(PORT)
+
+    def test_floatingip_status(self):
+        # create floating-ip with mapped port
+        fip = self.plugin.create_floatingip(self.context,
+                                            {'floatingip': self.floatingip})
+        self.plugin.update_floatingip_status.assert_called_once_with(
+            mock.ANY, FLOATINGIP, q_const.FLOATINGIP_STATUS_ACTIVE)
+        self.assertEqual(q_const.FLOATINGIP_STATUS_ACTIVE, fip['status'])
+
+        # dissociate mapped-port
+        self.plugin.update_floatingip_status.reset_mock()
+        self.floatingip.pop('port_id')
+        fip = self.plugin.update_floatingip(self.context, FLOATINGIP,
+                                            {'floatingip': self.floatingip})
+        self.plugin.update_floatingip_status.assert_called_once_with(
+            mock.ANY, FLOATINGIP, q_const.FLOATINGIP_STATUS_DOWN)
+        self.assertEqual(q_const.FLOATINGIP_STATUS_DOWN, fip['status'])
+
+        # re-associate mapped-port
+        self.plugin.update_floatingip_status.reset_mock()
+        self.floatingip['port_id'] = PORT
+        fip = self.plugin.update_floatingip(self.context, FLOATINGIP,
+                                            {'floatingip': self.floatingip})
+        self.plugin.update_floatingip_status.assert_called_once_with(
+            mock.ANY, FLOATINGIP, q_const.FLOATINGIP_STATUS_ACTIVE)
+        self.assertEqual(q_const.FLOATINGIP_STATUS_ACTIVE, fip['status'])
 
 
 class TestCiscoApicL3PluginPerTenantVRF(TestCiscoApicL3Plugin):

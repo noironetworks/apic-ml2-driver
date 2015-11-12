@@ -279,6 +279,8 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
             context, floatingip)
         port_id = floatingip.get('floatingip', {}).get('port_id')
         self._notify_port_update(port_id)
+        if res:
+            res['status'] = self._update_floatingip_status(context, res['id'])
         return res
 
     def update_floatingip(self, context, id, floatingip):
@@ -288,6 +290,9 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         port_id.append(floatingip.get('floatingip', {}).get('port_id'))
         for p in port_id:
             self._notify_port_update(p)
+        status = self._update_floatingip_status(context, id)
+        if res:
+            res['status'] = status
         return res
 
     def delete_floatingip(self, context, id):
@@ -308,3 +313,14 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         l2 = mechanism_apic.APICMechanismDriver.get_driver_instance()
         if l2 and port_id:
             l2.notify_port_update(port_id)
+
+    def _update_floatingip_status(self, context, fip_id):
+        status = q_const.FLOATINGIP_STATUS_DOWN
+        try:
+            fip = self.get_floatingip(context, fip_id)
+            if fip.get('port_id'):
+                status = q_const.FLOATINGIP_STATUS_ACTIVE
+            self.update_floatingip_status(context, fip_id, status)
+        except l3.FloatingIPNotFound:
+            pass
+        return status
