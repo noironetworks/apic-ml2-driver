@@ -58,9 +58,8 @@ class ApicBaseSynchronizer(SynchronizerBase):
                                                          network)
             try:
                 self.driver.create_network_postcommit(mech_context)
-            except Exception:
-                LOG.warn(_LW("Create network postcommit failed for "
-                             "network %s"), network['id'])
+            except Exception as e:
+                LOG.trace(e)
 
         # Sync Subnets
         for subnet in self.core_plugin.get_subnets(ctx):
@@ -68,9 +67,8 @@ class ApicBaseSynchronizer(SynchronizerBase):
                                                         subnet)
             try:
                 self.driver.create_subnet_postcommit(mech_context)
-            except Exception:
-                LOG.warn(_LW("Create subnet postcommit failed for"
-                             " subnet %s"), subnet['id'])
+            except Exception as e:
+                LOG.trace(e)
 
         # Sync Ports (compute/gateway/dhcp)
         for port in self.core_plugin.get_ports(ctx):
@@ -82,8 +80,7 @@ class ApicBaseSynchronizer(SynchronizerBase):
             try:
                 self.driver.create_port_postcommit(mech_context)
             except Exception:
-                LOG.warn(_LW("Create port postcommit failed for"
-                             " port %s"), port['id'])
+                LOG.trace(e)
 
 
 class ApicRouterSynchronizer(SynchronizerBase):
@@ -100,6 +97,5 @@ class ApicRouterSynchronizer(SynchronizerBase):
                 self.driver.add_router_interface_postcommit(
                     ctx, interface['device_id'],
                     {'port_id': interface['id']})
-            except Exception:
-                LOG.warn(_LW("Add interface postcommit failed for "
-                             "port %s"), interface['id'])
+            except Exception as e:
+                LOG.trace(e)
