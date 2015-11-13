@@ -16,13 +16,15 @@
 from neutron.common import constants as n_constants
 from neutron import context
 from neutron import manager
-from neutron.openstack.common.gettextutils import _LW
 from neutron.openstack.common import log
 from neutron.openstack.common import loopingcall
 from neutron.plugins.ml2 import db as l2_db
 from neutron.plugins.ml2 import driver_context
 
 LOG = log.getLogger(__name__)
+HOST_SNAT_NETWORK = 'host-snat-network-for-internal-use'
+HOST_SNAT_POOL = 'host-snat-pool-for-internal-use'
+HOST_SNAT_POOL_PORT = 'host-snat-pool-port-for-internal-use'
 
 
 class SynchronizerBase(object):
@@ -53,16 +55,24 @@ class ApicBaseSynchronizer(SynchronizerBase):
     def _sync_base(self):
         ctx = context.get_admin_context()
         # Sync Networks
-        for network in self.core_plugin.get_networks(ctx):
-            mech_context = driver_context.NetworkContext(self.core_plugin, ctx,
-                                                         network)
+        # Unroll to avoid unwanted additions during sync
+        networks = [x for x in self.core_plugin.get_networks(ctx)]
+        for network in networks:
+            if HOST_SNAT_NETWORK in network['name']:
+                continue
+
+            mech_context = driver_context.NetworkContext(
+                self.core_plugin, ctx, network)
             try:
                 self.driver.create_network_postcommit(mech_context)
             except Exception as e:
                 LOG.trace(e)
 
         # Sync Subnets
-        for subnet in self.core_plugin.get_subnets(ctx):
+        subnets = [x for x in self.core_plugin.get_subnets(ctx)]
+        for subnet in subnets:
+            if HOST_SNAT_POOL in subnet['name']:
+                continue
             mech_context = driver_context.SubnetContext(self.core_plugin, ctx,
                                                         subnet)
             try:
@@ -71,7 +81,10 @@ class ApicBaseSynchronizer(SynchronizerBase):
                 LOG.trace(e)
 
         # Sync Ports (compute/gateway/dhcp)
-        for port in self.core_plugin.get_ports(ctx):
+        ports = [x for x in self.core_plugin.get_ports(ctx)]
+        for port in ports:
+            if HOST_SNAT_POOL_PORT in port['name']:
+                continue
             _, binding = l2_db.get_locked_port_and_binding(ctx.session,
                                                            port['id'])
             network = self.core_plugin.get_network(ctx, port['network_id'])
@@ -79,7 +92,7 @@ class ApicBaseSynchronizer(SynchronizerBase):
                                                       port, network, binding)
             try:
                 self.driver.create_port_postcommit(mech_context)
-            except Exception:
+            except Exception as e:
                 LOG.trace(e)
 
 
@@ -92,7 +105,10 @@ class ApicRouterSynchronizer(SynchronizerBase):
         ctx = context.get_admin_context()
         # Sync Router Interfaces
         filters = {'device_owner': [n_constants.DEVICE_OWNER_ROUTER_INTF]}
-        for interface in self.core_plugin.get_ports(ctx, filters=filters):
+        ports = [x for x in self.core_plugin.get_ports(ctx, filters=filters)]
+        for interface in ports:
+            if HOST_SNAT_POOL_PORT in interface['name']:
+                continue
             try:
                 self.driver.add_router_interface_postcommit(
                     ctx, interface['device_id'],

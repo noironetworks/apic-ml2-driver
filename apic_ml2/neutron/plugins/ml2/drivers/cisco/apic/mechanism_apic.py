@@ -1143,6 +1143,11 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         # created on this network for the SNAT IP allocation pool
         # from which a IP will be handed to each host that needs it.
         net_name = self._get_snat_db_network_name(network)
+        if context._plugin.get_networks(
+                context._plugin_context.elevated(),
+                {'name': [net_name]}):
+            LOG.info(_("SNAT network %s already exists"), net_name)
+            return
         attrs = {'network': {'name': net_name,
                              'admin_state_up': False,
                              'shared': False,
