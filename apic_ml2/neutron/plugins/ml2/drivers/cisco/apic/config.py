@@ -16,7 +16,7 @@
 from oslo.config import cfg
 
 
-DEFAULT_ROOT_HELPER = ('sudo /usr/local/bin/neutron-rootwrap '
+DEFAULT_ROOT_HELPER = ('sudo /usr/bin/neutron-rootwrap '
                        '/etc/neutron/rootwrap.conf')
 
 
