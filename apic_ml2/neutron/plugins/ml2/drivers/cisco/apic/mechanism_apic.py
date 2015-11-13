@@ -30,6 +30,7 @@ from neutron.db import db_base_plugin_v2 as n_db
 from neutron.extensions import portbindings
 from neutron import manager
 from neutron.plugins.common import constants
+from neutron.plugins.ml2 import db as ml2_db
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2 import driver_context
 from neutron.plugins.ml2.drivers.cisco.apic import apic_model
@@ -1173,6 +1174,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                              'status': n_constants.NET_STATUS_DOWN}}
         snat_network = self.db_plugin.create_network(
             context._plugin_context, attrs)
+        segment = {api.NETWORK_TYPE: constants.TYPE_LOCAL}
+        ml2_db.add_network_segment(context._plugin_context.session,
+                                   snat_network['id'], segment)
+
         if not snat_network:
             LOG.warning(_("SNAT network %(name)s creation failed for "
                           "external network %(net_id)s. SNAT "
