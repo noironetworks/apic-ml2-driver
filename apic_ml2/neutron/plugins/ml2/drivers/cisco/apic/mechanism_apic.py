@@ -45,17 +45,14 @@ from oslo.config import cfg
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_sync
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import attestation
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import constants as acst
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import exceptions as aexc
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import nova_client
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import rpc as t_rpc
 
 
 LOG = log.getLogger(__name__)
-APIC_SYNC_NETWORK = 'apic-sync-network'
-HOST_SNAT_NETWORK = 'host-snat-network-for-internal-use-%s'
-HOST_SNAT_POOL = 'host-snat-pool-for-internal-use'
-HOST_SNAT_POOL_PORT = 'host-snat-pool-port-for-internal-use'
-DEVICE_OWNER_SNAT_PORT = 'host-snat-pool-port-device-owner-internal-use'
-n_db.AUTO_DELETE_PORT_OWNERS.append(DEVICE_OWNER_SNAT_PORT)
+n_db.AUTO_DELETE_PORT_OWNERS.append(acst.DEVICE_OWNER_SNAT_PORT)
 _apic_driver_instance = None
 
 
@@ -84,11 +81,6 @@ class CidrOverlapsApicExternalSubnet(n_exc.BadRequest):
 class WouldRequireNAT(n_exc.BadRequest):
     message = _("Setting gateway on router would require address translation, "
                 "but NAT-ing is disabled for external network %(ext_net)s.")
-
-
-class ReservedSynchronizationName(n_exc.BadRequest):
-    message = _("The name used for this network is reserved for on demand "
-                "synchronization.")
 
 
 class NameMapper(object):
@@ -392,7 +384,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         snat_network_id = snat_networks[0]['id']
         snat_network_tenant_id = snat_networks[0]['tenant_id']
         snat_subnets = self.db_plugin.get_subnets(
-            context, filters={'name': [HOST_SNAT_POOL],
+            context, filters={'name': [acst.HOST_SNAT_POOL],
                               'network_id': [snat_network_id]})
         if not snat_subnets:
             LOG.info(_("Subnet for host-SNAT-pool could not be found "
@@ -402,7 +394,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             return {}
 
         snat_ports = self.db_plugin.get_ports(
-            context, filters={'name': [HOST_SNAT_POOL_PORT],
+            context, filters={'name': [acst.HOST_SNAT_POOL_PORT],
                               'network_id': [snat_network_id],
                               'device_id': [host]})
         snat_ip = None
@@ -412,9 +404,9 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             # The host for which this SNAT IP is allocated is used
             # coded in the device_id.
             attrs = {'port': {'device_id': host,
-                              'device_owner': DEVICE_OWNER_SNAT_PORT,
+                              'device_owner': acst.DEVICE_OWNER_SNAT_PORT,
                               'tenant_id': snat_network_tenant_id,
-                              'name': HOST_SNAT_POOL_PORT,
+                              'name': acst.HOST_SNAT_POOL_PORT,
                               'network_id': snat_network_id,
                               'mac_address': attributes.ATTR_NOT_SPECIFIED,
                               'fixed_ips': [{'subnet_id':
@@ -565,7 +557,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 inst.synchronizer.sync_base()
             if args and isinstance(args[0], driver_context.NetworkContext):
                 if (args[0]._plugin_context.is_admin and
-                        args[0].current['name'] == APIC_SYNC_NETWORK):
+                        args[0].current['name'] == acst.APIC_SYNC_NETWORK):
                     inst.synchronizer._sync_base()
             return f(inst, *args, **kwargs)
         return inner
@@ -799,8 +791,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
     def create_network_postcommit(self, context):
         # The following validation is not happening in the precommit to avoid
         # database lock timeout
-        if context.current['name'] == APIC_SYNC_NETWORK:
-            raise ReservedSynchronizationName()
+        if context.current['name'] == acst.APIC_SYNC_NETWORK:
+            raise aexc.ReservedSynchronizationName()
         tenant_id = self._get_network_aci_tenant(context.current)
         network_id = context.current['id']
         # Convert to APIC IDs
@@ -958,7 +950,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         return "EXT-%s-allow-all" % network['id']
 
     def _get_snat_db_network_name(self, network):
-        return HOST_SNAT_NETWORK % network['id']
+        return acst.HOST_SNAT_NETWORK_PREFIX + network['id']
 
     def _create_shadow_ext_net_for_nat(self, context, l3out_name, ext_epg_name,
                                        router_contract, network, router):
@@ -1166,7 +1158,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         # external network will get port allocation and IP
         # from this subnet.
         host_cidir_ver = netaddr.IPNetwork(host_pool_cidr).version
-        attrs = {'subnet': {'name': HOST_SNAT_POOL,
+        attrs = {'subnet': {'name': acst.HOST_SNAT_POOL,
                             'cidr': host_pool_cidr,
                             'network_id': snat_network['id'],
                             'ip_version': host_cidir_ver,
@@ -1184,7 +1176,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             LOG.warning(_("Subnet %(pool) creation failed for "
                           "external network %(net_id)s. SNAT "
                           "will not function for this network"),
-                        {'pool': HOST_SNAT_POOL, 'net_id': network['id']})
+                        {'pool': acst.HOST_SNAT_POOL, 'net_id': network['id']})
             return False
 
     def _create_real_external_network(self, context, network):

@@ -20,6 +20,7 @@ import mock
 sys.modules["apicapi"] = mock.Mock()
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_sync
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import constants as acst
 from neutron.tests import base
 
 LOOPING_CALL = 'neutron.openstack.common.loopingcall.FixedIntervalLoopingCall'
@@ -57,21 +58,27 @@ class TestCiscoApicSync(base.BaseTestCase):
     def test_sync_base(self):
         sync = apic_sync.ApicBaseSynchronizer(self.driver)
         sync.core_plugin = mock.Mock()
-        sync.core_plugin.get_networks.return_value = [{'id': 'net'}]
-        sync.core_plugin.get_subnets.return_value = [{'id': 'sub'}]
-        sync.core_plugin.get_ports.return_value = [{'id': 'port',
-                                                    'network_id': 'net'}]
-        sync.sync_base()
-        self.driver.create_network_postcommit.assert_called_once()
-        self.driver.create_subnet_postcommit.assert_called_once()
-        self.get_locked_port_and_binding.assert_called_once()
-        self.driver.create_port_postcommit.assert_called_once()
+        sync.core_plugin.get_networks.return_value = [
+            {'id': 'net1', 'name': 'some'},
+            {'id': 'net2', 'name': acst.APIC_SYNC_NETWORK},
+            {'id': 'net3', 'name': acst.HOST_SNAT_NETWORK_PREFIX + 'asasa'}]
+        sync.core_plugin.get_subnets.return_value = [
+            {'id': 'sub', 'name': 'some'}]
+        sync.core_plugin.get_ports.return_value = [
+            {'id': 'port', 'network_id': 'net', 'name': 'some'}]
+        sync._sync_base()
+        self.assertEqual(1, self.driver.create_network_postcommit.call_count)
+        self.assertEqual(1, self.driver.create_subnet_postcommit.call_count)
+        self.assertEqual(1, self.get_locked_port_and_binding.call_count)
+        self.assertEqual(1, self.driver.create_port_postcommit.call_count)
 
     def test_sync_router(self):
         sync = apic_sync.ApicRouterSynchronizer(self.driver)
         sync.core_plugin = mock.Mock()
         sync.core_plugin.get_ports.return_value = [{'id': 'port',
                                                     'network_id': 'net',
-                                                    'device_id': 'dev'}]
-        sync.sync_router()
-        self.driver.add_router_interface_postcommit.assert_called_once()
+                                                    'device_id': 'dev',
+                                                    'name': 'some'}]
+        sync._sync_router()
+        self.assertEqual(
+            1, self.driver.add_router_interface_postcommit.call_count)

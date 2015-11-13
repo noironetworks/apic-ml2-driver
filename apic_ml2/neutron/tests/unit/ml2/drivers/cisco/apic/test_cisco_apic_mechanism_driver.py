@@ -43,6 +43,7 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
     mechanism_apic as md)
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
     rpc as mech_rpc)
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import constants as acst
 from apic_ml2.neutron.services.l3_router import l3_apic
 from apic_ml2.neutron.tests.unit.ml2.drivers.cisco.apic import (
     test_cisco_apic_common as mocked)
@@ -346,13 +347,13 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
 
     def test_sync_on_demand(self):
         self.synchronizer.reset_mock()
-        self.create_network(name=md.APIC_SYNC_NETWORK, is_admin_context=True,
+        self.create_network(name=acst.APIC_SYNC_NETWORK, is_admin_context=True,
                             expected_res_status=500)
         self.assertTrue(self.synchronizer._sync_base.called)
 
     def test_sync_on_demand_no_admin(self):
         self.synchronizer.reset_mock()
-        self.create_network(name=md.APIC_SYNC_NETWORK,
+        self.create_network(name=acst.APIC_SYNC_NETWORK,
                             expected_res_status=500)
         self.assertFalse(self.synchronizer._sync_base.called)
 
@@ -1680,7 +1681,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                 netaddr.IPNetwork(mocked.HOST_POOL_CIDR).prefixlen,
                 host_snat_ips[0]['prefixlen'])
             snat_ports = self.driver.db_plugin.get_ports(
-                ctx, filters={'name': [md.HOST_SNAT_POOL_PORT],
+                ctx, filters={'name': [acst.HOST_SNAT_POOL_PORT],
                               'network_id': [snat_network_id],
                               'device_id': ['h1']})
             self.assertEqual(1, len(snat_ports))
@@ -1705,7 +1706,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                     netaddr.IPNetwork(mocked.HOST_POOL_CIDR).prefixlen,
                     host_snat_ips[0]['prefixlen'])
                 snat_ports = self.driver.db_plugin.get_ports(
-                    ctx, filters={'name': [md.HOST_SNAT_POOL_PORT],
+                    ctx, filters={'name': [acst.HOST_SNAT_POOL_PORT],
                                   'network_id': [snat_network_id],
                                   'device_id': ['h1']})
                 self.assertEqual(1, len(snat_ports))
@@ -1730,17 +1731,17 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                     netaddr.IPNetwork(mocked.HOST_POOL_CIDR).prefixlen,
                     host_snat_ips[0]['prefixlen'])
                 snat_ports = self.driver.db_plugin.get_ports(
-                    ctx, filters={'name': [md.HOST_SNAT_POOL_PORT],
+                    ctx, filters={'name': [acst.HOST_SNAT_POOL_PORT],
                                   'network_id': [snat_network_id],
                                   'device_id': ['h2']})
                 self.assertEqual(1, len(snat_ports))
         snat_ports = self.driver.db_plugin.get_ports(
-            ctx, filters={'name': [md.HOST_SNAT_POOL_PORT],
+            ctx, filters={'name': [acst.HOST_SNAT_POOL_PORT],
                           'network_id': [snat_network_id]})
         self.assertEqual(2, len(snat_ports))
         self.driver.delete_network_postcommit(net_ctx)
         snat_ports = self.driver.db_plugin.get_ports(
-            ctx, filters={'name': [md.HOST_SNAT_POOL_PORT],
+            ctx, filters={'name': [acst.HOST_SNAT_POOL_PORT],
                           'network_id': [snat_network_id]})
         self.assertEqual(0, len(snat_ports))
         snat_networks = self.driver.db_plugin.get_networks(
@@ -1748,7 +1749,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                 db_net)]})
         self.assertEqual(0, len(snat_networks))
         subnets = self.driver.db_plugin.get_subnets(
-            ctx, filters={'name': [md.HOST_SNAT_POOL]})
+            ctx, filters={'name': [acst.HOST_SNAT_POOL]})
         self.assertEqual(0, len(subnets))
 
     def test_create_external_network_postcommit(self):
@@ -1767,7 +1768,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
             filters={'name': [self.driver._get_snat_db_network_name(db_net)]})
         self.assertEqual(1, len(snat_networks))
         subnets = self.driver.db_plugin.get_subnets(
-            ctx, filters={'name': [md.HOST_SNAT_POOL]})
+            ctx, filters={'name': [acst.HOST_SNAT_POOL]})
         self.assertEqual(1, len(subnets))
         self.driver.delete_network_postcommit(net_ctx)
         snat_networks = self.driver.db_plugin.get_networks(
@@ -1775,7 +1776,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
             filters={'name': [self.driver._get_snat_db_network_name(db_net)]})
         self.assertEqual(0, len(snat_networks))
         subnets = self.driver.db_plugin.get_subnets(
-            ctx, filters={'name': [md.HOST_SNAT_POOL]})
+            ctx, filters={'name': [acst.HOST_SNAT_POOL]})
         self.assertEqual(0, len(subnets))
 
 
