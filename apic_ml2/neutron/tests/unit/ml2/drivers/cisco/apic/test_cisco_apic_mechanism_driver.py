@@ -32,6 +32,7 @@ from neutron.db import db_base_plugin_v2  # noqa
 from neutron.db import models_v2  # noqa
 from neutron.extensions import portbindings
 from neutron import manager
+from neutron.plugins.ml2 import db as ml2_db
 from neutron.plugins.ml2 import driver_context
 from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron.tests import base
@@ -1766,7 +1767,10 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
         snat_networks = self.driver.db_plugin.get_networks(
             ctx,
             filters={'name': [self.driver._get_snat_db_network_name(db_net)]})
+        snat_net_id = snat_networks[0]['id']
         self.assertEqual(1, len(snat_networks))
+        seg = ml2_db.get_network_segments(ctx.session, snat_net_id)
+        self.assertEqual(1, len(seg))
         subnets = self.driver.db_plugin.get_subnets(
             ctx, filters={'name': [acst.HOST_SNAT_POOL]})
         self.assertEqual(1, len(subnets))
@@ -1775,6 +1779,8 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
             ctx,
             filters={'name': [self.driver._get_snat_db_network_name(db_net)]})
         self.assertEqual(0, len(snat_networks))
+        seg = ml2_db.get_network_segments(ctx.session, snat_net_id)
+        self.assertEqual(0, len(seg))
         subnets = self.driver.db_plugin.get_subnets(
             ctx, filters={'name': [acst.HOST_SNAT_POOL]})
         self.assertEqual(0, len(subnets))
