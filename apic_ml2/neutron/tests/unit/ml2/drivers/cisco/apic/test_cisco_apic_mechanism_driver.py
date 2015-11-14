@@ -132,6 +132,7 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
             'L3_ROUTER_NAT']
         l3_apic.apic_mapper.mapper_context = self.fake_transaction
         self.driver.apic_manager.vmm_shared_secret = 'dirtylittlesecret'
+        self.driver.notifier = mock.Mock()
 
     def _bind_port_to_host(self, port_id, host):
         plugin = manager.NeutronManager.get_plugin()
@@ -402,6 +403,85 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                 digestmod=hashlib.sha256).digest()
             # Validation succeeded
             self.assertEqual(expected_mac, observed_mac)
+
+    def test_dhcp_notifications_on_create(self):
+        net = self.create_network(
+            expected_res_status=201, shared=True,
+            is_admin_context=True)['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4, is_admin_context=True)
+        with self.port(subnet=sub) as p1:
+            self._bind_port_to_host(p1['port']['id'], 'h1')
+            with self.port(subnet=sub) as p2:
+                self._bind_port_to_host(p2['port']['id'], 'h1')
+                self.driver.notifier.reset_mock()
+                with self.port(subnet=sub, device_owner="network:dhcp"):
+                    self.assertEqual(
+                        2, self.driver.notifier.port_update.call_count)
+                    p1 = self.show_port(p1['port']['id'],
+                                        is_admin_context=True)['port']
+                    p2 = self.show_port(p2['port']['id'],
+                                        is_admin_context=True)['port']
+                    expected_calls = [
+                        mock.call(mock.ANY, p1),
+                        mock.call(mock.ANY, p2)]
+                    self._check_call_list(
+                        expected_calls,
+                        self.driver.notifier.port_update.call_args_list)
+
+    def test_dhcp_notifications_on_update(self):
+        net = self.create_network(
+            expected_res_status=201, shared=True,
+            is_admin_context=True)['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4, is_admin_context=True)
+        sub2 = self.create_subnet(
+            network_id=net['id'], cidr='192.168.1.0/24',
+            ip_version=4, is_admin_context=True)
+        with self.port(subnet=sub) as p1:
+            # Force port on a specific subnet
+            self.update_port(
+                p1['port']['id'],
+                fixed_ips=[{'subnet_id': sub['subnet']['id']}],
+                is_admin_context=True)
+            self._bind_port_to_host(p1['port']['id'], 'h1')
+            with self.port(subnet=sub2) as p2:
+                # Force port on a specific subnet
+                self.update_port(
+                    p2['port']['id'],
+                    fixed_ips=[{'subnet_id': sub2['subnet']['id']}],
+                    is_admin_context=True)
+                self._bind_port_to_host(p2['port']['id'], 'h1')
+                self.driver.notifier.port_update.reset_mock()
+                with self.port(subnet=sub, device_owner="network:dhcp") as p3:
+                    # Only sub 1 notifies
+                    self.assertEqual(
+                        1, self.driver.notifier.port_update.call_count)
+                    # Force port on a specific subnet
+                    self.update_port(
+                        p3['port']['id'],
+                        fixed_ips=[{'subnet_id': sub['subnet']['id']}],
+                        is_admin_context=True)
+                    self.driver.notifier.port_update.reset_mock()
+                    # Switch DHCP port to sub2
+                    self.update_port(
+                        p3['port']['id'],
+                        fixed_ips=[{'subnet_id': sub2['subnet']['id']}],
+                        is_admin_context=True)
+                    self.assertEqual(
+                        2, self.driver.notifier.port_update.call_count)
+                    p1 = self.show_port(p1['port']['id'],
+                                        is_admin_context=True)['port']
+                    p2 = self.show_port(p2['port']['id'],
+                                        is_admin_context=True)['port']
+                    expected_calls = [
+                        mock.call(mock.ANY, p1),
+                        mock.call(mock.ANY, p2)]
+                    self._check_call_list(
+                        expected_calls,
+                        self.driver.notifier.port_update.call_args_list)
 
 
 class MechanismRpcTestCase(ApicML2IntegratedTestBase):
