@@ -755,12 +755,29 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 bd_id = self._get_ext_bd_for_ext_net(l3out_name)
                 return tenant_id, bd_id, gateway_ip
 
+    def _notify_ports_on_subnets(self, context, network_id, subnets=None):
+        if not subnets:
+            return
+        context._plugin_context.session.expunge_all()
+        ports = context._plugin.get_ports(
+            context._plugin_context.elevated(), {'network_id': [network_id]})
+        for port in ports:
+            if set([x['subnet_id'] for x in port['fixed_ips']]) & set(subnets):
+                if (self._is_port_bound(port) and
+                        port['id'] != context.current['id']):
+                    self.notifier.port_update(context, port)
+
     def create_port_precommit(self, context):
         self._check_gw_port_operation(context, context.current)
 
     @sync_init
     def create_port_postcommit(self, context):
         self._perform_port_operations(context)
+        if context.current['device_owner'] == n_constants.DEVICE_OWNER_DHCP:
+            # Notify ports in the DHCP subnet
+            subs = [x['subnet_id'] for x in context.current['fixed_ips']]
+            self._notify_ports_on_subnets(
+                context, context.current['network_id'], subs)
 
     def update_port_precommit(self, context):
         self._check_gw_port_operation(context, context.current)
@@ -773,6 +790,16 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             # The VM was migrated
             self._delete_path_if_last(context, host=context.original_host)
         self._perform_port_operations(context)
+        if context.current['device_owner'] == n_constants.DEVICE_OWNER_DHCP:
+            if context.current['fixed_ips'] != context.original['fixed_ips']:
+                # Notify on modified subnets
+                curr_subs = set([x['subnet_id'] for x in
+                                 context.current['fixed_ips']])
+                old_subs = set([x['subnet_id'] for x in
+                                context.original['fixed_ips']])
+                diff_subs = curr_subs ^ old_subs
+                self._notify_ports_on_subnets(
+                    context, context.current['network_id'], diff_subs)
 
     def delete_port_postcommit(self, context):
         port = context.current
