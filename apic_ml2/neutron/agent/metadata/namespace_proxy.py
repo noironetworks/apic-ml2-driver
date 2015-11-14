@@ -63,8 +63,8 @@ class NetworkMetadataProxyHandler(object):
 
     def get_network_id(self, domain_id, remote_address):
         filedir = '/var/lib/neutron/opflex_agent'
-        filename = 'domain_nets.state'
-        fqfn = '%s/%s.state' % (filedir, filename)
+        filename = 'instance_networks.state'
+        fqfn = '%s/%s' % (filedir, filename)
 
         nets = None
         try:
