@@ -766,7 +766,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             if set([x['subnet_id'] for x in port['fixed_ips']]) & set(subnets):
                 if (self._is_port_bound(port) and
                         port['id'] != context.current['id']):
-                    self.notifier.port_update(context, port)
+                    self.notifier.port_update(context._plugin_context, port)
 
     def create_port_precommit(self, context):
         self._check_gw_port_operation(context, context.current)
