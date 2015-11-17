@@ -76,7 +76,7 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
         self.ml2_driver = mock.Mock()
         md.APICMechanismDriver.get_driver_instance = mock.Mock(
             return_value=self.ml2_driver)
-#        md.APICMechanismDriver.notify_port_update = mock.Mock()
+        md.APICMechanismDriver.notify_port_update = mock.Mock()
         self.context = context.get_admin_context()
         self.context.tenant_id = TENANT
         self.interface_info = {'subnet': {'subnet_id': SUBNET},
