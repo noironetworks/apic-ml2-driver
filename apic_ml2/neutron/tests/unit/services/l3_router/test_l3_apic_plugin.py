@@ -201,9 +201,6 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
         routers = self.plugin.get_routers(self.context)
         self.assertEqual(0, len(routers))
 
-    def test_singleton_manager(self):
-        self.assertIs(md.APICMechanismDriver.apic_manager, self.plugin.manager)
-
     def test_floatingip_port_notify_on_create(self):
         # create floating-ip with mapped port
         self.plugin.create_floatingip(self.context,
