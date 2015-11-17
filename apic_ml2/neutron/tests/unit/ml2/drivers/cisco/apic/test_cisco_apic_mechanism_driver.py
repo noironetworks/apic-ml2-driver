@@ -377,6 +377,8 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
         sub = self.create_subnet(
             tenant_id='onetenant', network_id=net['id'], cidr='192.168.0.0/24',
             ip_version=4)
+        self.driver.apic_manager.get_switch_and_port_for_host = mock.Mock(
+            return_value=[('102', 'eth4/23')])
         with self.port(subnet=sub, tenant_id='onetenant') as p1:
             p1 = p1['port']
             self._bind_port_to_host(p1['id'], 'h1')

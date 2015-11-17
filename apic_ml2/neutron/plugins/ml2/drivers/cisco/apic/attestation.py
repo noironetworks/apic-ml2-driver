@@ -18,7 +18,6 @@ import hashlib
 import hmac
 import time
 
-from apicapi import exceptions as aex
 from oslo.serialization import jsonutils as json
 
 BIG_VALIDITY = 1000 * 60 * 60 * 24 * 365 * 100  # Just a long validity for now
@@ -30,9 +29,7 @@ class EndpointAttestator(object):
         self.apic = apic_manager
 
     def get_endpoint_attestation(self, port_id, host, epg_name, epg_tenant):
-        host_config = self.apic.db.get_switch_and_port_for_host(host)
-        if not host_config:
-                raise aex.ApicHostNotConfigured(host=host)
+        host_config = self.apic.get_switch_and_port_for_host(host)
         attestation = {
             "ports": [],
             "endpoint-group": {
@@ -43,10 +40,9 @@ class EndpointAttestator(object):
             "validity": BIG_VALIDITY
         }
 
-        for switch, module, port in host_config:
+        for switch, port in host_config:
             attestation['ports'].append(
-                {"switch": str(switch), "port": 'eth' + str(module) + '/'
-                                                + str(port)})
+                {"switch": str(switch), "port": str(port)})
 
         validator = json.dumps(attestation, sort_keys=True)
         mac = hmac.new(self.apic.vmm_shared_secret, msg=validator,
