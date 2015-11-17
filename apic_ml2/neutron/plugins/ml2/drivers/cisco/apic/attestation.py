@@ -45,7 +45,8 @@ class EndpointAttestator(object):
 
         for switch, module, port in host_config:
             attestation['ports'].append(
-                {"switch": str(switch), "port": str(module) + '/' + str(port)})
+                {"switch": str(switch), "port": 'eth' + str(module) + '/'
+                                                + str(port)})
 
         validator = json.dumps(attestation, sort_keys=True)
         mac = hmac.new(self.apic.vmm_shared_secret, msg=validator,

@@ -368,7 +368,8 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
     def test_attestation(self):
         net = self.create_network(
             tenant_id='onetenant', expected_res_status=201)['network']
-        expected_attestation = {'ports': [{'switch': '102', 'port': '4/23'}],
+        expected_attestation = {'ports': [{'switch': '102',
+                                           'port': 'eth4/23'}],
                                 'endpoint-group': {
                                     'policy-space-name': self._tenant(
                                         neutron_tenant='onetenant'),
