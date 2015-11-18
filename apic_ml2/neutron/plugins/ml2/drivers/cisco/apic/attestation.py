@@ -45,7 +45,7 @@ class EndpointAttestator(object):
                 {"switch": str(switch), "port": str(port)})
 
         validator = json.dumps(attestation, sort_keys=True)
-        mac = hmac.new(self.apic.vmm_shared_secret, msg=validator,
-                       digestmod=hashlib.sha256).digest()
+        mac = hmac.new(base64.b64decode(self.apic.vmm_shared_secret),
+                       msg=validator, digestmod=hashlib.sha256).digest()
         return [{"name": port_id, "validator": base64.b64encode(validator),
                  "validator-mac": base64.b64encode(mac)}]

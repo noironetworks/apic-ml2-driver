@@ -132,7 +132,8 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
         self.l3_plugin = manager.NeutronManager.get_service_plugins()[
             'L3_ROUTER_NAT']
         l3_apic.apic_mapper.mapper_context = self.fake_transaction
-        self.driver.apic_manager.vmm_shared_secret = 'dirtylittlesecret'
+        self.driver.apic_manager.vmm_shared_secret = base64.b64encode(
+            'dirtylittlesecret')
         self.driver.notifier = mock.Mock()
 
     def _bind_port_to_host(self, port_id, host):
