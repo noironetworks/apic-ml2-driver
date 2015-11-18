@@ -371,13 +371,12 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             tenant_id='onetenant', expected_res_status=201)['network']
         expected_attestation = {'ports': [{'switch': '102',
                                            'port': 'eth4/23'}],
-                                'endpoint-group': {
-                                    'policy-space-name': self._tenant(
-                                        neutron_tenant='onetenant'),
-                                    'endpoint-group-name': (
-                                        self._app_profile(
-                                            neutron_tenant='onetenant') + '|' +
-                                        net['id'])}}
+                                'policy-space-name': self._tenant(
+                                    neutron_tenant='onetenant'),
+                                'endpoint-group-name': (
+                                    self._app_profile(
+                                        neutron_tenant='onetenant') + '|' +
+                                    net['id'])}
         sub = self.create_subnet(
             tenant_id='onetenant', network_id=net['id'], cidr='192.168.0.0/24',
             ip_version=4)
