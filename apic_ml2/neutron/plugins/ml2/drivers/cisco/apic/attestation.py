@@ -32,10 +32,8 @@ class EndpointAttestator(object):
         host_config = self.apic.get_switch_and_port_for_host(host)
         attestation = {
             "ports": [],
-            "endpoint-group": {
-                "policy-space-name": epg_tenant,
-                "endpoint-group-name": epg_name
-            },
+            "policy-space-name": epg_tenant,
+            "endpoint-group-name": epg_name,
             "timestamp": int(round(time.time() * 1000)),
             "validity": BIG_VALIDITY
         }
