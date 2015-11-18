@@ -374,7 +374,10 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                                 'endpoint-group': {
                                     'policy-space-name': self._tenant(
                                         neutron_tenant='onetenant'),
-                                    'endpoint-group-name': net['id']}}
+                                    'endpoint-group-name': (
+                                        self._app_profile(
+                                            neutron_tenant='onetenant') + '|' +
+                                        net['id'])}}
         sub = self.create_subnet(
             tenant_id='onetenant', network_id=net['id'], cidr='192.168.0.0/24',
             ip_version=4)

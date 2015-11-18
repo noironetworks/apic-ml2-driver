@@ -356,8 +356,9 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             self.get_vrf_details(context, vrf_id=network['tenant_id']))
         try:
             details['attestation'] = self.attestator.get_endpoint_attestation(
-                port_id, details['host'], details['endpoint_group_name'],
-                details['ptg_tenant'])
+                port_id, details['host'],
+                details['app_profile_name'] + "|" +
+                details['endpoint_group_name'], details['ptg_tenant'])
         except AttributeError:
             pass    # EP attestation not supported by APICAPI
         return details
