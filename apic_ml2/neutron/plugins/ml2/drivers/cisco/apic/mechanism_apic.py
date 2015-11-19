@@ -1266,6 +1266,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 self.apic_manager.ensure_external_routed_network_created(
                     l3out_name, owner=l3out_tenant,
                     context=external_vrf, transaction=trs)
+                self.apic_manager.set_domain_for_external_routed_network(
+                    l3out_name, owner=l3out_tenant, transaction=trs)
                 self.apic_manager.ensure_logical_node_profile_created(
                     l3out_name, switch, module, sport, encap,
                     address, transaction=trs,
