@@ -904,6 +904,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             expected_calls,
             mgr.ensure_external_routed_network_created.call_args_list)
 
+        self.assertFalse(mgr.set_domain_for_external_routed_network.called)
         self.assertFalse(mgr.ensure_logical_node_profile_created.called)
         self.assertFalse(mgr.ensure_static_route_created.called)
 
@@ -1171,6 +1172,9 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             expected_calls,
             mgr.ensure_external_routed_network_created.call_args_list)
 
+        mgr.set_domain_for_external_routed_network.assert_called_once_with(
+            self._scoped_name(mocked.APIC_NETWORK),
+            owner=self._tenant(), transaction='transaction')
         mgr.ensure_logical_node_profile_created.assert_called_once_with(
             self._scoped_name(mocked.APIC_NETWORK), mocked.APIC_EXT_SWITCH,
             mocked.APIC_EXT_MODULE, mocked.APIC_EXT_PORT,
@@ -1224,6 +1228,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
 
         self.assertFalse(mgr.ensure_context_enforced.called)
         self.assertFalse(mgr.ensure_external_routed_network_created.called)
+        self.assertFalse(mgr.set_domain_for_external_routed_network.called)
         self.assertFalse(mgr.ensure_logical_node_profile_created.called)
         self.assertFalse(mgr.ensure_static_route_created.called)
         self.assertFalse(mgr.ensure_external_epg_created.called)
@@ -1273,6 +1278,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
 
         self.assertFalse(mgr.ensure_context_enforced.called)
         self.assertFalse(mgr.ensure_external_routed_network_created.called)
+        self.assertFalse(mgr.set_domain_for_external_routed_network.called)
         self.assertFalse(mgr.ensure_logical_node_profile_created.called)
         self.assertFalse(mgr.ensure_static_route_created.called)
         self.assertFalse(mgr.ensure_external_epg_created.called)
