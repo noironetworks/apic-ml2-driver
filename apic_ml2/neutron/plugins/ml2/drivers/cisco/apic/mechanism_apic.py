@@ -118,6 +118,9 @@ class NameMapper(object):
             return getattr(self.aci_mapper, new_item)(*args, **kwargs)
         return name_wrapper
 
+    def delete_apic_name(self, resource_id):
+        self.aci_mapper.delete_apic_name(resource_id)
+
 
 class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
 
@@ -815,6 +818,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             if self._is_nat_enabled_on_ext_net(network):
                 self._delete_shadow_ext_net_for_nat(context, port, network)
         self._notify_ports_due_to_router_update(port)
+        self.name_mapper.delete_apic_name(context.current['id'])
 
     @sync_init
     def create_network_postcommit(self, context):
@@ -870,6 +874,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                                                     transaction=trs)
         else:
             self._delete_real_external_network(context, context.current)
+        self.name_mapper.delete_apic_name(context.current['id'])
 
     def create_subnet_precommit(self, context):
         subnet = context.current
@@ -936,6 +941,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             self.apic_manager.ensure_subnet_deleted_on_apic(
                 tenant_id, network_id, gateway_ip)
         self.notify_subnet_update(context.current)
+        self.name_mapper.delete_apic_name(context.current['id'])
 
     def _is_port_bound(self, port):
         return port[portbindings.VIF_TYPE] not in [

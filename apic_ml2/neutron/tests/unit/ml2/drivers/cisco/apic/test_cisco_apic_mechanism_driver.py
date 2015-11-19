@@ -115,6 +115,7 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
         md.APICMechanismDriver.get_base_synchronizer = mock.Mock(
             return_value=self.synchronizer)
         self.driver.name_mapper.aci_mapper.tenant = echo
+        self.driver.name_mapper.aci_mapper.delete_apic_name = mock.Mock()
         self.driver.apic_manager.apic.transaction = self.fake_transaction
         self.rpc = self.driver.topology_endpoints[0]
         self.db = self.driver.apic_manager.db
@@ -489,6 +490,42 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                     self._check_call_list(
                         expected_calls,
                         self.driver.notifier.port_update.call_args_list)
+
+    def test_deleted_name_network(self):
+        net = self.create_network(expected_res_status=201)['network']
+        mapper = self.driver.name_mapper.aci_mapper
+        self.assertFalse(mapper.delete_apic_name.called)
+        self.delete_network(net['id'], expected_res_status=204)
+        mapper.delete_apic_name.assert_called_once_with(net['id'])
+
+    def test_deleted_name_subnet(self):
+        net = self.create_network(expected_res_status=201)['network']
+        sub = self.create_subnet(network_id=net['id'], cidr='192.168.0.0/24',
+                                 ip_version=4)['subnet']
+        mapper = self.driver.name_mapper.aci_mapper
+        self.assertFalse(mapper.delete_apic_name.called)
+        self.delete_subnet(sub['id'], expected_res_status=204)
+        mapper.delete_apic_name.assert_called_once_with(sub['id'])
+
+    def test_deleted_name_port(self):
+        net = self.create_network(expected_res_status=201)['network']
+        self.create_subnet(network_id=net['id'], cidr='192.168.0.0/24',
+                           ip_version=4)
+        port = self.create_port(network_id=net['id'])
+        port = port['port']
+        mapper = self.driver.name_mapper.aci_mapper
+        self.assertFalse(mapper.delete_apic_name.called)
+        self.delete_port(port['id'], expected_res_status=204)
+        mapper.delete_apic_name.assert_called_once_with(port['id'])
+
+    def test_deleted_name_router(self):
+        router = self.create_router(api=self.ext_api,
+                                    expected_res_status=201)['router']
+        mapper = self.driver.name_mapper.aci_mapper
+        self.assertFalse(mapper.delete_apic_name.called)
+        self.delete_router(router['id'], api=self.ext_api,
+                           expected_res_status=204)
+        mapper.delete_apic_name.assert_called_once_with(router['id'])
 
 
 class MechanismRpcTestCase(ApicML2IntegratedTestBase):

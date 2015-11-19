@@ -248,6 +248,7 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         self.delete_router_precommit(context, router_id)
         result = super(ApicL3ServicePlugin, self).delete_router(context,
                                                                 router_id)
+        self.name_mapper.delete_apic_name(router_id)
         return result
 
     # Router Interface API
@@ -299,6 +300,7 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         port_id = self._get_port_mapped_to_floatingip(context, id)
         res = super(ApicL3ServicePlugin, self).delete_floatingip(context, id)
         self._notify_port_update(port_id)
+        self.name_mapper.delete_apic_name(id)
         return res
 
     def _get_port_mapped_to_floatingip(self, context, fip_id):
