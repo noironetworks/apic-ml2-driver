@@ -386,8 +386,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         snat_network_id = snat_networks[0]['id']
         snat_network_tenant_id = snat_networks[0]['tenant_id']
         snat_subnets = self.db_plugin.get_subnets(
-            context, filters={'name': [acst.HOST_SNAT_POOL],
-                              'network_id': [snat_network_id]})
+            context, filters={'network_id': [snat_network_id]})
         if not snat_subnets:
             LOG.info(_("Subnet for host-SNAT-pool could not be found "
                        "for SNAT network %(net_id)s. SNAT will not "
@@ -411,15 +410,16 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                               'name': acst.HOST_SNAT_POOL_PORT,
                               'network_id': snat_network_id,
                               'mac_address': attributes.ATTR_NOT_SPECIFIED,
-                              'fixed_ips': [{'subnet_id':
-                                             snat_subnets[0]['id']}],
+                              'fixed_ips': attributes.ATTR_NOT_SPECIFIED,
                               'admin_state_up': False}}
             port = self.db_plugin.create_port(context, attrs)
             if port and port['fixed_ips'][0]:
                 # The auto deletion of port logic looks for the port binding
                 # hence we populate the port binding info here
                 self._add_port_binding(context.session, port['id'], host)
+                snat_port_id = port['id']
                 snat_ip = port['fixed_ips'][0]['ip_address']
+                snat_port_subnet_id = port['fixed_ips'][0]['subnet_id']
             else:
                 LOG.warning(_("SNAT-port creation failed for subnet "
                               "%(subnet_id)s on SNAT network "
@@ -430,13 +430,27 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                              'ext_id': network['id']})
                 return {}
         else:
+            snat_port_id = snat_ports[0]['id']
             snat_ip = snat_ports[0]['fixed_ips'][0]['ip_address']
+            snat_port_subnet_id = snat_ports[0]['fixed_ips'][0]['subnet_id']
+
+        snat_port_subnet = self.db_plugin.get_subnet(
+            context, snat_port_subnet_id)
+
+        if not snat_port_subnet['gateway_ip']:
+            LOG.warning(_("Subnet %(subnet_id)s associated with allocated "
+                          "SNAT-port %(port_id)s has no gateway IP set. "
+                          "SNAT will not function on"
+                          "host %(host)s for external network %(ext_id)s"),
+                        {'subnet_id': snat_port_subnet_id,
+                         'port_id': snat_port_id,
+                         'host': host, 'ext_id': network['id']})
 
         return {'external_segment_name': network['name'],
                 'host_snat_ip': snat_ip,
-                'gateway_ip': snat_subnets[0]['gateway_ip'],
+                'gateway_ip': snat_port_subnet['gateway_ip'],
                 'prefixlen':
-                netaddr.IPNetwork(snat_subnets[0]['cidr']).prefixlen}
+                netaddr.IPNetwork(snat_port_subnet['cidr']).prefixlen}
 
     def _add_ip_mapping_details(self, context, port, details):
         """Add information about IP mapping for DNAT/SNAT."""
@@ -1190,11 +1204,11 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         # Each host that needs to provide SNAT for this
         # external network will get port allocation and IP
         # from this subnet.
-        host_cidir_ver = netaddr.IPNetwork(host_pool_cidr).version
+        host_cidr_ver = netaddr.IPNetwork(host_pool_cidr).version
         attrs = {'subnet': {'name': acst.HOST_SNAT_POOL,
                             'cidr': host_pool_cidr,
                             'network_id': snat_network['id'],
-                            'ip_version': host_cidir_ver,
+                            'ip_version': host_cidr_ver,
                             'enable_dhcp': False,
                             'gateway_ip': gateway,
                             'allocation_pools':
