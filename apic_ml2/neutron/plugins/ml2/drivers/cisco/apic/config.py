@@ -99,6 +99,17 @@ apic_opts = [
     cfg.BoolOpt('single_tenant_mode', default=True,
                 help=_("All the Openstack tenants will be described by a "
                        "single ACI tenant.")),
+    cfg.BoolOpt('attestation_enabled', default=False,
+                help='When endpoint attestation is enabled, APIC will '
+                     'securely verify the ownership of endpoints to a '
+                     'specific group.'),
+    cfg.IntOpt('attestation_key_synchronization_interval', default=60,
+               help='Defines how often the attestation key should be '
+                    'synchronized on the APIC. Use 0 for no-sync.'),
+    cfg.IntOpt('attestation_key_validity', default=60 * 60 * 24,
+               help='Defines how long a generated key is valid before '
+                    'expiring. Smaller value generates more notification '
+                    'traffic and better security.'),
 ]
 
 
