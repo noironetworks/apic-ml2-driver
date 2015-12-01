@@ -51,9 +51,10 @@ class PortForHAIPAddress(object):
 
     def get_port_for_ha_ipaddress(self, ipaddress, network_id):
         """Returns the Neutron Port ID for the HA IP Addresss."""
-        port_ha_ip = self.session.query(HAIPAddressToPortAssocation).filter_by(
-            ha_ip_address=ipaddress).join(models_v2.Port).filter_by(
-                network_id=network_id).first()
+        port_ha_ip = self.session.query(HAIPAddressToPortAssocation).join(
+            models_v2.Port).filter(
+                HAIPAddressToPortAssocation.ha_ip_address == ipaddress).filter(
+                    models_v2.Port.network_id == network_id).first()
         return port_ha_ip
 
     def get_ha_ipaddresses_for_port(self, port_id):
@@ -114,11 +115,13 @@ class HAIPOwnerDbMixin(object):
             try:
                 old_owner = self.ha_ip_handler.get_port_for_ha_ipaddress(
                     ipa, port['network_id'])
-                self.ha_ip_handler.set_port_id_for_ha_ipaddress(port_id, ipa)
-                if old_owner and old_owner['port_id'] != port_id:
-                    self.ha_ip_handler.delete_port_id_for_ha_ipaddress(
-                        old_owner['port_id'], ipa)
-                    ports_to_update.add(old_owner['port_id'])
+                with self.ha_ip_handler.session.begin(subtransactions=True):
+                    self.ha_ip_handler.set_port_id_for_ha_ipaddress(port_id,
+                                                                    ipa)
+                    if old_owner and old_owner['port_id'] != port_id:
+                        self.ha_ip_handler.delete_port_id_for_ha_ipaddress(
+                            old_owner['port_id'], ipa)
+                        ports_to_update.add(old_owner['port_id'])
             except db_exc.DBReferenceError as dbe:
                 LOG.debug("Ignoring FK error for port %s: %s", port_id, dbe)
         return ports_to_update
