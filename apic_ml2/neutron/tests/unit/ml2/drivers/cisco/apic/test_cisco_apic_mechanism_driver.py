@@ -40,6 +40,7 @@ from neutron.tests.unit.api import test_extensions
 from neutron.tests.unit.db import test_db_base_plugin_v2 as test_plugin
 from oslo_serialization import jsonutils as json
 
+from apic_ml2.neutron.db import port_ha_ipaddress_binding as ha
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
     mechanism_apic as md)
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
@@ -489,6 +490,59 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                     self._check_call_list(
                         expected_calls,
                         self.driver.notifier.port_update.call_args_list)
+
+    def test_overlapping_ip_ownership(self):
+        ha_handler = ha.HAIPOwnerDbMixin()
+        net1 = self.create_network(
+            tenant_id='onetenant', expected_res_status=201, shared=True,
+            is_admin_context=True)['network']
+        sub1 = self.create_subnet(
+            network_id=net1['id'], cidr='192.168.0.0/24',
+            ip_version=4, is_admin_context=True)
+
+        # Create another network with the same subnet
+        net2 = self.create_network(
+            tenant_id='onetenant', expected_res_status=201, shared=True,
+            is_admin_context=True)['network']
+        sub2 = self.create_subnet(
+            network_id=net2['id'], cidr='192.168.0.0/24',
+            ip_version=4, is_admin_context=True)
+
+        # Create 2 ports in each subnet, with the same IP address
+        with self.port(subnet=sub1, fixed_ips=[{'ip_address':
+                                                '192.168.0.4'}]) as p1:
+            with self.port(subnet=sub2, fixed_ips=[{'ip_address':
+                                                    '192.168.0.4'}]) as p2:
+                p1 = p1['port']
+                p2 = p2['port']
+                # Verify the two IPs are the same
+                self.assertEqual([x['ip_address'] for x in p1['fixed_ips']],
+                                 [x['ip_address'] for x in p2['fixed_ips']])
+                # Set P1 as owner
+                ha_handler.update_ip_owner(
+                    {'port': p1['id'], 'ip_address_v4': '192.168.0.4'})
+                # Ownership is set in the DB for P1
+                own_p1 = ha_handler.ha_ip_handler.get_ha_ipaddresses_for_port(
+                    p1['id'])
+                self.assertEqual(['192.168.0.4'], own_p1)
+
+                # Set P2 as owner
+                ha_handler.update_ip_owner(
+                    {'port': p2['id'], 'ip_address_v4': '192.168.0.4'})
+                # Ownership is set in the DB for P2
+                own_p2 = ha_handler.ha_ip_handler.get_ha_ipaddresses_for_port(
+                    p2['id'])
+                self.assertEqual(['192.168.0.4'], own_p2)
+
+                # P1 is still there
+                own_p1 = ha_handler.ha_ip_handler.get_ha_ipaddresses_for_port(
+                    p1['id'])
+                self.assertEqual(['192.168.0.4'], own_p1)
+
+                # Verify number of entries is exactly 2
+                entries = ha_handler.ha_ip_handler.session.query(
+                    ha.HAIPAddressToPortAssocation).all()
+                self.assertEqual(2, len(entries))
 
 
 class MechanismRpcTestCase(ApicML2IntegratedTestBase):
