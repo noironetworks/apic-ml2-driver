@@ -86,6 +86,9 @@ class PortForHAIPAddress(object):
             except orm.exc.NoResultFound:
                 return
 
+    def get_ha_port_associations(self):
+        return self.session.query(HAIPAddressToPortAssocation).all()
+
 
 class HAIPOwnerDbMixin(object):
 
@@ -100,6 +103,7 @@ class HAIPOwnerDbMixin(object):
         port_id = ip_owner_info.get('port')
         ipv4 = ip_owner_info.get('ip_address_v4')
         ipv6 = ip_owner_info.get('ip_address_v6')
+        network_id = ip_owner_info.get('network_id')
         if not port_id or (not ipv4 and not ipv6):
             return ports_to_update
         LOG.debug("Got IP owner update: %s", ip_owner_info)
@@ -114,7 +118,7 @@ class HAIPOwnerDbMixin(object):
                 continue
             try:
                 old_owner = self.ha_ip_handler.get_port_for_ha_ipaddress(
-                    ipa, port['network_id'])
+                    ipa, network_id or port['network_id'])
                 with self.ha_ip_handler.session.begin(subtransactions=True):
                     self.ha_ip_handler.set_port_id_for_ha_ipaddress(port_id,
                                                                     ipa)

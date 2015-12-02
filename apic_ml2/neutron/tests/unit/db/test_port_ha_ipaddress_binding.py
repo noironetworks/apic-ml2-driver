@@ -46,6 +46,16 @@ class PortToHAIPAddressBindingTestCase(testlib_api.SqlTestCase):
                                     'fixed_ips': [],
                                     'mac_address': 'fake-mac',
                                     'admin_state_up': True}}
+        # Port that is in the same network as port_1
+        self.port1_2_data = {'port': {'id': 'fake-port1-2-id',
+                                      'name': 'port1',
+                                      'network_id': 'fake-net1-id',
+                                      'tenant_id': 'test-tenant',
+                                      'device_id': 'fake_device',
+                                      'device_owner': 'fake_owner',
+                                      'fixed_ips': [],
+                                      'mac_address': 'fake-mac-2',
+                                      'admin_state_up': True}}
         self.port2_data = {'port': {'id': 'fake-port2-id',
                                     'name': 'port2',
                                     'network_id': 'fake-net2-id',
@@ -60,6 +70,7 @@ class PortToHAIPAddressBindingTestCase(testlib_api.SqlTestCase):
         self.plugin.create_network(self.context, self.net1_data)
         self.plugin.create_network(self.context, self.net2_data)
         self.port1 = self.plugin.create_port(self.context, self.port1_data)
+        self.port1_2 = self.plugin.create_port(self.context, self.port1_2_data)
         self.port2 = self.plugin.create_port(self.context, self.port2_data)
         self.port_haip = ha.PortForHAIPAddress()
 
@@ -102,7 +113,7 @@ class PortToHAIPAddressBindingTestCase(testlib_api.SqlTestCase):
             self.port1['id'], self.ha_ip1)
         self.assertEqual(1, result)
         obj = self.port_haip.get_port_for_ha_ipaddress(
-            self.port2['network_id'], self.ha_ip1)
+            self.ha_ip1, self.port2['network_id'])
         self.assertIsNone(obj)
 
     def test_get_ha_ip_addresses_for_port(self):
@@ -160,3 +171,32 @@ class PortToHAIPAddressBindingTestCase(testlib_api.SqlTestCase):
         obj = mixin.ha_ip_handler.get_port_for_ha_ipaddress(
             self.ha_ip1, port3['network_id'])
         self.assertEqual(port3['id'], obj['port_id'])
+
+    def test_ip_replaced(self):
+        mixin = ha.HAIPOwnerDbMixin()
+        mixin._get_plugin = mock.Mock(return_value=self.plugin)
+        ip_owner_info = {'port': self.port1['id'],
+                         'ip_address_v4': self.ha_ip1}
+        mixin.update_ip_owner(ip_owner_info)
+        # Verify only one entry is there
+        dump = mixin.ha_ip_handler.get_ha_port_associations()
+        self.assertEqual(1, len(dump))
+        self.assertEqual(self.port1['id'], dump[0].port_id)
+        self.assertEqual(self.ha_ip1, dump[0].ha_ip_address)
+
+        # Now override with port1_2
+        ip_owner_info['port'] = self.port1_2['id']
+        mixin.update_ip_owner(ip_owner_info)
+        # Verify still one entry exists
+        dump = mixin.ha_ip_handler.get_ha_port_associations()
+        self.assertEqual(1, len(dump))
+        self.assertEqual(self.port1_2['id'], dump[0].port_id)
+        self.assertEqual(self.ha_ip1, dump[0].ha_ip_address)
+
+        # Override again, but with a different net_id to keep both records
+        ip_owner_info['port'] = self.port1['id']
+        ip_owner_info['network_id'] = 'new_net_id'
+        mixin.update_ip_owner(ip_owner_info)
+        # Verify still one entry exists
+        dump = mixin.ha_ip_handler.get_ha_port_associations()
+        self.assertEqual(2, len(dump))
