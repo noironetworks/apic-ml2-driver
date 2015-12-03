@@ -238,7 +238,16 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         _apic_driver_instance = self
         self._l3_plugin = None
         self._db_plugin = None
-        self.attestator = attestation.EndpointAttestator(self.apic_manager)
+        self._setup_attestator()
+
+    def _setup_attestator(self):
+        self.attestator = attestation.EndpointAttestator(
+            self.apic_manager, self.notifier, cfg.CONF.ml2_cisco_apic)
+        if not self.attestator.enabled:
+            self.attestator.cleanup_attestation()
+        else:
+            # Start attestator main loop
+            self.attestator.start()
 
     def _setup_opflex_rpc_listeners(self):
         self.opflex_endpoints = [o_rpc.GBPServerRpcCallback(self)]
@@ -355,10 +364,12 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         details.update(
             self.get_vrf_details(context, vrf_id=network['tenant_id']))
         try:
-            details['attestation'] = self.attestator.get_endpoint_attestation(
+            hmac = self.attestator.get_endpoint_attestation(
                 port_id, details['host'],
                 details['app_profile_name'] + "|" +
                 details['endpoint_group_name'], details['ptg_tenant'])
+            if hmac:
+                details['attestation'] = hmac
         except AttributeError:
             pass    # EP attestation not supported by APICAPI
         return details

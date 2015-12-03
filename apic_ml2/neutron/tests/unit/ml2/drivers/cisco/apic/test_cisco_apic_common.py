@@ -18,10 +18,13 @@ import mock
 import requests
 
 from neutron import context
+from neutron.db import model_base
 from neutron.plugins.ml2 import config  # noqa
 from neutron.tests import base
 from oslo_config import cfg
 import webob
+
+from apic_ml2.neutron.db import attestation
 
 OK = requests.codes.ok
 
@@ -293,9 +296,22 @@ class ConfigMixin(object):
                 'host_pool_cidr': HOST_POOL_CIDR,
             },
         }
+        self.setup_attestation_db()
 
     def override_conf(self, opt, val, group):
         cfg.CONF.set_override(opt, val, group)
+
+    def setup_attestation_db(self):
+        self.vault = attestation.KeyVaultManager()
+        engine = self.vault._FACADE.get_engine()
+        model_base.BASEV2.metadata.create_all(engine)
+
+        def clear_tables():
+            with engine.begin() as conn:
+                for table in reversed(
+                        model_base.BASEV2.metadata.sorted_tables):
+                    conn.execute(table.delete())
+        self.addCleanup(clear_tables)
 
 
 class FakeDbContract(object):

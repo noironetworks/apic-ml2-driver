@@ -67,6 +67,7 @@ class KeyVaultManager(object):
             new_curr = KeyVault(
                 key=key, timestamp=timestamp, validity=validity, type=type)
             self.session.add(new_curr)
+            return new_curr
 
     def _get_current_key_db(self):
         with self.session.begin(subtransactions=True):
@@ -102,8 +103,15 @@ class KeyVaultManager(object):
         key_db = self._get_previous_key_db()
         return self._make_key_dict(key_db) if key_db else None
 
-    def set_current_key_and_rotate(self, key, timestamp, validity):
-        """Transactionally rotate the key"""
+    def get_current_and_previous_keys(self):
+        with self.session.begin(subtransactions=True):
+            return self.get_current_key(), self.get_previous_key()
+
+    def rotate_current_key(self, key, timestamp, validity):
+        """Transactionally rotate the key.
+
+        If no current key is set, this will be a noop and return None
+        """
         with self.session.begin(subtransactions=True):
             # Delete previous key
             self._delete_previous_key_db()
@@ -112,6 +120,34 @@ class KeyVaultManager(object):
             if new_prev:
                 new_prev.type = KeyVaultManager.KEY_TYPE_PREVIOUS
                 self.session.merge(new_prev)
-            # Add new key
-            self._create_key(key, timestamp, validity,
-                             KeyVaultManager.KEY_TYPE_CURRENT)
+                # Add new key
+                return self._make_key_dict(
+                    self._create_key(key, timestamp, validity,
+                                     KeyVaultManager.KEY_TYPE_CURRENT))
+            return None
+
+    def cleanup_keys(self):
+        with self.session.begin(subtransactions=True):
+            self._delete_previous_key_db()
+            self._delete_current_key_db()
+
+    def set_initial_key_if_not_exists(self, key, timestamp, validity):
+        # Transactionally creates the current key if non existent, returns
+        # the Key that was created if any
+        with self.session.begin(subtransactions=True):
+            if not self._get_current_key_db():
+                return self._make_key_dict(
+                    self._create_key(key, timestamp, validity,
+                                     KeyVaultManager.KEY_TYPE_CURRENT))
+            return None
+
+    def expire_current_key(self, current_key, new_key, timestamp, validity):
+        # Transactionally expires the attestation Key unless already expired
+        # returns True if a Key is actually set
+        with self.session.begin(subtransactions=True):
+            curr = self.get_current_key() or {}
+            if curr.get('key') == current_key:
+                return self._make_key_dict(
+                    self._create_key(new_key, timestamp, validity,
+                                     KeyVaultManager.KEY_TYPE_CURRENT))
+            return None

@@ -94,6 +94,8 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
                            'ml2_cisco_apic')
         self.override_conf('per_tenant_context', False,
                            'ml2_cisco_apic')
+        self.override_conf('attestation_enabled', True,
+                           'ml2_cisco_apic')
         service_plugins = service_plugins or {'L3_ROUTER_NAT': 'cisco_apic_l3'}
         mock.patch('apic_ml2.neutron.plugins.ml2.drivers.'
                    'cisco.apic.nova_client.NovaClient').start()
@@ -132,9 +134,11 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
         self.l3_plugin = manager.NeutronManager.get_service_plugins()[
             'L3_ROUTER_NAT']
         l3_apic.apic_mapper.mapper_context = self.fake_transaction
-        self.driver.apic_manager.vmm_shared_secret = base64.b64encode(
-            'dirtylittlesecret')
         self.driver.notifier = mock.Mock()
+        self.setup_attestation_db()
+        # Simulate attestator restarting
+        self.vault.set_initial_key_if_not_exists(
+            base64.b64encode('dirtybigsecret'), 10, 100)
 
     def _bind_port_to_host(self, port_id, host):
         plugin = manager.NeutronManager.get_plugin()
@@ -367,6 +371,8 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
         self.assertFalse(self.synchronizer._sync_base.called)
 
     def test_attestation(self):
+        self.vault.rotate_current_key(
+            base64.b64encode('dirtylittlesecret'), 10, 100)
         net = self.create_network(
             tenant_id='onetenant', expected_res_status=201)['network']
         expected_attestation = {'ports': [{'switch': '102',
