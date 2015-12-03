@@ -58,8 +58,8 @@ class EndpointAttestator(object):
 
     def _drift_key_validity(self, key):
         validity = int(key['validity'])
-        return str(validity + int(round(random.uniform(-validity * 0.1,
-                                                       validity * 0.1))))
+        return str(validity + int(round(random.uniform(0,
+                                                       2 * validity * 0.1))))
 
     def _generate_key_parameters(self):
         # returns Base64 codification of Key, the current timestamp, and the

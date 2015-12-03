@@ -108,6 +108,7 @@ class AttestatorTestCase(testlib_api.SqlTestCase, common.ConfigMixin):
         self.attestator = attestator.EndpointAttestator(
             self.apic_manager, self.notifier, self.cfg)
         self.setup_attestation_db()
+        self.attestator.alarm = mock.Mock()
 
     def test_timestamp(self):
         self.assertIsInstance(self.attestator._timestamp(), int)
@@ -128,7 +129,7 @@ class AttestatorTestCase(testlib_api.SqlTestCase, common.ConfigMixin):
         for x in range(10):
             validity = self.attestator._drift_key_validity(curr)
             validities.add(validity)
-            self.assertTrue(90 <= int(validity) <= 110,
+            self.assertTrue(100 <= int(validity) <= 120,
                             "Actual validity is %s" % validity)
         # it's very unlikely that all the random values collided, so verify
         # that at least a bunch are unique
@@ -163,3 +164,42 @@ class AttestatorTestCase(testlib_api.SqlTestCase, common.ConfigMixin):
         self.assertIsNone(prev)
         self.attestator.apic.set_vmm_secret.assert_called_once_with(
             current='', previous='')
+
+    def test_main_loop(self):
+        # First time into the loop, with restarted = to True, a key is
+        # generated but APIC is not notified
+
+        # We will find two keys being key expiration == 0
+        self.attestator._key_expiration = mock.Mock(return_value=0)
+        self.attestator._main_loop()
+
+        curr, prev = self.vault.get_current_and_previous_keys()
+        # Both keys exist
+        self.assertTrue(curr and prev)
+        self.assertFalse(self.attestator.apic.set_vmm_secret.called)
+
+        # Second time in the loop, APIC is called with older set of Keys
+        self.attestator._main_loop()
+        self.attestator.apic.set_vmm_secret.assert_called_once_with(
+            current=curr['key'], previous=prev['key'])
+
+        # Key still expired, so a new set of key is now present
+        older_curr = curr
+        curr, prev = self.vault.get_current_and_previous_keys()
+        self.assertTrue(curr and prev)
+        self.assertEqual(older_curr['key'], prev['key'])
+        self.attestator.apic.reset_mock()
+
+        # This time loop with unexpired key
+        self.attestator._key_expiration = mock.Mock(return_value=1)
+        self.attestator._main_loop()
+
+        # APIC still called with the previous values
+        self.attestator.apic.set_vmm_secret.assert_called_once_with(
+            current=curr['key'], previous=prev['key'])
+
+        # No rotation happened
+        older_curr, older_prev = curr, prev
+        curr, prev = self.vault.get_current_and_previous_keys()
+        self.assertEqual(older_curr, curr)
+        self.assertEqual(older_prev, prev)
