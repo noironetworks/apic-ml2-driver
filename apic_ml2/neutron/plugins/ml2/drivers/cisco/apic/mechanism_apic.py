@@ -346,7 +346,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         if port['device_owner'].startswith('compute:') and port['device_id']:
             vm = nova_client.NovaClient().get_server(port['device_id'])
             details['vm-name'] = vm.name if vm else port['device_id']
-        self._add_ip_mapping_details(context, port, details)
+        self._add_ip_mapping_details(context, port, kwargs['host'], details)
         self._add_network_details(context, port, details)
         if self._is_nat_enabled_on_ext_net(network):
             # PTG name is different
@@ -438,7 +438,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 'prefixlen':
                 netaddr.IPNetwork(snat_subnets[0]['cidr']).prefixlen}
 
-    def _add_ip_mapping_details(self, context, port, details):
+    def _add_ip_mapping_details(self, context, port, host, details):
         """Add information about IP mapping for DNAT/SNAT."""
         l3plugin = manager.NeutronManager.get_service_plugins().get(
             constants.L3_ROUTER_NAT)
@@ -492,7 +492,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                              self._get_network_app_profile(network))})
             host_snat_ip_allocation = (
                 self._allocate_snat_ip_for_host_and_ext_net(
-                    context, details['host'], network))
+                    context, host, network))
             if host_snat_ip_allocation:
                 host_snat_ips.append(host_snat_ip_allocation)
 

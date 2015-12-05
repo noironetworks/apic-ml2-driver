@@ -1790,7 +1790,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
         sub = self.create_subnet(
             network_id=net['id'], cidr='10.0.0.0/24',
             ip_version=4, is_admin_context=True)
-        host_arg = {'binding:host_id': 'h1'}
+        host_arg = {'binding:host_id': 'h2'}
         with self.port(subnet=sub, tenant_id='anothertenant',
                        device_owner='compute:', device_id='someid',
                        arg_list=(portbindings.HOST_ID,), **host_arg) as p1:
