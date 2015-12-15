@@ -95,7 +95,10 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
                            'ml2_cisco_apic')
         self.override_conf('per_tenant_context', False,
                            'ml2_cisco_apic')
-        service_plugins = service_plugins or {'L3_ROUTER_NAT': 'cisco_apic_l3'}
+        service_plugins = (
+            service_plugins or
+            {'L3_ROUTER_NAT': 'apic_ml2.neutron.services.l3_router.'
+                              'l3_apic.ApicL3ServicePlugin'})
         mock.patch('apic_ml2.neutron.plugins.ml2.drivers.'
                    'cisco.apic.nova_client.NovaClient').start()
         apic_client.RestClient = mock.Mock()

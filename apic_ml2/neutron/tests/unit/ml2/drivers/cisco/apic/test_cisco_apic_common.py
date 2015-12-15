@@ -303,6 +303,8 @@ class ConfigMixin(object):
         self.mocked_parser.return_value.read.return_value = [apic_switch_cfg]
         self.mocked_parser.return_value.parsed = [apic_switch_cfg]
 
+        cfg.CONF.set_override('allow_overlapping_ips', True)
+
     def override_conf(self, opt, val, group):
         cfg.CONF.set_override(opt, val, group)
 
