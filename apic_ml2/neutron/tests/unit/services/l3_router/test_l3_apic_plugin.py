@@ -101,7 +101,7 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
         self.plugin.name_mapper.port.return_value = mocked.APIC_PORT
         self.plugin.name_mapper.router.return_value = mocked.APIC_ROUTER
         self.plugin.name_mapper.app_profile.return_value = mocked.APIC_AP
-        self.plugin.per_tenant_context = False
+        self.plugin.single_tenant_mode = False
 
         self.contract = FakeContract()
         self.plugin.get_router = mock.Mock(
@@ -134,6 +134,11 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
                    new=mock.Mock(return_value=self.floatingip)).start()
         mock.patch('neutron.db.l3_dvr_db.L3_NAT_with_dvr_db_mixin.'
                    'delete_floatingip').start()
+
+        def _get_router_aci_tenant(router):
+            return 'common'
+        self.plugin.aci_mech_driver._get_router_aci_tenant = (
+            _get_router_aci_tenant)
         self.addCleanup(self.plugin.manager.reset_mock)
 
     def _check_call_list(self, expected, observed):
@@ -147,7 +152,7 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
             msg='There are more calls than expected: %s' % str(observed))
 
     def _tenant(self):
-        return ('common' if not self.plugin.per_tenant_context else
+        return ('common' if not self.plugin.single_tenant_mode else
                 mocked.APIC_TENANT)
 
     def _test_add_router_interface(self, interface_info):
