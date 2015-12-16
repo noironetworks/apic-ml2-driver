@@ -1129,7 +1129,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             # Tenant is COMMON only if per tenant context is disabled, or is a
             # shared NATed network.
             if self._is_nat_enabled_on_ext_net(network) and network['shared']:
-                    vrf['aci_tenant'] = apic_manager.TENANT_COMMON
+                vrf['aci_tenant'] = apic_manager.TENANT_COMMON
             if not self.per_tenant_context:
                 vrf['aci_tenant'] = apic_manager.TENANT_COMMON
 

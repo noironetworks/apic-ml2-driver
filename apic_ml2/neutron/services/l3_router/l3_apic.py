@@ -194,7 +194,10 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
 
         with self.manager.apic.transaction() as trs:
             vrf = self.aci_mech_driver._get_tenant_vrf(router['tenant_id'])
-            self.manager.create_router(arouter_id, owner=vrf['aci_tenant'],
+            # A Neutron router is rendered as a contract. This contract
+            # Will exist in the COMMON tenant when single tenant mode is false,
+            # in the sys_id tenant otherwise.
+            self.manager.create_router(arouter_id, owner=tenant_id,
                                        transaction=trs,
                                        context=vrf['aci_name'])
             if router['admin_state_up']:
