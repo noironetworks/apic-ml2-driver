@@ -14,3 +14,4 @@ lldpctl: CommandFilter, lldpctl, root
 # ip_lib filters
 ip: IpFilter, ip, root
 ip_exec: IpNetnsExecFilter, ip, root
+ovsdb-client: CommandFilter, ovsdb-client, root
