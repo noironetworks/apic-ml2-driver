@@ -183,18 +183,14 @@ class ApicTopologyServiceNotifierApi(object):
 
     RPC_API_VERSION = '1.1'
 
-    def __init__(self):
-        super(ApicTopologyServiceNotifierApi, self).__init__(
-            topic=TOPIC_APIC_SERVICE,
-            default_version=self.RPC_API_VERSION)
-
     def update_link(self, context, host, interface, mac, switch, module, port):
         self.fanout_cast(
             context, self.make_msg(
                 'update_link',
                 host=host, interface=interface, mac=mac,
                 switch=switch, module=module, port=port),
-            topic=TOPIC_APIC_SERVICE)
+            topic=TOPIC_APIC_SERVICE,
+            version=self.RPC_API_VERSION)
 
     def delete_link(self, context, host, interface):
         self.fanout_cast(
@@ -202,4 +198,5 @@ class ApicTopologyServiceNotifierApi(object):
                 'delete_link',
                 host=host, interface=interface, mac=None,
                 switch=0, module=0, port=0),
-            topic=TOPIC_APIC_SERVICE)
+            topic=TOPIC_APIC_SERVICE,
+            version=self.RPC_API_VERSION)
