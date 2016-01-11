@@ -16,10 +16,10 @@
 from neutron.common import constants as n_constants
 from neutron import context
 from neutron import manager
-from neutron.openstack.common import loopingcall
 from neutron.plugins.ml2 import db as l2_db
 from neutron.plugins.ml2 import driver_context
 from oslo_log import log as logging
+from oslo_service import loopingcall
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import constants
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import exceptions as aexc

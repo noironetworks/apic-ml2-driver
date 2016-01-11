@@ -33,7 +33,6 @@ from neutron.plugins.common import constants
 from neutron.plugins.ml2 import db as ml2_db
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2 import driver_context
-from neutron.plugins.ml2.drivers.cisco.apic import apic_model
 from neutron.plugins.ml2.drivers import mech_agent
 from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron.plugins.ml2 import models
@@ -43,6 +42,7 @@ from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
 
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_model
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_sync
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import attestation
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config
@@ -143,7 +143,9 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             apic_config.scope_names = False
         APICMechanismDriver.apic_manager = apic_manager.APICManager(
             apic_model.ApicDbModel(), logging, network_config, apic_config,
-            keyclient_param, keystone_authtoken, apic_system_id)
+            keyclient_param, keystone_authtoken, apic_system_id,
+            default_apic_model=('apic_ml2.neutron.plugins.ml2.drivers.'
+                                'cisco.apic.apic_model'))
         return APICMechanismDriver.apic_manager
 
     @staticmethod
@@ -306,7 +308,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
     def get_gbp_details(self, context, **kwargs):
         core_plugin = manager.NeutronManager.get_plugin()
         port_id = core_plugin._device_to_port_id(
-            kwargs['device'])
+            context, kwargs['device'])
         port_context = core_plugin.get_bound_port_context(
             context, port_id, kwargs['host'])
         if not port_context:
