@@ -23,6 +23,8 @@ from neutron.tests import base
 from oslo_config import cfg
 import webob
 
+from apicapi.apic_mapper import ApicName
+
 OK = requests.codes.ok
 
 APIC_HOSTS = ['fake.controller.local']
@@ -123,7 +125,7 @@ class ControllerMixin(object):
             return "NAT-vrf-%s" % (net_name or APIC_NETWORK)
         if self.driver.single_tenant_mode and self.driver.per_tenant_context:
             return APIC_TENANT
-        return 'shared'
+        return ApicName('shared')
 
     def _router_tenant(self):
         if self.driver.single_tenant_mode:

@@ -1,5 +1,11 @@
 neutron-ml2-driver-apic (@VERSION@-@REVISION@) trusty; urgency=low
 
+  * Update to Liberty
+
+ -- Amit Bose <bose@noironetworks.com>  Mon, 11 Jan 2016 14:42:08 -0700
+
+neutron-ml2-driver-apic (2015.1.0-1) trusty; urgency=low
+
   * Update to Kilo
 
  -- Amit Bose <bose@noironetworks.com>  Tue, 25 Aug 2015 15:13:46 -0700

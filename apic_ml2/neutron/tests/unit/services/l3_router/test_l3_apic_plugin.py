@@ -67,7 +67,7 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
                             mocked.ConfigMixin):
     def setUp(self):
         super(TestCiscoApicL3Plugin, self).setUp()
-        mock.patch('neutron.plugins.ml2.drivers.cisco.apic.'
+        mock.patch('apic_ml2.neutron.plugins.ml2.drivers.cisco.apic.'
                    'apic_model.ApicDbModel').start()
         mocked.ControllerMixin.set_up_mocks(self)
         mocked.ConfigMixin.set_up_mocks(self)
@@ -178,7 +178,7 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
         mgr = self.plugin.manager
         self.plugin.remove_router_interface(self.context, ROUTER,
                                             interface_info)
-        mgr.delete_contract_for_epg.assert_called_once()
+        self.assertEqual(1, mgr.remove_router_interface.call_count)
 
     def test_add_router_interface_subnet(self):
         self._test_add_router_interface(self.interface_info['subnet'])
