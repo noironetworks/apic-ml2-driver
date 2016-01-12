@@ -15,7 +15,7 @@ mkdir -p $BUILD_DIR
 rm -rf $BUILD_DIR/*
 NAME=`python setup.py --name`
 VERSION_PY=`python setup.py --version`
-VERSION=${VERSION_PY/.dev/~dev}
+VERSION=`echo $VERSION_PY | sed -nre 's,([^\.]+.[^\.]+.[^\.]+)((\.)(0[^\.]+))?((\.)(dev.*))?,\1 \4 \7,p' | sed -re 's/ *$//g' | sed -re 's/ +/~/g'`
 REVISION=${REVISION:-1}
 python setup.py sdist --dist-dir $BUILD_DIR
 SOURCE_FILE=${NAME}-${VERSION_PY}.tar.gz

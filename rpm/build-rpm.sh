@@ -15,7 +15,7 @@ mkdir -p $BUILD_DIR/BUILD $BUILD_DIR/SOURCES $BUILD_DIR/SPECS $BUILD_DIR/RPMS $B
 NAME=`python setup.py --name`
 RELEASE=${RELEASE:-1}
 VERSION_PY=`python setup.py --version`
-VERSION=${VERSION_PY/.dev/~dev}
+VERSION=`echo $VERSION_PY | sed -nre 's,([^\.]+.[^\.]+.[^\.]+)((\.)(0[^\.]+))?((\.)(dev.*))?,\1 \4 \7,p' | sed -re 's/ *$//g' | sed -re 's/ +/~/g'`
 SPEC_FILE=${SPEC_FILE_IN/.in/}
 SPEC_FILE=${SPEC_FILE/rpm\//}
 sed -e "s/@VERSION@/$VERSION/" \
