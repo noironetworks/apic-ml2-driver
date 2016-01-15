@@ -556,11 +556,16 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             if not inst.synchronizer:
                 inst.synchronizer = (
                     APICMechanismDriver.get_base_synchronizer(inst))
+                inst.router_synchronizer = (
+                    APICMechanismDriver.get_router_synchronizer(
+                        inst.l3_plugin))
                 inst.synchronizer.sync_base()
+                inst.router_synchronizer.sync_router()
             if args and isinstance(args[0], driver_context.NetworkContext):
                 if (args[0]._plugin_context.is_admin and
                         args[0].current['name'] == acst.APIC_SYNC_NETWORK):
                     inst.synchronizer._sync_base()
+                    inst.router_synchronizer._sync_router()
             return f(inst, *args, **kwargs)
         return inner
 
