@@ -24,6 +24,7 @@ from oslo_config import cfg
 import webob
 
 from apicapi.apic_mapper import ApicName
+from apicapi.apic_mapper import MAX_APIC_NAME_LENGTH
 
 OK = requests.codes.ok
 
@@ -149,8 +150,10 @@ class ControllerMixin(object):
         if prefix:
             tenant = prefix + '-' + tenant
         if self.driver.single_tenant_mode and not preexisting:
-            return tenant + '-' + name
-        return ('%s-%s' % (prefix, name)) if prefix else name
+            s_name = (tenant + '-' + name)
+        else:
+            s_name = ('%s-%s' % (prefix, name)) if prefix else name
+        return s_name[0:MAX_APIC_NAME_LENGTH]
 
     def set_up_mocks(self):
         # The mocked responses from the server are lists used by

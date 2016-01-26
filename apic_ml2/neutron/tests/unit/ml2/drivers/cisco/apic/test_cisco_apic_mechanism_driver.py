@@ -309,7 +309,8 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                 context.get_admin_context(), router['id'],
                 {'port_id': p1['port']['id']})
             self.mgr.add_router_interface.assert_called_once_with(
-                self._tenant(neutron_tenant='onetenant'), router['id'],
+                self._tenant(neutron_tenant='onetenant'),
+                self._scoped_name(router['id'], tenant='test-tenant'),
                 net['id'],
                 app_profile_name=self._app_profile(neutron_tenant='onetenant'))
 
@@ -319,7 +320,8 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                 context.get_admin_context(), router['id'],
                 {'port_id': p1['port']['id']})
             self.mgr.remove_router_interface.assert_called_once_with(
-                self._tenant(neutron_tenant='onetenant'), router['id'],
+                self._tenant(neutron_tenant='onetenant'),
+                self._scoped_name(router['id'], tenant='test-tenant'),
                 net['id'],
                 app_profile_name=self._app_profile(neutron_tenant='onetenant'))
 
@@ -340,7 +342,9 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             context.get_admin_context(), router['id'],
             {'subnet_id': sub['id']})
         self.mgr.add_router_interface.assert_called_once_with(
-            self._tenant(neutron_tenant='onetenant'), router['id'], net['id'],
+            self._tenant(neutron_tenant='onetenant'),
+            self._scoped_name(router['id'], tenant='test-tenant'),
+            net['id'],
             app_profile_name=self._app_profile(neutron_tenant='onetenant'))
 
         self.mgr.remove_router_interface = mock.Mock()
@@ -349,7 +353,9 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             context.get_admin_context(), router['id'],
             {'subnet_id': sub['id']})
         self.mgr.remove_router_interface.assert_called_once_with(
-            self._tenant(neutron_tenant='onetenant'), router['id'], net['id'],
+            self._tenant(neutron_tenant='onetenant'),
+            self._scoped_name(router['id'], tenant='test-tenant'),
+            net['id'],
             app_profile_name=self._app_profile(neutron_tenant='onetenant'))
 
     def test_sync_on_demand(self):
