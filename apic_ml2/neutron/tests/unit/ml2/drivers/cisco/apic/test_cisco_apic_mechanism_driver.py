@@ -553,6 +553,143 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                     ha.HAIPAddressToPortAssocation).all()
                 self.assertEqual(2, len(entries))
 
+    def test_ip_address_owner_update(self):
+        net = self.create_network(
+            tenant_id=mocked.APIC_TENANT, expected_res_status=201)['network']
+        self.create_subnet(
+            tenant_id=mocked.APIC_TENANT,
+            network_id=net['id'], cidr='10.0.0.0/24', ip_version=4)['subnet']
+        p1 = self.create_port(
+            network_id=net['id'], tenant_id=mocked.APIC_TENANT,
+            device_owner='compute:', device_id='someid')['port']
+        p2 = self.create_port(
+            network_id=net['id'], tenant_id=mocked.APIC_TENANT,
+            device_owner='compute:', device_id='someid')['port']
+
+        ip_owner_info = {'port': p1['id'], 'ip_address_v4': '1.2.3.4'}
+        self.driver.notify_port_update = mock.Mock()
+
+        # set new owner
+        self.driver.ip_address_owner_update(
+            context.get_admin_context(),
+            ip_owner_info=ip_owner_info, host='h1')
+        obj = self.driver.ha_ip_handler.get_port_for_ha_ipaddress(
+            '1.2.3.4', net['id'])
+        self.assertEqual(p1['id'], obj['port_id'])
+        self.driver.notify_port_update.assert_called_with(p1['id'])
+
+        # update existing owner
+        self.driver.notify_port_update.reset_mock()
+        ip_owner_info['port'] = p2['id']
+        self.driver.ip_address_owner_update(
+            context.get_admin_context(),
+            ip_owner_info=ip_owner_info, host='h2')
+        obj = self.driver.ha_ip_handler.get_port_for_ha_ipaddress(
+            '1.2.3.4', net['id'])
+        self.assertEqual(p2['id'], obj['port_id'])
+        exp_calls = [
+            mock.call(p1['id']),
+            mock.call(p2['id'])]
+        self._check_call_list(
+            exp_calls, self.driver.notify_port_update.call_args_list)
+
+    def test_gbp_details_for_allowed_address_pair(self):
+        net = self.create_network(
+            tenant_id=mocked.APIC_TENANT, expected_res_status=201)['network']
+        sub1 = self.create_subnet(
+            tenant_id=mocked.APIC_TENANT,
+            network_id=net['id'], cidr='10.0.0.0/24', ip_version=4)['subnet']
+        sub2 = self.create_subnet(
+            tenant_id=mocked.APIC_TENANT,
+            network_id=net['id'], cidr='1.2.3.0/24', ip_version=4)['subnet']
+        allow_addr = [{'ip_address': '1.2.3.250',
+                       'mac_address': '00:00:00:AA:AA:AA'},
+                      {'ip_address': '1.2.3.251',
+                       'mac_address': '00:00:00:BB:BB:BB'}]
+        # create 2 ports with same allowed-addresses
+        p1 = self.create_port(
+            network_id=net['id'], tenant_id=mocked.APIC_TENANT,
+            device_owner='compute:', device_id='someid',
+            fixed_ips=[{'subnet_id': sub1['id']}],
+            allowed_address_pairs=allow_addr)['port']
+        p2 = self.create_port(
+            network_id=net['id'], tenant_id=mocked.APIC_TENANT,
+            device_owner='compute:', device_id='someid',
+            fixed_ips=[{'subnet_id': sub1['id']}],
+            allowed_address_pairs=allow_addr)['port']
+
+        self._bind_port_to_host(p1['id'], 'h1')
+        self._bind_port_to_host(p2['id'], 'h2')
+        self.driver.ha_ip_handler.set_port_id_for_ha_ipaddress(
+            p1['id'], '1.2.3.250')
+        self.driver.ha_ip_handler.set_port_id_for_ha_ipaddress(
+            p2['id'], '1.2.3.251')
+        allow_addr[0]['active'] = True
+        details = self._get_gbp_details(p1['id'], 'h1')
+        self.assertEqual(allow_addr, details['allowed_address_pairs'])
+        del allow_addr[0]['active']
+        allow_addr[1]['active'] = True
+        details = self._get_gbp_details(p2['id'], 'h2')
+        self.assertEqual(allow_addr, details['allowed_address_pairs'])
+
+        # set allowed-address as fixed-IP of ports p3 and p4, which also have
+        # floating-IPs. Verify that FIP is "stolen" by p1 and p2
+        net_ext = self.create_network(
+            is_admin_context=True, tenant_id=mocked.APIC_TENANT,
+            **{'router:external': 'True'})['network']
+        self.create_subnet(
+            is_admin_context=True, tenant_id=mocked.APIC_TENANT,
+            network_id=net_ext['id'], cidr='8.8.8.0/24',
+            ip_version=4)['subnet']
+        p3 = self.create_port(
+            network_id=net['id'], tenant_id=mocked.APIC_TENANT,
+            fixed_ips=[{'subnet_id': sub2['id'],
+                        'ip_address': '1.2.3.250'}])['port']
+        p4 = self.create_port(
+            network_id=net['id'], tenant_id=mocked.APIC_TENANT,
+            fixed_ips=[{'subnet_id': sub2['id'],
+                        'ip_address': '1.2.3.251'}])['port']
+        rtr = self.create_router(
+            api=self.ext_api, tenant_id=mocked.APIC_TENANT,
+            external_gateway_info={'network_id': net_ext['id']})['router']
+        self.l3_plugin.add_router_interface(
+            context.get_admin_context(), rtr['id'], {'subnet_id': sub2['id']})
+        fip1 = self.create_floatingip(
+            tenant_id=mocked.APIC_TENANT, port_id=p3['id'],
+            floating_network_id=net_ext['id'],
+            api=self.ext_api)['floatingip']
+        fip2 = self.create_floatingip(
+            tenant_id=mocked.APIC_TENANT, port_id=p4['id'],
+            floating_network_id=net_ext['id'],
+            api=self.ext_api)['floatingip']
+        details = self._get_gbp_details(p1['id'], 'h1')
+        self.assertEqual(1, len(details['floating_ip']))
+        self.assertEqual(
+            fip1['floating_ip_address'],
+            details['floating_ip'][0]['floating_ip_address'])
+        details = self._get_gbp_details(p2['id'], 'h2')
+        self.assertEqual(1, len(details['floating_ip']))
+        self.assertEqual(
+            fip2['floating_ip_address'],
+            details['floating_ip'][0]['floating_ip_address'])
+
+        # verify FIP updates: update to p3, p4 should also update p1 and p2
+        self.driver.notify_port_update = mock.Mock()
+        self.driver.notify_port_update_for_fip(p3['id'])
+        expected_calls = [
+            mock.call(p, mock.ANY)
+            for p in sorted([p1['id'], p2['id'], p3['id']])]
+        self._check_call_list(
+            expected_calls, self.driver.notify_port_update.call_args_list)
+
+        self.driver.notify_port_update.reset_mock()
+        self.driver.notify_port_update_for_fip(p4['id'])
+        expected_calls = [
+            mock.call(p, mock.ANY)
+            for p in sorted([p1['id'], p2['id'], p4['id']])]
+        self._check_call_list(
+            expected_calls, self.driver.notify_port_update.call_args_list)
+
 
 class MechanismRpcTestCase(ApicML2IntegratedTestBase):
 

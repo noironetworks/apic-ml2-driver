@@ -26,7 +26,9 @@ from neutron.common import exceptions as n_exc
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron import context as nctx
+from neutron.db import allowedaddresspairs_db as n_addr_pair_db
 from neutron.db import db_base_plugin_v2 as n_db
+from neutron.db import models_v2
 from neutron.extensions import portbindings
 from neutron import manager
 from neutron.plugins.common import constants
@@ -43,6 +45,7 @@ from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
 
+from apic_ml2.neutron.db import port_ha_ipaddress_binding as ha_ip_db
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_sync
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import attestation
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config
@@ -119,7 +122,8 @@ class NameMapper(object):
         return name_wrapper
 
 
-class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
+class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
+                          ha_ip_db.HAIPOwnerDbMixin):
 
     apic_manager = None
 
@@ -182,6 +186,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         self.vif_type = portbindings.VIF_TYPE_OVS
         super(APICMechanismDriver, self).__init__(
             ofcst.AGENT_TYPE_OPFLEX_OVS)
+        ha_ip_db.HAIPOwnerDbMixin.__init__(self)
 
     def try_to_bind_segment_for_agent(self, context, segment, agent):
         if self.check_segment_for_agent(segment, agent):
@@ -346,8 +351,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         if port['device_owner'].startswith('compute:') and port['device_id']:
             vm = nova_client.NovaClient().get_server(port['device_id'])
             details['vm-name'] = vm.name if vm else port['device_id']
-        self._add_ip_mapping_details(context, port, kwargs['host'], details)
-        self._add_network_details(context, port, details)
+        owned_addr = self.ha_ip_handler.get_ha_ipaddresses_for_port(port['id'])
+        self._add_ip_mapping_details(context, port, kwargs['host'], owned_addr,
+                                     details)
+        self._add_network_details(context, port, owned_addr, details)
         if self._is_nat_enabled_on_ext_net(network):
             # PTG name is different
             details['endpoint_group_name'] = self._get_ext_epg_for_ext_net(
@@ -438,11 +445,26 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                 'prefixlen':
                 netaddr.IPNetwork(snat_subnets[0]['cidr']).prefixlen}
 
-    def _add_ip_mapping_details(self, context, port, host, details):
+    def _add_ip_mapping_details(self, context, port, host, owned_addr,
+                                details):
         """Add information about IP mapping for DNAT/SNAT."""
         l3plugin = manager.NeutronManager.get_service_plugins().get(
             constants.L3_ROUTER_NAT)
         core_plugin = context._plugin
+
+        fips_filter = [port['id']]
+        if owned_addr:
+            # If another port has a fixed IP that is same as an owned address,
+            # then steal that port's floating IP
+            other_ports = core_plugin.get_ports(
+                context,
+                filters={
+                    'network_id': [port['network_id']],
+                    'fixed_ips': {'ip_address': owned_addr}})
+            fips_filter.extend([p['id'] for p in other_ports])
+        fips = l3plugin.get_floatingips(
+            context,
+            filters={'port_id': fips_filter})
 
         ext_nets = core_plugin.get_networks(
             context,
@@ -451,8 +473,6 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                     if self._is_nat_enabled_on_ext_net(n)}
         fip_ext_nets = set()
 
-        fips = l3plugin.get_floatingips(context,
-                                        filters={'port_id': [port['id']]})
         for f in fips:
             net = ext_nets.get(f['floating_network_id'])
             if not net:
@@ -513,10 +533,15 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
             context, [x['device_id'] for x in router_gw_ports])
         return bool(port_sn & router_sn)
 
-    def _add_network_details(self, context, port, details):
+    def _add_network_details(self, context, port, owned_addr, details):
         details['allowed_address_pairs'] = port['allowed_address_pairs']
         details['enable_dhcp_optimization'] = self.enable_dhcp_opt
         details['enable_metadata_optimization'] = self.enable_metadata_opt
+        # mark owned addresses from allowed-address pairs as 'active'
+        owned_addr = set(owned_addr)
+        for allowed in details['allowed_address_pairs']:
+            if allowed['ip_address'] in owned_addr:
+                allowed['active'] = True
         details['subnets'] = context._plugin.get_subnets(
             context,
             filters={'id': [ip['subnet_id'] for ip in port['fixed_ips']]})
@@ -550,6 +575,15 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
                         {'destination': dhcp.METADATA_DEFAULT_CIDR,
                          'nexthop': dhcp_ips[0]})
             subnet['dhcp_server_ips'] = dhcp_ips
+
+    # RPC Method
+    def ip_address_owner_update(self, context, **kwargs):
+        if not kwargs.get('ip_owner_info'):
+            return
+        ports_to_update = self.update_ip_owner(kwargs['ip_owner_info'])
+        for p in ports_to_update:
+            LOG.debug("Ownership update for port %s", p)
+            self.notify_port_update(p)
 
     def sync_init(f):
         def inner(inst, *args, **kwargs):
@@ -963,6 +997,26 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase):
         except n_exc.PortNotFound:
             # Notification not needed
             pass
+
+    def notify_port_update_for_fip(self, port_id, context=None):
+        context = context or nctx.get_admin_context()
+        core_plugin = manager.NeutronManager.get_plugin()
+        try:
+            port = core_plugin.get_port(context, port_id)
+        except n_exc.PortNotFound:
+            return
+        ports_to_notify = [port_id]
+        fixed_ips = [x['ip_address'] for x in port['fixed_ips']]
+        if fixed_ips:
+            addr_pair = (
+                context.session.query(n_addr_pair_db.AllowedAddressPair)
+                .join(models_v2.Port)
+                .filter(models_v2.Port.network_id == port['network_id'])
+                .filter(n_addr_pair_db.AllowedAddressPair.ip_address.in_(
+                    fixed_ips)).all())
+            ports_to_notify.extend([x['port_id'] for x in addr_pair])
+        for p in sorted(ports_to_notify):
+            self.notify_port_update(p, context)
 
     def notify_subnet_update(self, subnet, context=None):
         context = context or nctx.get_admin_context()
