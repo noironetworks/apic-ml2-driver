@@ -76,7 +76,7 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
         self.ml2_driver = mock.Mock()
         md.APICMechanismDriver.get_driver_instance = mock.Mock(
             return_value=self.ml2_driver)
-        md.APICMechanismDriver.notify_port_update = mock.Mock()
+        md.APICMechanismDriver.notify_port_update_for_fip = mock.Mock()
         self.context = context.get_admin_context()
         self.context.tenant_id = TENANT
         self.interface_info = {'subnet': {'subnet_id': SUBNET},
@@ -210,30 +210,33 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
         # create floating-ip with mapped port
         self.plugin.create_floatingip(self.context,
                                       {'floatingip': self.floatingip})
-        self.ml2_driver.notify_port_update.assert_called_once_with(PORT)
+        self.ml2_driver.notify_port_update_for_fip.assert_called_once_with(
+            PORT)
 
     def test_floatingip_port_notify_on_reassociate(self):
         # associate with different port
         new_fip = {'port_id': 'port-another'}
-        self.ml2_driver.notify_port_update.reset_mock()
+        self.ml2_driver.notify_port_update_for_fip.reset_mock()
         self.plugin.update_floatingip(self.context, FLOATINGIP,
                                       {'floatingip': new_fip})
         self._check_call_list(
             [mock.call(PORT), mock.call('port-another')],
-            self.ml2_driver.notify_port_update.call_args_list)
+            self.ml2_driver.notify_port_update_for_fip.call_args_list)
 
     def test_floatingip_port_notify_on_disassociate(self):
         # dissociate mapped port
-        self.ml2_driver.notify_port_update.reset_mock()
+        self.ml2_driver.notify_port_update_for_fip.reset_mock()
         self.plugin.update_floatingip(self.context, FLOATINGIP,
                                       {'floatingip': {}})
-        self.ml2_driver.notify_port_update.assert_called_once_with(PORT)
+        self.ml2_driver.notify_port_update_for_fip.assert_called_once_with(
+            PORT)
 
     def test_floatingip_port_notify_on_delete(self):
         # delete
-        self.ml2_driver.notify_port_update.reset_mock()
+        self.ml2_driver.notify_port_update_for_fip.reset_mock()
         self.plugin.delete_floatingip(self.context, FLOATINGIP)
-        self.ml2_driver.notify_port_update.assert_called_once_with(PORT)
+        self.ml2_driver.notify_port_update_for_fip.assert_called_once_with(
+            PORT)
 
     def test_floatingip_status(self):
         # create floating-ip with mapped port

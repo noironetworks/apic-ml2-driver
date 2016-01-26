@@ -315,7 +315,7 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
     def _notify_port_update(self, port_id):
         l2 = mechanism_apic.APICMechanismDriver.get_driver_instance()
         if l2 and port_id:
-            l2.notify_port_update(port_id)
+            l2.notify_port_update_for_fip(port_id)
 
     def _update_floatingip_status(self, context, fip_id):
         status = q_const.FLOATINGIP_STATUS_DOWN
