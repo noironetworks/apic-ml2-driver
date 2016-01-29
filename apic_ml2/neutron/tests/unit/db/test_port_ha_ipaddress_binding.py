@@ -200,3 +200,17 @@ class PortToHAIPAddressBindingTestCase(testlib_api.SqlTestCase):
         # Verify still one entry exists
         dump = mixin.ha_ip_handler.get_ha_port_associations()
         self.assertEqual(2, len(dump))
+
+    def test_duplicate_entry_handled_gracefully(self):
+        self.port_haip.set_port_id_for_ha_ipaddress(
+            self.port1['id'], self.ha_ip1)
+        # Set this twice, without hijacking the query
+        obj = self.port_haip.set_port_id_for_ha_ipaddress(
+            self.port1['id'], self.ha_ip1)
+        self.assertEqual(obj.port_id, self.port1['id'])
+        self.assertEqual(obj.ha_ip_address, self.ha_ip1)
+        # Now simulate null return from query
+        self.port_haip._get_ha_ipaddress = mock.Mock(return_value=None)
+        obj = self.port_haip.set_port_id_for_ha_ipaddress(
+            self.port1['id'], self.ha_ip1)
+        self.assertIsNone(obj)
