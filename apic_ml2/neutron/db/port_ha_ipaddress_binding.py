@@ -49,6 +49,10 @@ class PortForHAIPAddress(object):
     def __init__(self):
         self.session = db_api.get_session()
 
+    def _get_ha_ipaddress(self, port_id, ipaddress):
+        return self.session.query(HAIPAddressToPortAssocation).filter_by(
+            port_id=port_id, ha_ip_address=ipaddress).first()
+
     def get_port_for_ha_ipaddress(self, ipaddress, network_id):
         """Returns the Neutron Port ID for the HA IP Addresss."""
         port_ha_ip = self.session.query(HAIPAddressToPortAssocation).join(
@@ -65,16 +69,20 @@ class PortForHAIPAddress(object):
 
     def set_port_id_for_ha_ipaddress(self, port_id, ipaddress):
         """Stores a Neutron Port Id as owner of HA IP Addr (idempotent API)."""
-        with self.session.begin(subtransactions=True):
-            obj = self.session.query(HAIPAddressToPortAssocation).filter_by(
-                port_id=port_id, ha_ip_address=ipaddress).first()
-            if obj:
-                return obj
-            else:
-                obj = HAIPAddressToPortAssocation(port_id=port_id,
-                                                  ha_ip_address=ipaddress)
-                self.session.add(obj)
-                return obj
+        self.session.expunge_all()
+        try:
+            with self.session.begin(subtransactions=True):
+                obj = self._get_ha_ipaddress(port_id, ipaddress)
+                if obj:
+                    return obj
+                else:
+                    obj = HAIPAddressToPortAssocation(port_id=port_id,
+                                                      ha_ip_address=ipaddress)
+                    self.session.add(obj)
+                    return obj
+        except db_exc.DBDuplicateEntry:
+            LOG.debug('Duplicate IP ownership entry for tuple %s',
+                      (port_id, ipaddress))
 
     def delete_port_id_for_ha_ipaddress(self, port_id, ipaddress):
         with self.session.begin(subtransactions=True):
