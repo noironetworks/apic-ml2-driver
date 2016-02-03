@@ -19,9 +19,10 @@ eventlet.monkey_patch()
 from oslo_concurrency import lockutils
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
-from oslo_messaging import target
+import oslo_messaging
 
 from neutron import context as nctx
+from neutron.common import rpc
 from neutron.db import api as db_api
 from neutron.extensions import providernet as api
 from neutron import manager
@@ -96,7 +97,7 @@ class ApicTopologyRpcCallbackMechanism(ApicTopologyRpcCallback):
     disabled.
     """
     RPC_API_VERSION = "1.1"
-    target = target.Target(version=RPC_API_VERSION)
+    target = oslo_messaging.Target(version=RPC_API_VERSION)
 
     def __init__(self, apic_manager, driver):
         self.mech_apic = driver
@@ -181,22 +182,16 @@ class ApicTopologyRpcCallbackMechanism(ApicTopologyRpcCallback):
 
 class ApicTopologyServiceNotifierApi(object):
 
-    RPC_API_VERSION = '1.1'
+    def __init__(self):
+        target = oslo_messaging.Target(topic=TOPIC_APIC_SERVICE, version='1.0')
+        self.client = rpc.get_client(target)
 
     def update_link(self, context, host, interface, mac, switch, module, port):
-        self.fanout_cast(
-            context, self.make_msg(
-                'update_link',
-                host=host, interface=interface, mac=mac,
-                switch=switch, module=module, port=port),
-            topic=TOPIC_APIC_SERVICE,
-            version=self.RPC_API_VERSION)
+        cctxt = self.client.prepare(version='1.1', fanout=True)
+        cctxt.cast(context, 'update_link', host=host, interface=interface,
+                   mac=mac, switch=switch, module=module, port=port)
 
     def delete_link(self, context, host, interface):
-        self.fanout_cast(
-            context, self.make_msg(
-                'delete_link',
-                host=host, interface=interface, mac=None,
-                switch=0, module=0, port=0),
-            topic=TOPIC_APIC_SERVICE,
-            version=self.RPC_API_VERSION)
+        cctxt = self.client.prepare(version='1.1', fanout=True)
+        cctxt.cast(context, 'delete_link', host=host, interface=interface,
+                   mac=None, switch=0, module=0, port=0)

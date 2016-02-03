@@ -130,7 +130,6 @@ class ApicTopologyAgent(manager.Manager):
         self.port_local_re = re.compile(ACI_PORT_LOCAL_FORMAT)
         self.vpcport_desc_re = re.compile(ACI_VPCPORT_DESCR_FORMAT)
         self.chassis_desc_re = re.compile(ACI_CHASSIS_DESCR_FORMAT)
-        self.root_helper = self.conf.root_helper
         self.service_agent = arpc.ApicTopologyServiceNotifierApi()
         self.state = None
         self.state_agent = None
@@ -215,7 +214,7 @@ class ApicTopologyAgent(manager.Manager):
     def _get_peers(self):
         interfaces = {}
         peers = {}
-        lldpkeys = utils.execute(self.lldpcmd, self.root_helper)
+        lldpkeys = utils.execute(self.lldpcmd, run_as_root=True)
         for line in lldpkeys.splitlines():
             if '=' not in line:
                 continue
