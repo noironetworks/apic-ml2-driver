@@ -110,7 +110,6 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
             PLUGIN_NAME, service_plugins=service_plugins)
         ext_mgr = extensions.PluginAwareExtensionManager.get_instance()
         self.ext_api = test_extensions.setup_extensions_middleware(ext_mgr)
-        self.plugin = manager.NeutronManager.get_plugin()
         self.plugin.remove_networks_from_down_agents = mock.Mock()
         self.plugin.is_agent_down = mock.Mock(return_value=False)
         self.driver = self.plugin.mechanism_manager.mech_drivers[
