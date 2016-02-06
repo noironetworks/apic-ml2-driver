@@ -20,6 +20,7 @@ from neutron.common import constants as q_const
 from neutron.common import exceptions as n_exc
 from neutron import context
 
+import apicapi.apic_mapper  # noqa
 sys.modules["apicapi"] = mock.Mock()
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
@@ -109,12 +110,13 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
                           'tenant_id': TENANT})
         self.plugin.manager.apic.transaction = self.fake_transaction
 
-        self.plugin.get_subnet = mock.Mock(return_value=self.subnet)
-        self.plugin.get_network = mock.Mock(return_value=self.network)
-        self.plugin.get_port = mock.Mock(return_value=self.port)
-        self.plugin.get_ports = mock.Mock(return_value=[self.port])
         self.plugin._aci_mech_driver = mock.Mock()
-        self.plugin.ml2_plugin = mock.Mock()
+        self.plugin._ml2_plugin = mock.Mock()
+        self.plugin.ml2_plugin.get_subnet = mock.Mock(return_value=self.subnet)
+        self.plugin.ml2_plugin.get_network = mock.Mock(
+            return_value=self.network)
+        self.plugin.ml2_plugin.get_port = mock.Mock(return_value=self.port)
+        self.plugin.ml2_plugin.get_ports = mock.Mock(return_value=[self.port])
         self.plugin.get_floatingip = mock.Mock(return_value=self.floatingip)
         self.plugin.update_floatingip_status = mock.Mock()
 

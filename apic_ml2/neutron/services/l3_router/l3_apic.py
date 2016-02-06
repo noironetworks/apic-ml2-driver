@@ -16,7 +16,7 @@
 from apicapi import apic_mapper
 from neutron.common import constants as q_const
 from neutron.common import exceptions as n_exc
-from neutron.db import db_base_plugin_v2
+from neutron.db import common_db_mixin
 from neutron.db import extraroute_db
 from neutron.db import l3_db
 from neutron.db import l3_dvr_db
@@ -36,7 +36,7 @@ class InterTenantRouterInterfaceNotAllowedOnPerTenantContext(n_exc.BadRequest):
                 "another tenant when per_tenant_context is enabled.")
 
 
-class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
+class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
                           l3_dvr_db.L3_NAT_with_dvr_db_mixin,
                           extraroute_db.ExtraRoute_db_mixin):
     supported_extension_aliases = ["router", "ext-gw-mode", "extraroute"]
@@ -49,12 +49,16 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         self.manager.ensure_infra_created_on_apic()
         self.manager.ensure_bgp_pod_policy_created_on_apic()
         self._aci_mech_driver = None
-        self.ml2_plugin = None
+        self._ml2_plugin = None
+
+    @property
+    def ml2_plugin(self):
+        if not self._ml2_plugin:
+            self._ml2_plugin = manager.NeutronManager.get_plugin()
+        return self._ml2_plugin
 
     @property
     def aci_mech_driver(self):
-        if not self.ml2_plugin:
-            self.ml2_plugin = manager.NeutronManager.get_plugin()
         if not self._aci_mech_driver:
             self._aci_mech_driver = (
                 self.ml2_plugin.mechanism_manager.mech_drivers[
@@ -77,7 +81,7 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
         filters = {'device_id': [router_id],
                    'device_owner': [q_const.DEVICE_OWNER_ROUTER_INTF],
                    'fixed_ips': {'subnet_id': [subnet_id]}}
-        ports = self.get_ports(context.elevated(), filters=filters)
+        ports = self.ml2_plugin.get_ports(context.elevated(), filters=filters)
         return ports[0]['id']
 
     def _update_router_gw_info(self, context, router_id, info, router=None):
@@ -87,7 +91,8 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
             filters = {'device_id': [router_id],
                        'device_owner': [q_const.DEVICE_OWNER_ROUTER_GW],
                        'network_id': [info['network_id']]}
-            ports = self.get_ports(context.elevated(), filters=filters)
+            ports = self.ml2_plugin.get_ports(context.elevated(),
+                                              filters=filters)
             manager.NeutronManager.get_plugin().update_port_status(
                 context, ports[0]['id'], q_const.PORT_STATUS_ACTIVE)
 
@@ -118,16 +123,18 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
 
         # Add router interface
         if 'subnet_id' in interface_info:
-            subnet = self.get_subnet(context, interface_info['subnet_id'])
+            subnet = self.ml2_plugin.get_subnet(context,
+                                                interface_info['subnet_id'])
             network_id = subnet['network_id']
             port_id = self._get_port_id_for_router_interface(
                 context, router_id, interface_info['subnet_id'])
         else:
-            port = self.get_port(context, interface_info['port_id'])
+            port = self.ml2_plugin.get_port(context,
+                                            interface_info['port_id'])
             network_id = port['network_id']
             port_id = interface_info['port_id']
 
-        network = self.get_network(context, network_id)
+        network = self.ml2_plugin.get_network(context, network_id)
         tenant_id = network['tenant_id']
         if (tenant_id != router['tenant_id'] and
                 self.aci_mech_driver.per_tenant_context and
@@ -151,16 +158,17 @@ class ApicL3ServicePlugin(db_base_plugin_v2.NeutronDbPluginV2,
     def remove_router_interface_precommit(self, context, router_id,
                                           interface_info):
         if 'subnet_id' in interface_info:
-            subnet = self.get_subnet(context, interface_info['subnet_id'])
+            subnet = self.ml2_plugin.get_subnet(context,
+                                                interface_info['subnet_id'])
             network_id = subnet['network_id']
             port_id = self._get_port_id_for_router_interface(
                 context, router_id, interface_info['subnet_id'])
         else:
-            port = self.get_port(context, interface_info['port_id'])
+            port = self.ml2_plugin.get_port(context, interface_info['port_id'])
             network_id = port['network_id']
             port_id = interface_info['port_id']
 
-        network = self.get_network(context, network_id)
+        network = self.ml2_plugin.get_network(context, network_id)
         tenant_id = network['tenant_id']
 
         router = self.get_router(context, router_id)
