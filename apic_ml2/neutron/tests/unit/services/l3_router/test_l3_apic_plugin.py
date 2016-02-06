@@ -19,7 +19,9 @@ import mock
 from neutron.common import constants as q_const
 from neutron.common import exceptions as n_exc
 from neutron import context
+from neutron import manager
 
+import apicapi.apic_mapper  # noqa
 sys.modules["apicapi"] = mock.Mock()
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
@@ -109,30 +111,34 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
                           'tenant_id': TENANT})
         self.plugin.manager.apic.transaction = self.fake_transaction
 
-        self.plugin.get_subnet = mock.Mock(return_value=self.subnet)
-        self.plugin.get_network = mock.Mock(return_value=self.network)
-        self.plugin.get_port = mock.Mock(return_value=self.port)
-        self.plugin.get_ports = mock.Mock(return_value=[self.port])
         self.plugin._aci_mech_driver = mock.Mock()
-        self.plugin.ml2_plugin = mock.Mock()
+        manager.NeutronManager.get_plugin = mock.Mock()
+        manager.NeutronManager.get_plugin.get_subnet = mock.Mock(
+            return_value=self.subnet)
+        manager.NeutronManager.get_plugin.get_network = mock.Mock(
+            return_value=self.network)
+        manager.NeutronManager.get_plugin.get_port = mock.Mock(
+            return_value=self.port)
+        manager.NeutronManager.get_plugin.get_ports = mock.Mock(
+            return_value=[self.port])
         self.plugin.get_floatingip = mock.Mock(return_value=self.floatingip)
         self.plugin.update_floatingip_status = mock.Mock()
 
-        mock.patch('neutron.db.l3_dvr_db.L3_NAT_with_dvr_db_mixin.'
+        mock.patch('neutron.db.l3_db.L3_NAT_db_mixin.'
                    '_core_plugin').start()
-        mock.patch('neutron.db.l3_dvr_db.L3_NAT_with_dvr_db_mixin.'
+        mock.patch('neutron.db.l3_db.L3_NAT_db_mixin.'
                    'add_router_interface').start()
-        mock.patch('neutron.db.l3_dvr_db.L3_NAT_with_dvr_db_mixin.'
+        mock.patch('neutron.db.l3_db.L3_NAT_db_mixin.'
                    'remove_router_interface').start()
         mock.patch(
             'neutron.manager.NeutronManager.get_service_plugins').start()
-        mock.patch('neutron.db.l3_dvr_db.L3_NAT_with_dvr_db_mixin.'
+        mock.patch('neutron.db.l3_db.L3_NAT_db_mixin.'
                    'update_floatingip',
                    new=mock.Mock(return_value=self.floatingip)).start()
-        mock.patch('neutron.db.l3_dvr_db.L3_NAT_with_dvr_db_mixin.'
+        mock.patch('neutron.db.l3_db.L3_NAT_db_mixin.'
                    'create_floatingip',
                    new=mock.Mock(return_value=self.floatingip)).start()
-        mock.patch('neutron.db.l3_dvr_db.L3_NAT_with_dvr_db_mixin.'
+        mock.patch('neutron.db.l3_db.L3_NAT_db_mixin.'
                    'delete_floatingip').start()
 
         def _get_router_aci_tenant(router):
