@@ -21,8 +21,8 @@ from oslo_db import exception as db_exc
 from oslo_log import log as logging
 import oslo_messaging
 
-from neutron import context as nctx
 from neutron.common import rpc
+from neutron import context as nctx
 from neutron.db import api as db_api
 from neutron.extensions import providernet as api
 from neutron import manager
