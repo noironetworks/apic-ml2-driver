@@ -44,9 +44,9 @@ from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
 
+from apic_ml2.neutron.db import l3out_vlan_allocation as l3out_vlan_alloc
 from apic_ml2.neutron.db import port_ha_ipaddress_binding as ha_ip_db
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_model
-from apic_ml2.neutron.db import l3out_vlan_allocation as l3out_vlan_alloc
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_sync
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import attestation
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config
@@ -249,7 +249,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
 
         self.l3out_vlan_alloc = l3out_vlan_alloc.L3outVlanAlloc()
         self.l3out_vlan_alloc.sync_vlan_allocations(
-                                            self.apic_manager.ext_net_dict)
+            self.apic_manager.ext_net_dict)
 
     def _setup_opflex_rpc_listeners(self):
         self.opflex_endpoints = [o_rpc.GBPServerRpcCallback(self)]
@@ -1077,7 +1077,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
                     address = net_info['cidr_exposed']
                     next_hop = net_info['gateway_ip']
                     vlan_id = self.l3out_vlan_alloc.reserve_vlan(
-                                        network['name'], router['tenant_id'])
+                        network['name'], router['tenant_id'])
                     switch = net_info['switch']
                     module, sport = net_info['port'].split('/')
 
@@ -1110,7 +1110,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
                     self.apic_manager.associate_external_epg_to_nat_epg(
                         router_tenant, shadow_l3out, shadow_ext_epg,
                         nat_epg_name, target_owner=nat_epg_tenant,
-                        app_profile_name=self._get_network_app_profile(network),
+                        app_profile_name=self. _get_network_app_profile(
+                            network),
                         transaction=trs)
             return True
         except Exception as e:
@@ -1136,7 +1137,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
         # the vlan associated with this shadow L3out
         if self._is_asr_router_type(ext_info):
             self.l3out_vlan_alloc.release_vlan(
-                                    network['name'], router['tenant_id'])
+                network['name'], router['tenant_id'])
 
     def _get_router_interface_subnets(self, context, router_ids):
         core_plugin = manager.NeutronManager.get_plugin()
