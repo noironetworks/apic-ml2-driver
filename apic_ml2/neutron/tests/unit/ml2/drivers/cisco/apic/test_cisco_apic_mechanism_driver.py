@@ -17,6 +17,7 @@ import base64
 import hashlib
 import hmac
 import sys
+import tempfile
 
 from apicapi import apic_client
 from apicapi import apic_manager
@@ -688,6 +689,68 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             for p in sorted([p1['id'], p2['id'], p4['id']])]
         self._check_call_list(
             expected_calls, self.driver.notify_port_update.call_args_list)
+
+
+class TestCiscoApicML2SubnetScope(ApicML2IntegratedTestCase):
+    def setUp(self, service_plugins=None):
+        with tempfile.NamedTemporaryFile(delete=False) as fd:
+            self.cons_file_name = fd.name
+        self.override_conf('network_constraints_filename',
+                           self.cons_file_name,
+                           'ml2_cisco_apic')
+        super(TestCiscoApicML2SubnetScope, self).setUp(service_plugins)
+
+    def test_subnet_scope(self):
+        cons_data = """
+[DEFAULT]
+subnet_scope = deny
+
+[%s/net1]
+public = 10.10.10.1/24,10.10.20.1/24
+private = 20.10.10.0/28,20.10.20.0/24
+deny = 30.10.10.0/24
+default = private
+            """ % (mocked.APIC_TENANT)
+        self.driver.net_cons.source.last_refresh_time = 0
+        with open(self.cons_file_name, 'w') as fd:
+            fd.write(cons_data)
+
+        self.mgr.ensure_subnet_created_on_apic = mock.Mock()
+        self.driver.name_mapper.aci_mapper.min_suffix = 0
+        net1 = self.create_network(
+            name='net1', tenant_id=mocked.APIC_TENANT,
+            expected_res_status=201)['network']
+        net2 = self.create_network(
+            name='net2', tenant_id=mocked.APIC_TENANT,
+            expected_res_status=201)['network']
+
+        for cidr in ['10.10.10.0/28', '20.10.10.0/26', '40.10.10.0/30']:
+            self.create_subnet(
+                tenant_id=mocked.APIC_TENANT,
+                network_id=net1['id'], cidr=cidr, ip_version=4)
+        exp_calls = [
+            mock.call(
+                self._tenant(), self._scoped_name('net1'),
+                '10.10.10.1/28', scope='public'),
+            mock.call(
+                self._tenant(), self._scoped_name('net1'),
+                '20.10.10.1/26', scope='private'),
+            mock.call(
+                self._tenant(), self._scoped_name('net1'),
+                '40.10.10.1/30', scope='private')]
+        self._check_call_list(
+            exp_calls, self.mgr.ensure_subnet_created_on_apic.call_args_list)
+
+        res = self.create_subnet(
+            tenant_id=mocked.APIC_TENANT,
+            network_id=net1['id'], cidr='30.10.10.0/24', ip_version=4,
+            expected_res_status=500)
+        self.assertEqual('MechanismDriverError', res['NeutronError']['type'])
+        res = self.create_subnet(
+            tenant_id=mocked.APIC_TENANT,
+            network_id=net2['id'], cidr='10.10.10.0/24', ip_version=4,
+            expected_res_status=500)
+        self.assertEqual('MechanismDriverError', res['NeutronError']['type'])
 
 
 class MechanismRpcTestCase(ApicML2IntegratedTestBase):
@@ -1580,7 +1643,8 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.driver.create_subnet_postcommit(subnet_ctx)
         mgr.ensure_subnet_created_on_apic.assert_called_once_with(
             self._tenant(), self._scoped_name(mocked.APIC_NETWORK),
-            '%s/%s' % (SUBNET_GATEWAY, SUBNET_NETMASK))
+            '%s/%s' % (SUBNET_GATEWAY, SUBNET_NETMASK),
+            scope=None)
 
     def test_create_subnet_nogw_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
@@ -1605,7 +1669,8 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         mgr.ensure_subnet_created_on_apic.assert_called_once_with(
             self._tenant(),
             "EXT-bd-%s" % self._scoped_name(mocked.APIC_NETWORK),
-            '%s/%s' % (SUBNET_GATEWAY, SUBNET_NETMASK))
+            '%s/%s' % (SUBNET_GATEWAY, SUBNET_NETMASK),
+            scope=None)
 
     def test_delete_external_subnet_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,

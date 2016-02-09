@@ -46,6 +46,8 @@ from oslo_config import cfg
 from oslo_log import log as logging
 
 from apic_ml2.neutron.db import port_ha_ipaddress_binding as ha_ip_db
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
+    network_constraints as net_cons)
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_sync
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import attestation
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config
@@ -85,6 +87,11 @@ class CidrOverlapsApicExternalSubnet(n_exc.BadRequest):
 class WouldRequireNAT(n_exc.BadRequest):
     message = _("Setting gateway on router would require address translation, "
                 "but NAT-ing is disabled for external network %(ext_net)s.")
+
+
+class SubnetDisallowedByNetConstraints(n_exc.BadRequest):
+    message = _("Network constraints disallow creation of subnet %(cidr)s "
+                "in network %(net)s")
 
 
 class NameMapper(object):
@@ -244,6 +251,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
         self._l3_plugin = None
         self._db_plugin = None
         self.attestator = attestation.EndpointAttestator(self.apic_manager)
+        net_cons_source = cfg.CONF.ml2_cisco_apic.network_constraints_filename
+        if net_cons_source is not None:
+            net_cons_source = net_cons.ConfigFileSource(net_cons_source)
+        self.net_cons = net_cons.NetworkConstraints(net_cons_source)
 
     def _setup_opflex_rpc_listeners(self):
         self.opflex_endpoints = [o_rpc.GBPServerRpcCallback(self)]
@@ -914,6 +925,13 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
         subnet = context.current
         network = context._plugin.get_network(context._plugin_context,
                                               subnet['network_id'])
+        context.subnet_scope = self.net_cons.get_subnet_scope(
+            str(self.name_mapper.tenant(context, network['tenant_id'])),
+            network['name'],
+            subnet['cidr'])
+        if context.subnet_scope == net_cons.SCOPE_DENY:
+            raise SubnetDisallowedByNetConstraints(cidr=subnet['cidr'],
+                                                   net=network['name'])
         if network.get('router:external'):
             ext_info = self.apic_manager.ext_net_dict.get(network['name'])
             if ext_info:
@@ -935,7 +953,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
             tenant_id, network_id, gateway_ip = info
             # Create subnet on BD
             self.apic_manager.ensure_subnet_created_on_apic(
-                tenant_id, network_id, gateway_ip)
+                tenant_id, network_id, gateway_ip,
+                scope=getattr(context, 'subnet_scope', None))
         self.notify_subnet_update(context.current)
 
     @sync_init
