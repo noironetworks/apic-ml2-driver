@@ -13,8 +13,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import sys
-
 from oslo_log import log
 from six import moves
 import sqlalchemy as sa
@@ -29,13 +27,14 @@ from neutron.plugins.ml2.drivers import helpers
 
 LOG = log.getLogger(__name__)
 
+
 class L3OutVlanAllocation(model_base.BASEV2):
     """Represent allocation state of a vlan_id for the L3 out per VRF.
 
-    If allocated is False, the vlan_id is available for allocation. 
+    If allocated is False, the vlan_id is available for allocation.
     If allocated is True, the vlan_id is in use.
 
-    When an allocation is released, if the vlan_id is inside the pool 
+    When an allocation is released, if the vlan_id is inside the pool
     described by network_vlan_ranges, then allocated is set to
     False. If it is outside the pool, the record is deleted.
     """
@@ -45,7 +44,7 @@ class L3OutVlanAllocation(model_base.BASEV2):
         sa.Index('apic_ml2_l3out_vlan_allocation_l3out_network_allocated',
                  'l3out_network', 'allocated'),
         model_base.BASEV2.__table_args__,)
-    
+
     l3out_network = sa.Column(sa.String(64), nullable=False,
                               primary_key=True)
     vrf = sa.Column(sa.String(64), nullable=False,
@@ -54,9 +53,11 @@ class L3OutVlanAllocation(model_base.BASEV2):
                         autoincrement=False)
     allocated = sa.Column(sa.Boolean, nullable=False)
 
+
 class NoVlanAvailable(exc.ResourceExhausted):
     message = _("Unable to allocate the vlan. "
                 "No vlan is available for %(l3out_network)s external network")
+
 
 # inherit from SegmentTypeDriver to reuse the code to reserve/release
 # vlan IDs from the pool
@@ -77,7 +78,7 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
                     vlan_range = (int(vlan_min), int(vlan_max))
                     plugin_utils.verify_vlan_range(vlan_range)
                     self.l3out_vlan_ranges[l3out_network] = vlan_range
-        except:
+        except Exception:
             LOG.exception(_LE("Failed to parse L3out_vlan_ranges."))
             raise
         LOG.info(_LI("L3out VLAN ranges: %s"), self.l3out_vlan_ranges)
@@ -126,7 +127,7 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
                 # add missing allocatable vlans to table
                 for vlan_id in sorted(vlan_ids):
                     alloc = L3OutVlanAllocation(l3out_network=l3out_network,
-                                                vrf = "",
+                                                vrf='',
                                                 vlan_id=vlan_id,
                                                 allocated=False)
                     self.session.add(alloc)
@@ -153,8 +154,9 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
                                vrf=vrf))
             count = query.update({"allocated": True})
             if count:
-                LOG.debug("reserving %(count)s vlan %(vlan_id)s for vrf %(vrf)s" 
-                          " on l3out network %(l3out_network)s from pool",
+                LOG.debug("reserving %(count)s vlan %(vlan_id)s for vrf "
+                          "%(vrf)s on l3out network %(l3out_network)s from "
+                          " pool",
                           {'count': count,
                            'vlan_id': query[0].vlan_id,
                            'vrf': vrf,
@@ -167,23 +169,24 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
             filters = {}
             filters['l3out_network'] = l3out_network
             alloc = self.allocate_partially_specified_segment(
-                                                    self.session, **filters)
+                self.session, **filters)
             if not alloc:
                 raise NoVlanAvailable(l3out_network=l3out_network)
 
             filters['vlan_id'] = alloc.vlan_id
             query = (self.session.query(L3OutVlanAllocation).
                      filter_by(allocated=True, **filters))
-            count = query.update({"vrf": vrf})  
+            count = query.update({"vrf": vrf})
             if count:
-                LOG.debug("updating vrf %(vrf)s for %(count)s vlan %(vlan_id)s " 
-                          "on l3out network %(l3out_network)s to pool",
+                LOG.debug("updating vrf %(vrf)s for %(count)s vlan "
+                          "%(vlan_id)s on l3out network %(l3out_network)s to "
+                          "pool",
                           {'vrf': vrf,
                            'count': count,
                            'vlan_id': alloc.vlan_id,
                            'l3out_network': l3out_network})
 
-            LOG.debug("reserving vlan %(vlan_id)s " 
+            LOG.debug("reserving vlan %(vlan_id)s "
                       "on l3out network %(l3out_network)s from pool",
                       {'vlan_id': alloc.vlan_id,
                        'l3out_network': l3out_network})
@@ -205,11 +208,11 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
 
         LOG.warning(_LW("No vlan_id found for vrf %(vrf)s on l3out "
                         "network %(l3out_network)s"),
-                        {'vrf': vrf,
-                         'l3out_network': l3out_network})
+                    {'vrf': vrf,
+                     'l3out_network': l3out_network})
 
     # None is returned if not found
-    @staticmethod    
+    @staticmethod
     def get_vlan_allocated(l3out_network, vrf):
         session = db_api.get_session()
         query = (session.query(L3OutVlanAllocation).

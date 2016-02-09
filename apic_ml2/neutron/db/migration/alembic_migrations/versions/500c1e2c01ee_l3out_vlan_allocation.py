@@ -35,5 +35,6 @@ def upgrade():
         sa.Column('allocated', sa.Boolean, nullable=False),
         sa.PrimaryKeyConstraint('l3out_network', 'vlan_id'))
 
+
 def downgrade():
     op.drop_table('apic_ml2_l3out_vlan_allocation')

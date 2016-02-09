@@ -298,7 +298,7 @@ class ConfigMixin(object):
                 'host_pool_cidr': HOST_POOL_CIDR,
             },
             APIC_NETWORK_ASR + '-name': {
-                'router_type' : 'ASR',
+                'router_type': 'ASR',
                 'switch': APIC_EXT_SWITCH,
                 'port': APIC_EXT_MODULE + '/' + APIC_EXT_PORT,
                 'cidr_exposed': APIC_EXT_CIDR_EXPOSED,
