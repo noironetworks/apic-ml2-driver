@@ -16,7 +16,6 @@ BuildRequires:	python-pbr
 BuildRequires:	python-setuptools
 Requires:	openstack-neutron-ml2 >= 2015.1
 Requires:	openstack-neutron-ml2 < 2015.2
-Requires:	lldpad
 Requires:	apicapi
 Requires:	python-oslo-concurrency
 Requires:	neutron-opflex-agent
