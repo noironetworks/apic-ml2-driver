@@ -70,6 +70,11 @@ AGENT_CONF = {'alive': True, 'binary': 'somebinary',
               'topic': 'sometopic', 'agent_type': AGENT_TYPE,
               'configurations': {'opflex_networks': None,
                                  'bridge_mappings': {'physnet1': 'br-eth1'}}}
+AGENT_TYPE_DVS = acst.AGENT_TYPE_DVS
+AGENT_CONF_DVS = {'alive': True, 'binary': 'anotherbinary',
+                  'topic': 'anothertopic', 'agent_type': AGENT_TYPE_DVS,
+                  'configurations': {'bridge_mappings': {'physnet1':
+                                                         'br-eth1'}}}
 
 
 def echo(context, id, prefix=''):
@@ -139,13 +144,16 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
             'dirtylittlesecret')
         self.driver.notifier = mock.Mock()
 
-    def _bind_port_to_host(self, port_id, host):
+    def _register_agent(self, host, agent_cfg=AGENT_CONF):
         plugin = manager.NeutronManager.get_plugin()
         ctx = context.get_admin_context()
         agent = {'host': host}
-        agent.update(AGENT_CONF)
+        agent.update(agent_cfg)
         plugin.create_or_update_agent(ctx, agent)
-        data = {'port': {'binding:host_id': host, 'device_owner': 'compute:',
+
+    def _bind_port_to_host(self, port_id, host):
+        data = {'port': {'binding:host_id': host,
+                         'device_owner': 'compute:nova',
                          'device_id': 'someid'}}
         # Create EP with bound port
         req = self.new_update_request('ports', data, port_id,
@@ -210,6 +218,7 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                           is_admin_context=True, expected_res_status=200)
 
     def test_port_on_shared_non_opflex_network(self):
+        self._register_agent('h1')
         net = self.create_network(
             tenant_id='onetenant', expected_res_status=201, shared=True,
             is_admin_context=True)['network']
@@ -230,6 +239,7 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                     neutron_tenant='onetenant'))
 
     def test_port_on_shared_opflex_network(self):
+        self._register_agent('h1')
         net = self.create_network(
             tenant_id='onetenant', expected_res_status=201, shared=True,
             is_admin_context=True)['network']
@@ -254,6 +264,7 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             self.assertEqual(sub['subnet']['id'], details['subnets'][0]['id'])
 
     def test_enhanced_subnet_options(self):
+        self._register_agent('h1')
         net = self.create_network(
             tenant_id='onetenant', expected_res_status=201, shared=True,
             is_admin_context=True)['network']
@@ -376,6 +387,7 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
         self.assertFalse(self.synchronizer._sync_base.called)
 
     def test_attestation(self):
+        self._register_agent('h1')
         net = self.create_network(
             tenant_id='onetenant', expected_res_status=201)['network']
         expected_attestation = {'ports': [{'switch': '102',
@@ -421,6 +433,7 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             self.assertEqual(expected_mac, observed_mac)
 
     def test_dhcp_notifications_on_create(self):
+        self._register_agent('h1')
         net = self.create_network(
             expected_res_status=201, shared=True,
             is_admin_context=True)['network']
@@ -447,6 +460,7 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                         self.driver.notifier.port_update.call_args_list)
 
     def test_dhcp_notifications_on_update(self):
+        self._register_agent('h1')
         net = self.create_network(
             expected_res_status=201, shared=True,
             is_admin_context=True)['network']
@@ -593,6 +607,8 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             exp_calls, self.driver.notify_port_update.call_args_list)
 
     def test_gbp_details_for_allowed_address_pair(self):
+        self._register_agent('h1')
+        self._register_agent('h2')
         net = self.create_network(
             tenant_id=mocked.APIC_TENANT, expected_res_status=201)['network']
         sub1 = self.create_subnet(
@@ -706,6 +722,8 @@ class MechanismRpcTestCase(ApicML2IntegratedTestBase):
         self.assertIn(('h2', 'static'), peers)
 
     def test_remove_hostlink(self):
+        self._register_agent('h1')
+        self._register_agent('h2')
         # Test removal of one link
         self._add_hosts_to_apic(3)
         self.driver.apic_manager.delete_path = mock.Mock()
@@ -735,6 +753,7 @@ class MechanismRpcTestCase(ApicML2IntegratedTestBase):
                     0, self.driver.apic_manager.delete_path.call_count)
 
     def test_remove_hostlink_vpc(self):
+        self._register_agent('h1')
         self._add_hosts_to_apic(3, vpc=True)
         self.driver.apic_manager.delete_path = mock.Mock()
         net = self.create_network()['network']
@@ -761,6 +780,9 @@ class MechanismRpcTestCase(ApicML2IntegratedTestBase):
                                      '1'))
 
     def test_add_hostlink(self):
+        self._register_agent('h1')
+        self._register_agent('h2')
+        self._register_agent('rhel03')
         # Test removal of one link
         self._add_hosts_to_apic(2)
         net = self.create_network()['network']
@@ -799,6 +821,7 @@ class MechanismRpcTestCase(ApicML2IntegratedTestBase):
                             net['provider:segmentation_id']))
 
     def test_update_hostlink(self):
+        self._register_agent('h1')
         self._add_hosts_to_apic(1)
 
         net1 = self.create_network()['network']
@@ -1772,6 +1795,64 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             port['device_owner'] = n_constants.DEVICE_OWNER_ROUTER_GW
             port['device_id'] = mocked.APIC_ROUTER
         return FakePortContext(port, network_ctx)
+
+
+class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
+
+    def setUp(self, service_plugins=None):
+        super(ApicML2IntegratedTestCaseDvs, self).setUp(service_plugins)
+        # This is required for the test. Without it,
+        # the ML2 driver's agent_type ends up being a
+        # mocked type, which fails when passed to the
+        # hast_agents() method for the PortContext
+        # (but only for types not defined by the
+        # mechanism driver class itself).
+        self.driver.agent_type = 'Open vSwitch agent'
+
+    def test_bind_port_dvs(self):
+        # Register a DVS agent
+        self._register_agent('h1', agent_cfg=AGENT_CONF_DVS)
+        net = self.create_network(
+            tenant_id='onetenant', expected_res_status=201, shared=True,
+            is_admin_context=True)['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4, is_admin_context=True)
+        with self.port(subnet=sub, tenant_id='onetenant') as p1:
+            p1 = p1['port']
+            self.assertEqual(net['id'], p1['network_id'])
+            self.mgr.ensure_path_created_for_port = mock.Mock()
+            # Bind port to trigger path binding
+            newp1 = self._bind_port_to_host(p1['id'], 'h1')
+            # Called on the network's tenant
+            expected_pg = (mocked.APIC_SYSTEM_ID + '|' +
+                           net['tenant_id'] + '|' + net['id'])
+            pg = newp1['port']['binding:vif_details']['dvs_port_group']
+            self.assertEqual(pg, expected_pg)
+
+    def test_bind_port_dvs_with_opflex_diff_hosts(self):
+        # Register an OpFlex agent and DVS agent
+        self._register_agent('h1')
+        self._register_agent('h2', agent_cfg=AGENT_CONF_DVS)
+        net = self.create_network(
+            tenant_id='onetenant', expected_res_status=201, shared=True,
+            is_admin_context=True)['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4, is_admin_context=True)
+        # Bind a VLAN port after registering a DVS agent
+        with self.port(subnet=sub, tenant_id='onetenant') as p1:
+            p1 = p1['port']
+            self.assertEqual(net['id'], p1['network_id'])
+            self.mgr.ensure_path_created_for_port = mock.Mock()
+            # Bind port to trigger path binding
+            newp1 = self._bind_port_to_host(p1['id'], 'h2')
+            # Called on the network's tenant
+            expected_pg = (mocked.APIC_SYSTEM_ID + '|' +
+                           net['tenant_id'] + '|' + net['id'])
+            vif_det = newp1['port']['binding:vif_details']
+            self.assertIsNotNone(vif_det.get('dvs_port_group', None))
+            self.assertEqual(expected_pg, vif_det.get('dvs_port_group'))
 
 
 class ApicML2IntegratedTestCaseSingleVRF(ApicML2IntegratedTestCase):
