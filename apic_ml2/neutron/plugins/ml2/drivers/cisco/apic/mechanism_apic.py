@@ -30,6 +30,7 @@ from neutron.db import allowedaddresspairs_db as n_addr_pair_db
 from neutron.db import db_base_plugin_v2 as n_db
 from neutron.db import models_v2
 from neutron.extensions import portbindings
+from neutron.i18n import _LW
 from neutron import manager
 from neutron.plugins.common import constants
 from neutron.plugins.ml2 import db as ml2_db
@@ -190,10 +191,66 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
             ofcst.AGENT_TYPE_OPFLEX_OVS)
         ha_ip_db.HAIPOwnerDbMixin.__init__(self)
 
+    def bind_port(self, context):
+        """Get port binding per host.
+
+           Overriding the superclass implementation
+           in order to support multiple agent types
+           in a single mechanism driver (DVS and OpFlex)
+        """
+
+        LOG.debug("Attempting to bind port %(port)s on "
+                  "network %(network)s",
+                  {'port': context.current['id'],
+                   'network': context.network.current['id']})
+        vnic_type = context.current.get(portbindings.VNIC_TYPE,
+                                        portbindings.VNIC_NORMAL)
+        if vnic_type not in self.supported_vnic_types:
+            LOG.debug("Refusing to bind due to unsupported vnic_type: %s",
+                      vnic_type)
+            return
+
+        agent_list = context.host_agents(self.agent_type)
+        agent_list.extend(context.host_agents(acst.AGENT_TYPE_DVS))
+        for agent in agent_list:
+            LOG.debug("Checking agent: %s", agent)
+            if agent['alive']:
+                for segment in context.segments_to_bind:
+                    if self.try_to_bind_segment_for_agent(context, segment,
+                                                          agent):
+                        LOG.debug("Bound using segment: %s", segment)
+                        return
+            else:
+                LOG.warning(_LW("Refusing to bind port %(pid)s to dead agent: "
+                                "%(agent)s"),
+                            {'pid': context.current['id'], 'agent': agent})
+
+    def set_dvs_vif_details(self, context):
+        """Populate VIF details for DVS VIFs.
+
+           For DVS VIFs, provide the portgroup along
+           with the security groups setting
+        """
+
+        tenant_id = context.current.get('tenant_id')
+        network_id = context.current.get('network_id')
+        if tenant_id and network_id:
+            network = self.name_mapper.network(context, network_id)
+            project_name = self.name_mapper.tenant(None, tenant_id)
+            sg_enabled = self.vif_details[portbindings.CAP_PORT_FILTER]
+            return {portbindings.CAP_PORT_FILTER: sg_enabled,
+                    'dvs_port_group': (cfg.CONF.apic_system_id +
+                                       '|' + str(project_name) +
+                                       '|' + str(network))}
+
     def try_to_bind_segment_for_agent(self, context, segment, agent):
         if self.check_segment_for_agent(segment, agent):
-            context.set_binding(
-                segment[api.ID], self.vif_type, self.vif_details)
+            vif_type = self.vif_type
+            vif_details = self.vif_details
+            if agent['agent_type'] == acst.AGENT_TYPE_DVS:
+                vif_type = acst.VIF_TYPE_DVS
+                vif_details = self.set_dvs_vif_details(context)
+            context.set_binding(segment[api.ID], vif_type, vif_details)
             return True
         else:
             return False
