@@ -358,8 +358,14 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
             vm = nova_client.NovaClient().get_server(port['device_id'])
             details['vm-name'] = vm.name if vm else port['device_id']
         owned_addr = self.ha_ip_handler.get_ha_ipaddresses_for_port(port['id'])
-        self._add_ip_mapping_details(context, port, kwargs['host'], owned_addr,
-                                     details)
+
+        ext_info = self.apic_manager.ext_net_dict.get(network['name'])
+        if ext_info and self._is_asr_router_type(ext_info):
+            pass
+        else:
+            self._add_ip_mapping_details(context, port, kwargs['host'],
+                                         owned_addr, details)
+
         self._add_network_details(context, port, owned_addr, details)
         if self._is_nat_enabled_on_ext_net(network):
             # PTG name is different
@@ -677,7 +683,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
                     context, l3out_name, external_epg, cid, network, router)
 
             # Use non-NAT config
-            if not nat_ok and not self._is_asr_router_type(router_info):
+            if not nat_ok:
                 # Set contract for L3Out EPGs
                 with self.apic_manager.apic.transaction() as trs:
                     self.apic_manager.ensure_external_epg_consumed_contract(
@@ -737,7 +743,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
             context, port.get('device_id'),
             openstack_owner=router['tenant_id'])
         router_info = self.apic_manager.ext_net_dict.get(network['name'], {})
-        if router_info and not self._is_asr_router_type(router_info):
+        if router_info:
             if 'external_epg' not in router_info:
                 self.apic_manager.delete_external_epg_contract(arouter_id,
                                                                l3out_name)
@@ -1323,11 +1329,6 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
         if not net_info:
             return
 
-        # if there is a router_type (like ASR) then we don't need to create
-        # this L3 out, NatEPG, contract, ...etc in APIC
-        if self._is_asr_router_type(net_info):
-            return
-
         if self._is_pre_existing(net_info):
             l3out_name_pre = self.name_mapper.pre_existing(
                 context, network['name'])
@@ -1484,12 +1485,6 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
         vrf = self._get_network_vrf(context, network)
 
         if not net_info:
-            return
-
-        # if there is a router_type (like ASR) then we don't need to delete
-        # this L3 out, NatEPG, contract, ...etc in APIC as none was created
-        # before
-        if self._is_asr_router_type(net_info):
             return
 
         if self._is_pre_existing(net_info):

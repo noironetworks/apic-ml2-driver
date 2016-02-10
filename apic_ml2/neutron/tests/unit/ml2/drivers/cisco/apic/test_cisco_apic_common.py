@@ -304,7 +304,7 @@ class ConfigMixin(object):
                 'port': APIC_EXT_MODULE + '/' + APIC_EXT_PORT,
                 'cidr_exposed': APIC_EXT_CIDR_EXPOSED,
                 'gateway_ip': APIC_EXT_GATEWAY_IP,
-                'shadow_l3out_vlan_range': '1600:1610'
+                'vlan_range': '1600:1610'
             },
         }
 

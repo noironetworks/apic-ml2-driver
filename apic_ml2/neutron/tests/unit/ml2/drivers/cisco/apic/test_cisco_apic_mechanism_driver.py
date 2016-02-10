@@ -1287,7 +1287,6 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.driver._delete_path_if_last = mock.Mock()
         self.driver.delete_port_postcommit(port_ctx)
         mgr = self.driver.apic_manager
-        self.assertFalse(mgr.delete_external_epg_contract.called)
         mgr.delete_external_routed_network.assert_called_once_with(
             "Shd-%s" % self._scoped_name(mocked.APIC_NETWORK_ASR),
             owner=self._tenant())
@@ -1550,26 +1549,6 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.assertFalse(mgr.set_contract_for_external_epg.called)
         self.assertFalse(mgr.set_l3out_for_bd.called)
 
-    def test_create_asr_external_network_postcommit(self):
-        net_ctx = self._get_network_context(mocked.APIC_TENANT,
-                                            mocked.APIC_NETWORK_ASR,
-                                            TEST_SEGMENT1, external=True)
-        mgr = self.driver.apic_manager
-        self.driver.create_network_postcommit(net_ctx)
-
-        self.assertFalse(mgr.ensure_context_enforced.called)
-        self.assertFalse(mgr.ensure_external_routed_network_created.called)
-        self.assertFalse(mgr.set_domain_for_external_routed_network.called)
-        self.assertFalse(mgr.ensure_logical_node_profile_created.called)
-        self.assertFalse(mgr.ensure_static_route_created.called)
-        self.assertFalse(mgr.ensure_external_epg_created.called)
-        self.assertFalse(mgr.ensure_epg_created.called)
-        self.assertFalse(mgr.ensure_bd_created_on_apic.called)
-        self.assertFalse(mgr.create_tenant_filter.called)
-        self.assertFalse(mgr.manage_contract_subject_bi_filter.called)
-        self.assertFalse(mgr.set_contract_for_external_epg.called)
-        self.assertFalse(mgr.set_l3out_for_bd.called)
-
     def test_delete_network_postcommit(self):
         ctx = self._get_network_context(mocked.APIC_TENANT,
                                         mocked.APIC_NETWORK,
@@ -1650,14 +1629,6 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         mgr.delete_external_routed_network.assert_called_once_with(
             self._scoped_name(mocked.APIC_NETWORK_NO_NAT),
             owner=self._tenant())
-
-    def test_delete_external_asr_network_postcommit(self):
-        ctx = self._get_network_context(mocked.APIC_TENANT,
-                                        mocked.APIC_NETWORK_ASR,
-                                        TEST_SEGMENT1, external=True)
-        mgr = self.driver.apic_manager
-        self.driver.delete_network_postcommit(ctx)
-        self.assertFalse(mgr.delete_external_routed_network.called)
 
     def test_create_subnet_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
