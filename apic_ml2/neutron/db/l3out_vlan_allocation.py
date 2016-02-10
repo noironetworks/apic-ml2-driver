@@ -69,18 +69,19 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
 
     def _parse_vlan_ranges(self, ext_net_dict):
         self.l3out_vlan_ranges = {}
-        try:
-            for l3out_network in ext_net_dict.keys():
+        for l3out_network in ext_net_dict.keys():
+            try:
                 ext_info = ext_net_dict.get(l3out_network)
-                vlan_range_str = ext_info.get('shadow_l3out_vlan_range')
+                vlan_range_str = ext_info.get('vlan_range')
                 if vlan_range_str:
                     vlan_min, vlan_max = vlan_range_str.strip().split(':')
                     vlan_range = (int(vlan_min), int(vlan_max))
                     plugin_utils.verify_vlan_range(vlan_range)
                     self.l3out_vlan_ranges[l3out_network] = vlan_range
-        except Exception:
-            LOG.exception(_LE("Failed to parse L3out_vlan_ranges."))
-            raise
+            except Exception:
+                LOG.exception(_LE("Failed to parse L3out_vlan_ranges."))
+                raise
+
         LOG.info(_LI("L3out VLAN ranges: %s"), self.l3out_vlan_ranges)
 
     def sync_vlan_allocations(self, ext_net_dict):
@@ -100,9 +101,8 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
                  vlan_range) in self.l3out_vlan_ranges.items():
                 # determine current configured allocatable vlans for
                 # this l3out network
-                vlan_ids = set()
                 vlan_min, vlan_max = vlan_range
-                vlan_ids |= set(moves.xrange(vlan_min, vlan_max + 1))
+                vlan_ids = set(moves.xrange(vlan_min, vlan_max + 1))
 
                 # remove from table unallocated vlans not currently
                 # allocatable
@@ -154,13 +154,13 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
                                vrf=vrf))
             count = query.update({"allocated": True})
             if count:
-                LOG.debug("reserving %(count)s vlan %(vlan_id)s for vrf "
+                LOG.debug("reserving vlan %(vlan_id)s for vrf "
                           "%(vrf)s on l3out network %(l3out_network)s from "
-                          " pool",
-                          {'count': count,
-                           'vlan_id': query[0].vlan_id,
+                          "pool. Totally %(count)s rows updated.",
+                          {'vlan_id': query[0].vlan_id,
                            'vrf': vrf,
-                           'l3out_network': l3out_network})
+                           'l3out_network': l3out_network,
+                           'count': count})
                 return query[0].vlan_id
 
             # couldn't find this vrf, allocate vlan from the pool
@@ -178,13 +178,13 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
                      filter_by(allocated=True, **filters))
             count = query.update({"vrf": vrf})
             if count:
-                LOG.debug("updating vrf %(vrf)s for %(count)s vlan "
+                LOG.debug("updating vrf %(vrf)s vlan "
                           "%(vlan_id)s on l3out network %(l3out_network)s to "
-                          "pool",
+                          "pool. Totally %(count)s rows updated.",
                           {'vrf': vrf,
-                           'count': count,
                            'vlan_id': alloc.vlan_id,
-                           'l3out_network': l3out_network})
+                           'l3out_network': l3out_network,
+                           'count': count})
 
             LOG.debug("reserving vlan %(vlan_id)s "
                       "on l3out network %(l3out_network)s from pool",
@@ -199,11 +199,12 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
                                vrf=vrf))
             count = query.update({"allocated": False})
             if count:
-                LOG.debug("Releasing %(count)s vlan %(vlan_id)s on l3out "
-                          "network %(l3out_network)s to pool",
-                          {'count': count,
-                           'vlan_id': query[0].vlan_id,
-                           'l3out_network': l3out_network})
+                LOG.debug("Releasing vlan %(vlan_id)s on l3out "
+                          "network %(l3out_network)s to pool. "
+                          "Totally %(count)s rows updated.",
+                          {'vlan_id': query[0].vlan_id,
+                           'l3out_network': l3out_network,
+                           'count': count})
                 return
 
         LOG.warning(_LW("No vlan_id found for vrf %(vrf)s on l3out "

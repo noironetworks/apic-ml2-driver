@@ -31,7 +31,7 @@ class L3outVlanAllocationTestCase(testlib_api.SqlTestCase):
                                      'switch': '401',
                                      'gateway_ip': '1.103.2.1',
                                      'router_type': 'asr',
-                                     'shadow_l3out_vlan_range': '1500:1501',
+                                     'vlan_range': '1500:1501',
                                      'cidr_exposed': '1.103.2.254/24'},
                         'DC-Out': {'router_id': '1.0.0.1',
                                    'host_pool_cidr': '10.1.2.1/24',
@@ -39,7 +39,7 @@ class L3outVlanAllocationTestCase(testlib_api.SqlTestCase):
                                    'switch': '401',
                                    'gateway_ip': '1.103.2.1',
                                    'router_type': 'asr',
-                                   'shadow_l3out_vlan_range': '1051:1055',
+                                   'vlan_range': '1051:1055',
                                    'cidr_exposed': '1.103.2.254/24'},
                         }
 
@@ -108,7 +108,7 @@ class L3outVlanAllocationTestCase(testlib_api.SqlTestCase):
         bad_ext_net_dict = {
             'BadRange-Out': {
                 'router_id': '1.0.0.1',
-                'shadow_l3out_vlan_range': '4000:5000',
+                'vlan_range': '4000:5000',
                 'cidr_exposed': '1.103.2.254/24'
             }
         }
