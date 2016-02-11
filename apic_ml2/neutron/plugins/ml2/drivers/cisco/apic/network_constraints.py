@@ -16,8 +16,8 @@
 import netaddr
 import os
 
-from oslo_config import cfg
-from oslo_log import log as logging
+from neutron.openstack.common import log as logging
+from oslo.config import cfg
 
 
 LOG = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ class NetworkConstraintsSource(object):
         pass
 
     def get_subnet_constraints(self, tenant, network):
-        """Returns (default-scope, scope-for-tenant, scope-for-network) """
+        """Returns (default-scope, scope-for-tenant, scope-for-network)."""
         return (None, None, None)
 
 

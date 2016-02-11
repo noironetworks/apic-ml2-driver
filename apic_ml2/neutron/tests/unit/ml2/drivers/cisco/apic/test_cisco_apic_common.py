@@ -248,12 +248,6 @@ class ConfigMixin(object):
             cfg.CONF.set_override(opt, val, 'ml2_cisco_apic')
         self.apic_config = cfg.CONF.ml2_cisco_apic
 
-        # Configure switch topology
-        apic_switch_cfg = {
-            'apic_switch:101': {'ubuntu1,ubuntu2': ['3/11']},
-            'apic_switch:102': {'rhel01,rhel02': ['4/21'],
-                                'rhel03': ['4/22']},
-        }
         self.switch_dict = {
             '101': {
                 '3/11': ['ubuntu1', 'ubuntu2'],
@@ -302,10 +296,6 @@ class ConfigMixin(object):
                 'host_pool_cidr': HOST_POOL_CIDR,
             },
         }
-        self.mocked_parser = mock.patch.object(
-            cfg, 'MultiConfigParser').start()
-        self.mocked_parser.return_value.read.return_value = [apic_switch_cfg]
-        self.mocked_parser.return_value.parsed = [apic_switch_cfg]
 
         cfg.CONF.set_override('allow_overlapping_ips', True)
 
