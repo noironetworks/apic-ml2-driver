@@ -31,7 +31,12 @@ class TestNetworkConstraints(base.BaseTestCase):
             s1 = netaddr.IPSet(['10.10.10.1/24', '10.10.20.1/24'])
             s2 = netaddr.IPSet(['20.10.10.0/24', '20.10.20.0/24'])
             s3 = netaddr.IPSet(['30.10.10.0/24', '30.10.20.0/24'])
+            s4 = netaddr.IPSet(['10.20.0.0/16'])
             c = netaddr.IPSet(['5.5.0.0/16'])
+            t_cons = None
+            if tenant == 't1':
+                t_cons = {'public': s4, 'default': 'private'}
+
             if tenant == 't1' and network == 'net1':
                 cons = {'public': s1, 'private': s2, 'deny': s3,
                         'default': 'private'}
@@ -49,7 +54,7 @@ class TestNetworkConstraints(base.BaseTestCase):
                 cons = {'public': s1 | c, 'private': s2, 'deny': s3 | c}
             elif tenant == 't2' and network == 'net4':
                 cons = {'public': s1, 'private': s2 | c, 'deny': s3 | c}
-            return (def_scope, cons)
+            return (def_scope, t_cons, cons)
 
     def setUp(self):
         super(TestNetworkConstraints, self).setUp()
@@ -85,11 +90,37 @@ class TestNetworkConstraints(base.BaseTestCase):
         self.assertEqual(
             anc.SCOPE_DENY,
             self.net_cons.get_subnet_scope('t1', 'net1', '30.10.20.1/28'))
+        # supersets of deny
+        self.assertEqual(
+            anc.SCOPE_DENY,
+            self.net_cons.get_subnet_scope('t1', 'net1', '30.10.10.1/16'))
+        self.assertEqual(
+            anc.SCOPE_DENY,
+            self.net_cons.get_subnet_scope('t1', 'net1', '30.10.20.1/16'))
 
-    def test_network_default_subnet_scope(self):
+    def test_tenant_subnet_scope(self):
+        self.assertEqual(
+            anc.SCOPE_PUBLIC,
+            self.net_cons.get_subnet_scope('t1', 'net3', '10.20.0.0/28'))
+        self.assertEqual(
+            anc.SCOPE_PUBLIC,
+            self.net_cons.get_subnet_scope('t1', 'net4', '10.20.0.0/26'))
         self.assertEqual(
             anc.SCOPE_PRIVATE,
-            self.net_cons.get_subnet_scope('t1', 'net1', '10.10.20.0/23'))
+            self.net_cons.get_subnet_scope('t1', 'net3', '20.10.10.0/28'))
+        self.assertEqual(
+            anc.SCOPE_PRIVATE,
+            self.net_cons.get_subnet_scope('t1', 'net4', '20.10.10.0/28'))
+
+    def test_network_default_subnet_scope(self):
+        # supersets of public/private
+        self.assertEqual(
+            anc.SCOPE_PRIVATE,
+            self.net_cons.get_subnet_scope('t1', 'net1', '10.10.10.0/20'))
+        self.assertEqual(
+            anc.SCOPE_PRIVATE,
+            self.net_cons.get_subnet_scope('t1', 'net1', '20.10.10.1/20'))
+
         self.assertEqual(
             anc.SCOPE_PRIVATE,
             self.net_cons.get_subnet_scope('t1', 'net1', '40.10.10.1/28'))
@@ -100,10 +131,10 @@ class TestNetworkConstraints(base.BaseTestCase):
     def test_global_default_subnet_scope(self):
         self.assertEqual(
             anc.SCOPE_PUBLIC,
-            self.net_cons.get_subnet_scope('t1', 'net3', '10.10.10.1/24'))
+            self.net_cons.get_subnet_scope('t2', 'net3', '10.30.10.1/24'))
         self.assertEqual(
             anc.SCOPE_PUBLIC,
-            self.net_cons.get_subnet_scope('t1', 'net4', '20.10.10.1/24'))
+            self.net_cons.get_subnet_scope('t2', 'net4', '20.30.10.1/24'))
         self.assertEqual(
             anc.SCOPE_PUBLIC,
             self.net_cons.get_subnet_scope('foo', 'bar', '10.10.10.1/24'))
@@ -144,6 +175,10 @@ default = deny
 [t1/net3]
 default = deny
 
+[t1]
+public = 10.20.0.0/16
+default = private
+
 [t1:net_unk]
 default = deny
 """
@@ -156,12 +191,15 @@ default = deny
 
     def test_non_existent(self):
         ncs = anc.ConfigFileSource("foo")
-        self.assertEqual((None, {}), ncs.get_subnet_constraints('t', 'n'))
+        self.assertEqual((None, {}, {}), ncs.get_subnet_constraints('t', 'n'))
 
     def test_no_default_scope(self):
         self._write_constraints_file(self.file_data.replace('DEFAULT', 'a'))
         ncs = anc.ConfigFileSource(self.cons_file_name)
-        self.assertEqual((None, {'default': 'deny'}),
+        self.assertEqual((None,
+                          {'public': netaddr.IPSet(['10.20.0.0/16']),
+                           'default': 'private'},
+                          {'default': 'deny'}),
                          ncs.get_subnet_constraints('t1', 'net3'))
 
     def test_parse(self):
@@ -169,6 +207,8 @@ default = deny
         ncs = anc.ConfigFileSource(self.cons_file_name)
         self.assertEqual(
             (anc.SCOPE_PUBLIC,
+             {'public': netaddr.IPSet(['10.20.0.0/16']),
+              'default': 'private'},
              {'public': netaddr.IPSet(['10.10.10.1/24', '10.10.20.1/24']),
               'private': None,
               'deny': netaddr.IPSet(['20.10.10.0/24']),
@@ -177,18 +217,26 @@ default = deny
 
         self.assertEqual(
             (anc.SCOPE_PUBLIC,
+             {'public': netaddr.IPSet(['10.20.0.0/16']),
+              'default': 'private'},
              {'public': netaddr.IPSet(['10.10.10.1/24']),
               'private': netaddr.IPSet(['20.10.10.0/24']),
               'default': 'deny'}),
             ncs.get_subnet_constraints('t1', 'net2'))
 
-        self.assertEqual((anc.SCOPE_PUBLIC, {}),
+        self.assertEqual((anc.SCOPE_PUBLIC,
+                          {'public': netaddr.IPSet(['10.20.0.0/16']),
+                           'default': 'private'},
+                          {}),
                          ncs.get_subnet_constraints('t1', 'net_unk'))
 
     def test_auto_refresh(self):
         self._write_constraints_file(self.file_data)
         ncs = anc.ConfigFileSource(self.cons_file_name)
-        self.assertEqual((anc.SCOPE_PUBLIC, {'default': 'deny'}),
+        self.assertEqual((anc.SCOPE_PUBLIC,
+                          {'public': netaddr.IPSet(['10.20.0.0/16']),
+                           'default': 'private'},
+                          {'default': 'deny'}),
                          ncs.get_subnet_constraints('t1', 'net3'))
         time.sleep(0.1)
 
@@ -197,7 +245,10 @@ default = deny
         data = data.replace('t1/net3', 't2/net3')
         self._write_constraints_file(data)
 
-        self.assertEqual((anc.SCOPE_DENY, {}),
+        self.assertEqual((anc.SCOPE_DENY,
+                          {'public': netaddr.IPSet(['10.20.0.0/16']),
+                           'default': 'private'},
+                          {}),
                          ncs.get_subnet_constraints('t1', 'net3'))
-        self.assertEqual((anc.SCOPE_DENY, {'default': 'deny'}),
+        self.assertEqual((anc.SCOPE_DENY, {}, {'default': 'deny'}),
                          ncs.get_subnet_constraints('t2', 'net3'))
