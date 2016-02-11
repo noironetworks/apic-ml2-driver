@@ -38,6 +38,7 @@ APIC_NETWORK = 'network99'
 APIC_NETWORK_PRE = 'network_pre'
 APIC_NETWORK_NO_NAT = 'network_no_nat'
 APIC_NETWORK_HOST_SNAT = 'network-host-snat'
+APIC_NETWORK_ASR = 'network_asr'
 APIC_EXT_EPG = 'external_epg'
 APIC_NETNAME = 'net99name'
 APIC_SUBNET = '10.3.2.1/24'
@@ -296,6 +297,14 @@ class ConfigMixin(object):
                 'cidr_exposed': APIC_EXT_CIDR_EXPOSED,
                 'gateway_ip': APIC_EXT_GATEWAY_IP,
                 'host_pool_cidr': HOST_POOL_CIDR,
+            },
+            APIC_NETWORK_ASR + '-name': {
+                'router_type': 'ASR',
+                'switch': APIC_EXT_SWITCH,
+                'port': APIC_EXT_MODULE + '/' + APIC_EXT_PORT,
+                'cidr_exposed': APIC_EXT_CIDR_EXPOSED,
+                'gateway_ip': APIC_EXT_GATEWAY_IP,
+                'vlan_range': '1600:1610'
             },
         }
 

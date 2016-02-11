@@ -44,6 +44,7 @@ from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
 
+from apic_ml2.neutron.db import l3out_vlan_allocation as l3out_vlan_alloc
 from apic_ml2.neutron.db import port_ha_ipaddress_binding as ha_ip_db
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
     network_constraints as net_cons)
@@ -55,7 +56,6 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import constants as acst
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import exceptions as aexc
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import nova_client
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import rpc as t_rpc
-
 
 LOG = logging.getLogger(__name__)
 n_db.AUTO_DELETE_PORT_OWNERS.append(acst.DEVICE_OWNER_SNAT_PORT)
@@ -258,6 +258,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
             net_cons_source = net_cons.ConfigFileSource(net_cons_source)
         self.net_cons = net_cons.NetworkConstraints(net_cons_source)
 
+        self.l3out_vlan_alloc = l3out_vlan_alloc.L3outVlanAlloc()
+        self.l3out_vlan_alloc.sync_vlan_allocations(
+            self.apic_manager.ext_net_dict)
+
     def _setup_opflex_rpc_listeners(self):
         self.opflex_endpoints = [o_rpc.GBPServerRpcCallback(self)]
         self.opflex_topic = o_rpc.TOPIC_OPFLEX
@@ -365,8 +369,14 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
             vm = nova_client.NovaClient().get_server(port['device_id'])
             details['vm-name'] = vm.name if vm else port['device_id']
         owned_addr = self.ha_ip_handler.get_ha_ipaddresses_for_port(port['id'])
-        self._add_ip_mapping_details(context, port, kwargs['host'], owned_addr,
-                                     details)
+
+        ext_info = self.apic_manager.ext_net_dict.get(network['name'])
+        if ext_info and self._is_asr_router_type(ext_info):
+            pass
+        else:
+            self._add_ip_mapping_details(context, port, kwargs['host'],
+                                         owned_addr, details)
+
         self._add_network_details(context, port, owned_addr, details)
         if self._is_nat_enabled_on_ext_net(network):
             # PTG name is different
@@ -683,7 +693,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
                 nat_ok = self._create_shadow_ext_net_for_nat(
                     context, l3out_name, external_epg, cid, network, router)
 
-            if not nat_ok:      # Use non-NAT config
+            # Use non-NAT config
+            if not nat_ok:
                 # Set contract for L3Out EPGs
                 with self.apic_manager.apic.transaction() as trs:
                     self.apic_manager.ensure_external_epg_consumed_contract(
@@ -715,7 +726,6 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
         ext_info = self.apic_manager.ext_net_dict.get(network['name'])
         router = self.l3_plugin.get_router(context._plugin_context, router_id)
         vrf_info = self._get_tenant_vrf(router['tenant_id'])
-
         if router_id and ext_info:
             nat_reqd = self._is_nat_required(
                 context, network, vrf_info, ext_info)
@@ -744,7 +754,6 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
             context, port.get('device_id'),
             openstack_owner=router['tenant_id'])
         router_info = self.apic_manager.ext_net_dict.get(network['name'], {})
-
         if router_info:
             if 'external_epg' not in router_info:
                 self.apic_manager.delete_external_epg_contract(arouter_id,
@@ -1072,7 +1081,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
         shadow_l3out = self._get_shadow_name_for_nat(shadow_l3out)
         router_tenant = self._get_tenant(router)
         nat_epg_tenant = self._get_network_aci_tenant(network)
-
+        net_info = self.apic_manager.ext_net_dict.get(network['name'])
         try:
             with self.apic_manager.apic.transaction(None) as trs:
                 # create shadow L3-out and shadow external-epg
@@ -1086,6 +1095,28 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
                 self.apic_manager.ensure_external_epg_created(
                     shadow_l3out, external_epg=shadow_ext_epg,
                     owner=router_tenant, transaction=trs)
+
+                # if there is a router_type (like ASR) then we have to flesh
+                # out this shadow L3 out in APIC
+                if self._is_asr_router_type(net_info):
+                    address = net_info['cidr_exposed']
+                    next_hop = net_info['gateway_ip']
+                    vlan_id = self.l3out_vlan_alloc.reserve_vlan(
+                        network['name'], router['tenant_id'])
+                    switch = net_info['switch']
+                    module, sport = net_info['port'].split('/')
+
+                    self.apic_manager.set_domain_for_external_routed_network(
+                        shadow_l3out, owner=router_tenant, transaction=trs)
+                    self.apic_manager.ensure_logical_node_profile_created(
+                        shadow_l3out, switch, module, sport,
+                        'vlan-' + str(vlan_id), address, transaction=trs,
+                        owner=router_tenant)
+                    self.apic_manager.ensure_static_route_created(
+                        shadow_l3out, switch, next_hop,
+                        owner=router_tenant,
+                        transaction=trs)
+
                 # make them use router-contract
                 self.apic_manager.ensure_external_epg_consumed_contract(
                     shadow_l3out, router_contract,
@@ -1097,11 +1128,16 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
                     owner=router_tenant, transaction=trs)
 
                 # link up shadow external-EPG to NAT EPG
-                self.apic_manager.associate_external_epg_to_nat_epg(
-                    router_tenant, shadow_l3out, shadow_ext_epg,
-                    nat_epg_name, target_owner=nat_epg_tenant,
-                    app_profile_name=self._get_network_app_profile(network),
-                    transaction=trs)
+
+                # ASR is the only router we support now so any other values
+                # we treat it as none
+                if not self._is_asr_router_type(net_info):
+                    self.apic_manager.associate_external_epg_to_nat_epg(
+                        router_tenant, shadow_l3out, shadow_ext_epg,
+                        nat_epg_name, target_owner=nat_epg_tenant,
+                        app_profile_name=self. _get_network_app_profile(
+                            network),
+                        transaction=trs)
             return True
         except Exception as e:
             LOG.info(_("Unable to create Shadow EPG: %s"), e)
@@ -1121,6 +1157,12 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
         shadow_l3out = self._get_shadow_name_for_nat(shadow_l3out)
         self.apic_manager.delete_external_routed_network(
             shadow_l3out, owner=self._get_network_aci_tenant(network))
+
+        # if there is a router_type (like ASR) then we have to release
+        # the vlan associated with this shadow L3out
+        if self._is_asr_router_type(ext_info):
+            self.l3out_vlan_alloc.release_vlan(
+                network['name'], router['tenant_id'])
 
     def _get_router_interface_subnets(self, context, router_ids):
         core_plugin = manager.NeutronManager.get_plugin()
@@ -1572,3 +1614,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
     def _is_pre_existing(self, ext_info):
         opt = ext_info.get('preexisting', 'false')
         return opt.lower() in ['true', 'yes', '1']
+
+    def _is_asr_router_type(self, ext_info):
+        router_type = ext_info.get('router_type', 'none')
+        return router_type.lower() == 'asr'

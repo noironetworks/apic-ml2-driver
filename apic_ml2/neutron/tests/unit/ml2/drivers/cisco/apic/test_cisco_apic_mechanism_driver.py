@@ -922,7 +922,6 @@ class MechanismRpcTestCase(ApicML2IntegratedTestBase):
 class TestCiscoApicMechDriver(base.BaseTestCase,
                               mocked.ControllerMixin,
                               mocked.ConfigMixin):
-
     def setUp(self):
         super(TestCiscoApicMechDriver, self).setUp()
         mocked.ControllerMixin.set_up_mocks(self)
@@ -1137,6 +1136,62 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
     def test_update_cross_tenant_gw_port_postcommit(self):
         self._test_update_gw_port_postcommit('admin_tenant')
 
+    def test_update_asr_gw_port_postcommit(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK_ASR,
+                                            TEST_SEGMENT1, external=True)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK_ASR,
+                                          'vm1', net_ctx, HOST_ID1, gw=True)
+        mgr = self.driver.apic_manager
+        mgr.get_router_contract.return_value = mocked.FakeDbContract(
+            mocked.APIC_CONTRACT)
+        self.driver.update_port_postcommit(port_ctx)
+        mgr.get_router_contract.assert_called_once_with(
+            self._scoped_name(port_ctx.current['device_id']),
+            owner=self._tenant(vrf=True))
+
+        expected_calls = [
+            mock.call("Shd-%s" % self._scoped_name(mocked.APIC_NETWORK_ASR),
+                      owner=self._tenant(), transaction=mock.ANY,
+                      context=self._network_vrf_name())]
+        self._check_call_list(
+            expected_calls,
+            mgr.ensure_external_routed_network_created.call_args_list)
+
+        expected_calls = [
+            mock.call("Shd-%s" % self._scoped_name(mocked.APIC_NETWORK_ASR),
+                      external_epg="Shd-%s" % mocked.APIC_EXT_EPG,
+                      owner=self._tenant(), transaction=mock.ANY)]
+
+        self._check_call_list(
+            expected_calls, mgr.ensure_external_epg_created.call_args_list)
+
+        self.assertTrue(self.driver.l3out_vlan_alloc.reserve_vlan)
+        self.assertTrue(mgr.set_domain_for_external_routed_network.called)
+        self.assertTrue(mgr.ensure_logical_node_profile_created.called)
+        self.assertTrue(mgr.ensure_static_route_created.called)
+
+        expected_calls = [
+            mock.call(
+                "Shd-%s" % self._scoped_name(mocked.APIC_NETWORK_ASR),
+                mgr.get_router_contract.return_value,
+                external_epg="Shd-%s" % mocked.APIC_EXT_EPG,
+                owner=self._tenant(), transaction=mock.ANY)]
+        self._check_call_list(
+            expected_calls,
+            mgr.ensure_external_epg_consumed_contract.call_args_list)
+
+        expected_calls = [
+            mock.call(
+                "Shd-%s" % self._scoped_name(mocked.APIC_NETWORK_ASR),
+                mgr.get_router_contract.return_value,
+                external_epg="Shd-%s" % mocked.APIC_EXT_EPG,
+                owner=self._tenant(), transaction=mock.ANY)]
+        self._check_call_list(
+            expected_calls,
+            mgr.ensure_external_epg_provided_contract.call_args_list)
+
     def _test_update_pre_gw_port_postcommit(self,
                                             net_tenant=mocked.APIC_TENANT):
         net_ctx = self._get_network_context(net_tenant,
@@ -1283,6 +1338,21 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         mgr.delete_external_routed_network.assert_called_once_with(
             "Shd-%s" % self._scoped_name(mocked.APIC_NETWORK),
             owner=self._tenant())
+
+    def test_delete_asr_gw_port_postcommit(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK_ASR,
+                                            TEST_SEGMENT1, external=True)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK_ASR,
+                                          'vm1', net_ctx, HOST_ID1, gw=True)
+        self.driver._delete_path_if_last = mock.Mock()
+        self.driver.delete_port_postcommit(port_ctx)
+        mgr = self.driver.apic_manager
+        mgr.delete_external_routed_network.assert_called_once_with(
+            "Shd-%s" % self._scoped_name(mocked.APIC_NETWORK_ASR),
+            owner=self._tenant())
+        self.assertTrue(self.driver.l3out_vlan_alloc.release_vlan)
 
     def test_update_no_nat_gw_port_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
