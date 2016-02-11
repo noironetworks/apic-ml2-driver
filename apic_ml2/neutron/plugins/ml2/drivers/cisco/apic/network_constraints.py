@@ -32,8 +32,8 @@ class NetworkConstraintsSource(object):
         pass
 
     def get_subnet_constraints(self, tenant, network):
-        """Returns pair (default-subnet-scope, scope-dict-for-network) """
-        return (None, None)
+        """Returns (default-scope, scope-for-tenant, scope-for-network) """
+        return (None, None, None)
 
 
 class NetworkConstraints(object):
@@ -44,18 +44,24 @@ class NetworkConstraints(object):
         scope = None
         cidr = netaddr.IPNetwork(cidr)
         if self.source:
-            def_scope, constraints = (
+            def_scope, tenant_cons, net_cons = (
                 self.source.get_subnet_constraints(tenant, network))
             scope = def_scope or scope
-            if constraints:
-                if cidr in (constraints.get('deny') or netaddr.IPSet()):
-                    return SCOPE_DENY
-                elif cidr in (constraints.get('private') or netaddr.IPSet()):
-                    return SCOPE_PRIVATE
-                elif cidr in (constraints.get('public') or netaddr.IPSet()):
-                    return SCOPE_PUBLIC
-                else:
-                    scope = constraints.get('default') or scope
+            for constraints in [net_cons, tenant_cons]:
+                if constraints:
+                    # scope is deny if there is any overlap with deny set
+                    # scope is public/private if subset of public/private set
+                    if netaddr.IPSet(cidr) & (constraints.get('deny') or
+                                              netaddr.IPSet()):
+                        return SCOPE_DENY
+                    elif cidr in (constraints.get('private') or
+                                  netaddr.IPSet()):
+                        return SCOPE_PRIVATE
+                    elif cidr in (constraints.get('public') or
+                                  netaddr.IPSet()):
+                        return SCOPE_PUBLIC
+                    elif constraints.get('default'):
+                        return constraints.get('default')
         return scope
 
 
@@ -70,6 +76,7 @@ class ConfigFileSource(NetworkConstraintsSource):
     def get_subnet_constraints(self, tenant, network):
         self._refresh()
         return (self.subnet_default_scope,
+                self.subnet_constraints.get((tenant, None), {}),
                 self.subnet_constraints.get((tenant, network), {}))
 
     def _refresh(self):
@@ -118,8 +125,8 @@ class ConfigFileSource(NetworkConstraintsSource):
                     LOG.debug('Default subnet scope: %s', def_scope)
                 else:
                     net = tuple(section_name.split('/', 1))
-                    if len(net) < 2:
-                        continue
+                    if len(net) < 2:    # tenant case
+                        net += tuple([None])
                     constraints[net] = {}
                     for k, v in cfg_file[section_name].iteritems():
                         k = k.lower()
