@@ -14,8 +14,7 @@ BuildArch:	noarch
 BuildRequires:	python2-devel
 BuildRequires:	python-pbr
 BuildRequires:	python-setuptools
-Requires:	openstack-neutron-ml2 >= 2015.2
-Requires:	openstack-neutron-ml2 < 2015.3
+Requires:	openstack-neutron-ml2
 Requires:	apicapi
 Requires:	python-oslo-concurrency
 Requires:	neutron-opflex-agent
