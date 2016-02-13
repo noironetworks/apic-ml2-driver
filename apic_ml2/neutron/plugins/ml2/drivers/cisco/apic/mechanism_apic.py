@@ -195,15 +195,55 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
             ofcst.AGENT_TYPE_OPFLEX_OVS)
         ha_ip_db.HAIPOwnerDbMixin.__init__(self)
 
+    def _is_dvs_vif_type(self, context, agent):
+        """Return if this port is a DVS vif
+
+           We need to bind the port as a DVS VIF type
+           when the port belongs to nova, and when there's
+           an OpFlex agent on that (compute) host that's told
+           us it's supporting a VMware hypervisor.
+        """
+        port = context.current
+        if port['device_owner'] == 'compute:nova':
+            hv_type = agent['configurations'].get('hypervisor_type', None)
+            if hv_type and hv_type == acst.HYPERVISOR_VCENTER:
+                return True
+        return False
+
+    def _get_dvs_vif_details(self, context):
+        """Populate VIF details for DVS VIFs.
+
+           For DVS VIFs, provide the portgroup along
+           with the security groups setting
+        """
+
+        # Use default security groups from MD
+        vif_details = ({portbindings.CAP_PORT_FILTER:
+                        self.vif_details[portbindings.CAP_PORT_FILTER]})
+        network_id = context.current.get('network_id')
+        if network_id:
+            network = self.name_mapper.network(context, network_id)
+            net = self._get_plugin().get_network(context._plugin_context,
+                                                 network_id)
+            project_name = self.name_mapper.tenant(None, net['tenant_id'])
+            vif_details['dvs_port_group'] = (cfg.CONF.apic_system_id +
+                                             '|' + str(project_name) +
+                                             '|' + str(network))
+        return vif_details
+
     def try_to_bind_segment_for_agent(self, context, segment, agent):
-        if self.check_segment_for_agent(segment, agent):
-            context.set_binding(
-                segment[api.ID], self.vif_type, self.vif_details)
+        if self._check_segment_for_agent(segment, agent):
+            vif_type = self.vif_type
+            vif_details = self.vif_details
+            if self._is_dvs_vif_type(context, agent):
+                vif_type = acst.VIF_TYPE_DVS
+                vif_details = self._get_dvs_vif_details(context)
+            context.set_binding(segment[api.ID], vif_type, vif_details)
             return True
         else:
             return False
 
-    def check_segment_for_agent(self, segment, agent):
+    def _check_segment_for_agent(self, segment, agent):
         network_type = segment[api.NETWORK_TYPE]
         if network_type == ofcst.TYPE_OPFLEX:
             opflex_mappings = agent['configurations'].get('opflex_networks',
