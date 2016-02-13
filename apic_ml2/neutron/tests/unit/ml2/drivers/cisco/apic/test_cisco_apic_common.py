@@ -206,7 +206,7 @@ class ConfigMixin(object):
     def __init__(self):
         self.mocked_parser = None
 
-    def set_up_mocks(self):
+    def set_up_mocks(self, ml2_opts=None):
         # Mock the configuration file
         base.BaseTestCase.config_parse()
 
@@ -217,10 +217,12 @@ class ConfigMixin(object):
         cfg.CONF.keystone_authtoken = KEYSTONE_TOKEN
 
         # Configure the ML2 mechanism drivers and network types
-        ml2_opts = {
-            'mechanism_drivers': ['openvswitch', 'cisco_apic_ml2'],
-            'tenant_network_types': ['vlan'],
-        }
+        if ml2_opts is None:
+            ml2_opts = {
+                'mechanism_drivers': ['openvswitch', 'cisco_apic_ml2'],
+                'tenant_network_types': ['vlan'],
+            }
+
         for opt, val in ml2_opts.items():
                 cfg.CONF.set_override(opt, val, 'ml2')
 
