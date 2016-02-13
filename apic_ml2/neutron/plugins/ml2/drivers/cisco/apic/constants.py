@@ -13,8 +13,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+AGENT_TYPE_DVS = 'DVS agent'
 APIC_SYNC_NETWORK = 'apic-sync-network'
 HOST_SNAT_NETWORK_PREFIX = 'host-snat-network-for-internal-use-'
 HOST_SNAT_POOL = 'host-snat-pool-for-internal-use'
 HOST_SNAT_POOL_PORT = 'host-snat-pool-port-for-internal-use'
 DEVICE_OWNER_SNAT_PORT = 'host-snat-pool-port-device-owner-internal-use'
+VIF_TYPE_DVS = 'dvs'
