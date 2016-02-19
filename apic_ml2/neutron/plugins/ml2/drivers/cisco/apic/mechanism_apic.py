@@ -816,9 +816,9 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
 
     def _get_active_path_count(self, context, host=None):
         return context._plugin_context.session.query(
-            models.PortBinding).filter_by(
+            models.PortBindingLevel).filter_by(
                 host=host or context.host,
-                segment=context._binding.segment).count()
+                segment_id=context.top_bound_segment['id']).count()
 
     @lockutils.synchronized('apic-portlock')
     def _delete_port_path(self, context, atenant_id, anetwork_id,
@@ -908,8 +908,8 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
         port = context.current
         network = context.network.current
         # Check if a compute port
-        if (not self._is_apic_network_type(context) and context.host and
-                context._binding.segment):
+        if (not self._is_apic_network_type(context) and
+                self._is_port_bound(port) and context.top_bound_segment):
             self._delete_path_if_last(context)
         if port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
             self._delete_contract(context)
