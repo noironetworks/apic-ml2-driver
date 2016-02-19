@@ -17,4 +17,8 @@ APIC_SYNC_NETWORK = 'apic-sync-network'
 HOST_SNAT_NETWORK_PREFIX = 'host-snat-network-for-internal-use-'
 HOST_SNAT_POOL = 'host-snat-pool-for-internal-use'
 HOST_SNAT_POOL_PORT = 'host-snat-pool-port-for-internal-use'
+# TODO(tbachman) Figure out a better/common place for this
+HYPERVISOR_VCENTER = "VMware vCenter"
 DEVICE_OWNER_SNAT_PORT = 'host-snat-pool-port-device-owner-internal-use'
+# TODO(tbachman) figure out a better/common place for this
+VIF_TYPE_DVS = "dvs"
