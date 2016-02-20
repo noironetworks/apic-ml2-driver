@@ -147,18 +147,19 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
     def get_type(self):
         return p_const.TYPE_VLAN
 
-    def reserve_vlan(self, l3out_network, vrf):
+    def reserve_vlan(self, l3out_network, vrf, vrf_tenant=None):
+        vrf_db = L3outVlanAlloc._get_vrf_name_db(vrf, vrf_tenant)
         with self.session.begin(subtransactions=True):
             query = (self.session.query(L3OutVlanAllocation).
                      filter_by(l3out_network=l3out_network,
-                               vrf=vrf))
+                               vrf=vrf_db))
             count = query.update({"allocated": True})
             if count:
                 LOG.debug("reserving vlan %(vlan_id)s for vrf "
                           "%(vrf)s on l3out network %(l3out_network)s from "
                           "pool. Totally %(count)s rows updated.",
                           {'vlan_id': query[0].vlan_id,
-                           'vrf': vrf,
+                           'vrf': vrf_db,
                            'l3out_network': l3out_network,
                            'count': count})
                 return query[0].vlan_id
@@ -176,12 +177,12 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
             filters['vlan_id'] = alloc.vlan_id
             query = (self.session.query(L3OutVlanAllocation).
                      filter_by(allocated=True, **filters))
-            count = query.update({"vrf": vrf})
+            count = query.update({"vrf": vrf_db})
             if count:
                 LOG.debug("updating vrf %(vrf)s vlan "
                           "%(vlan_id)s on l3out network %(l3out_network)s to "
                           "pool. Totally %(count)s rows updated.",
-                          {'vrf': vrf,
+                          {'vrf': vrf_db,
                            'vlan_id': alloc.vlan_id,
                            'l3out_network': l3out_network,
                            'count': count})
@@ -192,11 +193,12 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
                        'l3out_network': l3out_network})
             return alloc.vlan_id
 
-    def release_vlan(self, l3out_network, vrf):
+    def release_vlan(self, l3out_network, vrf, vrf_tenant=None):
+        vrf_db = L3outVlanAlloc._get_vrf_name_db(vrf, vrf_tenant)
         with self.session.begin(subtransactions=True):
             query = (self.session.query(L3OutVlanAllocation).
                      filter_by(l3out_network=l3out_network,
-                               vrf=vrf))
+                               vrf=vrf_db))
             count = query.update({"allocated": False})
             if count:
                 LOG.debug("Releasing vlan %(vlan_id)s on l3out "
@@ -209,19 +211,24 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
 
         LOG.warning(_LW("No vlan_id found for vrf %(vrf)s on l3out "
                         "network %(l3out_network)s"),
-                    {'vrf': vrf,
+                    {'vrf': vrf_db,
                      'l3out_network': l3out_network})
 
     # None is returned if not found
     @staticmethod
-    def get_vlan_allocated(l3out_network, vrf):
+    def get_vlan_allocated(l3out_network, vrf, vrf_tenant=None):
         session = db_api.get_session()
         query = (session.query(L3OutVlanAllocation).
                  filter_by(l3out_network=l3out_network,
-                           vrf=vrf,
+                           vrf=L3outVlanAlloc._get_vrf_name_db(
+                               vrf, vrf_tenant),
                            allocated=True))
         if query.count() > 0:
             return query[0].vlan_id
+
+    @staticmethod
+    def _get_vrf_name_db(vrf, vrf_tenant):
+        return vrf_tenant and ("%s/%s" % (vrf_tenant, vrf)) or vrf
 
     def initialize(self):
         return

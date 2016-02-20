@@ -51,12 +51,14 @@ class L3outVlanAllocationTestCase(testlib_api.SqlTestCase):
             'Mgmt-Out']
         LOG.info(("vlan range: %d - %d"), vlan_min, vlan_max)
 
-        vlan_id1 = self.l3out_vlan_alloc.reserve_vlan('Mgmt-Out', 'admin')
+        vlan_id1 = self.l3out_vlan_alloc.reserve_vlan('Mgmt-Out', 'admin',
+                                                      'tenant1')
         LOG.info(("vlan reserved: %d"), vlan_id1)
         self.assertTrue(vlan_min <= vlan_id1 <= vlan_max)
 
         # it should reserve the same vlan with the same l3 network + vrf
-        vlan_id2 = self.l3out_vlan_alloc.reserve_vlan('Mgmt-Out', 'admin')
+        vlan_id2 = self.l3out_vlan_alloc.reserve_vlan('Mgmt-Out', 'admin',
+                                                      'tenant1')
         self.assertEqual(vlan_id1, vlan_id2)
 
         vlan_id3 = self.l3out_vlan_alloc.reserve_vlan('Mgmt-Out', 'demo')
@@ -64,22 +66,25 @@ class L3outVlanAllocationTestCase(testlib_api.SqlTestCase):
         self.assertTrue(vlan_min <= vlan_id3 <= vlan_max)
 
     def test_exception_thrown_reserve_vlan_when_full(self):
-        vlan_id1 = self.l3out_vlan_alloc.reserve_vlan('Mgmt-Out', 'test1')
-        vlan_id2 = self.l3out_vlan_alloc.reserve_vlan('Mgmt-Out', 'test2')
+        vlan_id1 = self.l3out_vlan_alloc.reserve_vlan('Mgmt-Out', 'test1',
+                                                      'tenant1')
+        vlan_id2 = self.l3out_vlan_alloc.reserve_vlan('Mgmt-Out', 'test2',
+                                                      'tenant1')
         self.assertNotEqual(vlan_id1, vlan_id2)
 
         self.assertRaises(l3out_vlan_alloc.NoVlanAvailable,
                           self.l3out_vlan_alloc.reserve_vlan,
-                          'Mgmt-Out', 'test3')
+                          'Mgmt-Out', 'test3', 'tenant1')
 
-        self.l3out_vlan_alloc.release_vlan('Mgmt-Out', 'test1')
-        vlan_id5 = self.l3out_vlan_alloc.reserve_vlan('Mgmt-Out', 'test3')
+        self.l3out_vlan_alloc.release_vlan('Mgmt-Out', 'test1', 'tenant1')
+        vlan_id5 = self.l3out_vlan_alloc.reserve_vlan('Mgmt-Out', 'test3',
+                                                      'tenant1')
         self.assertEqual(vlan_id1, vlan_id5)
 
         # test when the vlan pool is full again with different vrf
         self.assertRaises(l3out_vlan_alloc.NoVlanAvailable,
                           self.l3out_vlan_alloc.reserve_vlan,
-                          'Mgmt-Out', 'test1')
+                          'Mgmt-Out', 'test1', 'tenant1')
 
         # test when wrong L3 out network name
         self.assertRaises(l3out_vlan_alloc.NoVlanAvailable,
@@ -91,11 +96,12 @@ class L3outVlanAllocationTestCase(testlib_api.SqlTestCase):
         self.l3out_vlan_alloc.release_vlan('Mgmt-Out', 'garbage')
 
     def test_get_vlan_allocated(self):
-        vlan_id1 = self.l3out_vlan_alloc.reserve_vlan('Mgmt-Out', 'test')
+        vlan_id1 = self.l3out_vlan_alloc.reserve_vlan('Mgmt-Out', 'test',
+                                                      'tenant1')
         LOG.info(("vlan reserved: %d"), vlan_id1)
 
         vlan_id2 = l3out_vlan_alloc.L3outVlanAlloc.get_vlan_allocated(
-            'Mgmt-Out', 'test')
+            'Mgmt-Out', 'test', 'tenant1')
         LOG.info(("vlan allocated: %d"), vlan_id2)
         self.assertEqual(vlan_id1, vlan_id2)
 
