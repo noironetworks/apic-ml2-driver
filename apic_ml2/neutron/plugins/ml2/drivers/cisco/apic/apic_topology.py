@@ -27,13 +27,14 @@ from oslo_service import service as svc
 from neutron.agent.common import config
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
+from neutron.agent import rpc as agent_rpc
 from neutron.common import config as common_cfg
-from neutron.common import rpc
 from neutron.common import utils as neutron_utils
 from neutron.db import agents_db
 from neutron.i18n import _LE, _LI
 from neutron import manager
 from neutron import service
+import oslo_messaging
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (mechanism_apic as
                                                              ma)
@@ -61,7 +62,7 @@ LOG = logging.getLogger(__name__)
 
 class ApicTopologyService(manager.Manager, arpc.ApicTopologyRpcCallback):
 
-    RPC_API_VERSION = '1.1'
+    target = oslo_messaging.Target(version='1.1')
 
     def __init__(self, host=None):
         if host is None:
@@ -89,11 +90,10 @@ class ApicTopologyService(manager.Manager, arpc.ApicTopologyRpcCallback):
             'agent_type': TYPE_APIC_SERVICE_AGENT,
         }
 
-        self.conn = rpc.create_connection(new=True)
         self.dispatcher = [self, agents_db.AgentExtRpcCallback()]
-        self.conn.create_consumer(
-            self.topic, self.dispatcher, fanout=True)
-        self.conn.consume_in_threads()
+        self.connection = agent_rpc.create_consumers(
+            self.dispatcher, self.topic, [], start_listening=False)
+        self.connection.consume_in_threads()
 
     def after_start(self):
         LOG.info(_LI("APIC service agent started"))
