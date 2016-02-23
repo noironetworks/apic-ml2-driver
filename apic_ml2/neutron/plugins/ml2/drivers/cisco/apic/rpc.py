@@ -183,7 +183,7 @@ class ApicTopologyRpcCallbackMechanism(ApicTopologyRpcCallback):
 class ApicTopologyServiceNotifierApi(object):
 
     def __init__(self):
-        target = oslo_messaging.Target(topic=TOPIC_APIC_SERVICE, version='1.0')
+        target = oslo_messaging.Target(topic=TOPIC_APIC_SERVICE, version='1.1')
         self.client = rpc.get_client(target)
 
     def update_link(self, context, host, interface, mac, switch, module, port):
