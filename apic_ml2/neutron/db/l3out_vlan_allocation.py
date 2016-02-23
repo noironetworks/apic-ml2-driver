@@ -79,8 +79,8 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
                     plugin_utils.verify_vlan_range(vlan_range)
                     self.l3out_vlan_ranges[l3out_network] = vlan_range
             except Exception:
-                LOG.exception(_LE("Failed to parse L3out_vlan_ranges."))
-                raise
+                LOG.exception(_LE("Failed to parse vlan_range for L3out %s"),
+                              l3out_network)
 
         LOG.info(_LI("L3out VLAN ranges: %s"), self.l3out_vlan_ranges)
 

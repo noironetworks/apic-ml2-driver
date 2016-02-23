@@ -10,7 +10,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron.common import exceptions as n_exc
 from neutron import context
 from neutron.tests.unit import testlib_api
 from oslo_log import log
@@ -110,7 +109,7 @@ class L3outVlanAllocationTestCase(testlib_api.SqlTestCase):
         LOG.info(("vlan allocated: %s"), vlan_id3)
         self.assertIsNone(vlan_id3)
 
-    def test_bad_range_throw_exception(self):
+    def test_bad_range_no_exception(self):
         bad_ext_net_dict = {
             'BadRange-Out': {
                 'router_id': '1.0.0.1',
@@ -118,10 +117,8 @@ class L3outVlanAllocationTestCase(testlib_api.SqlTestCase):
                 'cidr_exposed': '1.103.2.254/24'
             }
         }
-        bad_l3out_vlan_alloc = l3out_vlan_alloc.L3outVlanAlloc()
-        self.assertRaises(n_exc.NetworkVlanRangeError,
-                          bad_l3out_vlan_alloc.sync_vlan_allocations,
-                          bad_ext_net_dict)
+        bad_range_l3out_vlan_alloc = l3out_vlan_alloc.L3outVlanAlloc()
+        bad_range_l3out_vlan_alloc.sync_vlan_allocations(bad_ext_net_dict)
 
     def test_no_range_no_exception(self):
         ext_net_dict = {
