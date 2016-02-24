@@ -4,4 +4,4 @@
 
 oslo.concurrency>=1.8.0,<1.9.0
 -e git+https://github.com/noironetworks/apicapi.git@master#egg=apicapi
--e git+https://github.com/noironetworks/python-opflex-agent.git@stable/juno#egg=python-opflexagent-agent
+-e git+https://github.com/noironetworks/python-opflex-agent.git@stable/juno#egg=neutron-opflex-agent
