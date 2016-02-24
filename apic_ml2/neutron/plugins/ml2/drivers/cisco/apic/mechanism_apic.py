@@ -206,7 +206,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
            us it's supporting a VMware hypervisor.
         """
         port = context.current
-        if port['device_owner'] == 'compute:nova':
+        if port['device_owner'].startswith('compute:'):
             hv_type = agent['configurations'].get('hypervisor_type', None)
             if hv_type and hv_type == acst.HYPERVISOR_VCENTER:
                 return True
