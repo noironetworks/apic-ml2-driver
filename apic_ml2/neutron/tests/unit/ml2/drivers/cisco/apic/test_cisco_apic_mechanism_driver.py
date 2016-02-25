@@ -170,7 +170,7 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
 
     def _bind_port_to_host(self, port_id, host):
         data = {'port': {'binding:host_id': host,
-                         'device_owner': 'compute:nova',
+                         'device_owner': 'compute:',
                          'device_id': 'someid'}}
         # Create EP with bound port
         req = self.new_update_request('ports', data, port_id,
