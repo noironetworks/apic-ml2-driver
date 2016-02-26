@@ -35,7 +35,6 @@ from neutron.plugins.common import constants
 from neutron.plugins.ml2 import db as ml2_db
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2 import driver_context
-from neutron.plugins.ml2.drivers import mech_agent
 from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron.plugins.ml2 import models
 from opflexagent import constants as ofcst
@@ -129,7 +128,7 @@ class NameMapper(object):
         return name_wrapper
 
 
-class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
+class APICMechanismDriver(api.MechanismDriver,
                           ha_ip_db.HAIPOwnerDbMixin):
 
     apic_manager = None
@@ -189,88 +188,121 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
         return self._db_plugin
 
     def __init__(self):
-        sg_enabled = securitygroups_rpc.is_firewall_enabled()
-        self.vif_details = {portbindings.CAP_PORT_FILTER: sg_enabled,
-                            portbindings.OVS_HYBRID_PLUG: sg_enabled}
-        self.vif_type = portbindings.VIF_TYPE_OVS
-        super(APICMechanismDriver, self).__init__(
-            ofcst.AGENT_TYPE_OPFLEX_OVS)
+        self.sg_enabled = securitygroups_rpc.is_firewall_enabled()
+        super(APICMechanismDriver, self).__init__()
         ha_ip_db.HAIPOwnerDbMixin.__init__(self)
 
-    def _is_dvs_vif_type(self, context, agent):
-        """Return if this port is a DVS vif
+    def _agent_bind_port(self, context, agent_list, bind_strategy):
+        """Attempt port binding per agent.
 
-           We need to bind the port as a DVS VIF type
-           when the port belongs to nova, and when there's
-           an OpFlex agent on that (compute) host that's told
-           us it's supporting a VMware hypervisor.
+           Perform the port binding for a given agent.
+           Returns True if bound successfully.
         """
-        port = context.current
-        if port['device_owner'].startswith('compute:'):
-            hv_type = agent['configurations'].get('hypervisor_type', None)
-            if hv_type and hv_type == acst.HYPERVISOR_VCENTER:
-                return True
+        for agent in agent_list:
+            LOG.debug("Checking agent: %s", agent)
+            if agent['alive']:
+                for segment in context.segments_to_bind:
+                    if bind_strategy(context, segment, agent):
+                        LOG.debug("Bound using segment: %s", segment)
+                        return True
+            else:
+                LOG.warning(_("Refusing to bind port %(pid)s to dead agent: "
+                              "%(agent)s"),
+                            {'pid': context.current['id'], 'agent': agent})
         return False
 
-    def _get_dvs_vif_details(self, context):
-        """Populate VIF details for DVS VIFs.
+    def bind_port(self, context):
+        """Get port binding per host.
+
+           This is similar to the one defined in the
+           AgentMechanismDriverBase class, but is modified
+           to support multiple L2 agent types (DVS and OpFlex).
+        """
+        LOG.debug("Attempting to bind port %(port)s on "
+                  "network %(network)s",
+                  {'port': context.current['id'],
+                   'network': context.network.current['id']})
+        vnic_type = context.current.get(portbindings.VNIC_TYPE,
+                                        portbindings.VNIC_NORMAL)
+        if vnic_type not in [portbindings.VNIC_NORMAL]:
+            LOG.debug("Refusing to bind due to unsupported vnic_type: %s",
+                      vnic_type)
+            return
+
+        # Attempt to bind ports for DVS agents for nova-compute daemons
+        # first. This allows having network agents (dhcp, metadata)
+        # that typically run on a network node using an OpFlex agent to
+        # co-exist with nova-compute daemons for ESX, which host DVS agents.
+        if context.current['device_owner'].startswith('compute:'):
+            agent_list = context.host_agents(acst.AGENT_TYPE_DVS)
+            if self._agent_bind_port(context, agent_list, self._bind_dvs_port):
+                return
+
+        # It either wasn't a DVS binding, or there wasn't a DVS
+        # agent on the binding host (could be the case in a hybrid
+        # environment supporting KVM and ESX compute). Go try for
+        # OpFlex agents.
+        agent_list = context.host_agents(ofcst.AGENT_TYPE_OPFLEX_OVS)
+        self._agent_bind_port(context, agent_list, self._bind_opflex_port)
+
+    def _bind_dvs_port(self, context, segment, agent):
+        """Populate VIF type and details for DVS VIFs.
 
            For DVS VIFs, provide the portgroup along
            with the security groups setting
         """
-
-        # Use default security groups from MD
-        vif_details = ({portbindings.CAP_PORT_FILTER:
-                        self.vif_details[portbindings.CAP_PORT_FILTER]})
-        network_id = context.current.get('network_id')
-        if network_id:
-            network = self.name_mapper.network(context, network_id)
+        if self._check_segment_for_agent(segment, agent):
+            network_id = context.current.get('network_id')
+            network_name = self.name_mapper.network(context, network_id)
             net = self._get_plugin().get_network(context._plugin_context,
                                                  network_id)
             project_name = self.name_mapper.tenant(None, net['tenant_id'])
+            # Use default security groups from MD
+            vif_details = {portbindings.CAP_PORT_FILTER: self.sg_enabled}
             vif_details['dvs_port_group'] = (cfg.CONF.apic_system_id +
                                              '|' + str(project_name) +
-                                             '|' + str(network))
-        return vif_details
+                                             '|' + str(network_name))
+            context.set_binding(segment[api.ID],
+                                acst.VIF_TYPE_DVS, vif_details)
+            return True
+        else:
+            return False
 
-    def try_to_bind_segment_for_agent(self, context, segment, agent):
+    def _bind_opflex_port(self, context, segment, agent):
+        """Populate VIF type and details for OpFlex VIFs.
+
+           For OpFlex VIFs, we just report the OVS VIF type,
+           along with security groups setting, which were
+           set when this mechanism driver was instantiated.
+        """
         if self._check_segment_for_agent(segment, agent):
-            vif_type = self.vif_type
-            vif_details = self.vif_details
-            if self._is_dvs_vif_type(context, agent):
-                vif_type = acst.VIF_TYPE_DVS
-                vif_details = self._get_dvs_vif_details(context)
-            context.set_binding(segment[api.ID], vif_type, vif_details)
+            context.set_binding(segment[api.ID],
+                                portbindings.VIF_TYPE_OVS,
+                                {portbindings.CAP_PORT_FILTER:
+                                 self.sg_enabled,
+                                 portbindings.OVS_HYBRID_PLUG:
+                                 self.sg_enabled})
             return True
         else:
             return False
 
     def _check_segment_for_agent(self, segment, agent):
-        network_type = segment[api.NETWORK_TYPE]
-        if network_type == ofcst.TYPE_OPFLEX:
-            opflex_mappings = agent['configurations'].get('opflex_networks',
-                                                          [])
+        """Check support for OpFlex type segments.
+
+           The agent has the ability to limit the segments in OpFlex
+           networks by specifying the mappings in their config. If no
+           mapping is specifified, then all OpFlex segments are
+           supported.
+        """
+        if segment[api.NETWORK_TYPE] == ofcst.TYPE_OPFLEX:
+            opflex_mappings = agent['configurations'].get('opflex_networks')
             LOG.debug(_("Checking segment: %(segment)s "
                         "for physical network: %(mappings)s "),
                       {'segment': segment, 'mappings': opflex_mappings})
             return (opflex_mappings is None or
                     segment[api.PHYSICAL_NETWORK] in opflex_mappings)
         else:
-            mappings = agent['configurations'].get('bridge_mappings', {})
-            tunnel_types = agent['configurations'].get('tunnel_types', [])
-            LOG.debug(_("Checking segment: %(segment)s "
-                        "for mappings: %(mappings)s "
-                        "with tunnel_types: %(tunnel_types)s"),
-                      {'segment': segment, 'mappings': mappings,
-                       'tunnel_types': tunnel_types})
-            if network_type == 'local':
-                return True
-            elif network_type in tunnel_types:
-                return True
-            elif network_type in ['flat', 'vlan']:
-                return segment[api.PHYSICAL_NETWORK] in mappings
-            else:
-                return False
+            return False
 
     def initialize(self):
         # initialize apic
