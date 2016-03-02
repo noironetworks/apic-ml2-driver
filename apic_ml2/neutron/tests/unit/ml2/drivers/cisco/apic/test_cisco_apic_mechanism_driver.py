@@ -85,13 +85,11 @@ AGENT_CONF = {'alive': True, 'binary': 'somebinary',
               'topic': 'sometopic', 'agent_type': AGENT_TYPE,
               'configurations': {'opflex_networks': None,
                                  'bridge_mappings': {'physnet1': 'br-eth1'}}}
-AGENT_TYPE_DVS = ofcst.AGENT_TYPE_OPFLEX_OVS
-AGENT_CONF_DVS = {'alive': True, 'binary': 'somebinary',
-                  'topic': 'sometopic', 'agent_type': AGENT_TYPE_DVS,
+AGENT_TYPE_DVS = acst.AGENT_TYPE_DVS
+AGENT_CONF_DVS = {'alive': True, 'binary': 'anotherbinary',
+                  'topic': 'anothertopic', 'agent_type': AGENT_TYPE_DVS,
                   'configurations':
-                      {'hypervisor_type': acst.HYPERVISOR_VCENTER,
-                       'opflex_networks': None,
-                       'bridge_mappings': {'physnet1': 'br-eth1'}}}
+                      {'bridge_mappings': {'physnet1': 'br-eth1'}}}
 
 
 def echo(context, id, prefix=''):
@@ -177,7 +175,7 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
                                       self.fmt)
         return self.deserialize(self.fmt, req.get_response(self.api))
 
-    def _bind_net_port_to_host(self, port_id, host):
+    def _bind_dhcp_port_to_host(self, port_id, host):
         data = {'port': {'binding:host_id': host,
                          'device_owner': 'network:dhcp',
                          'device_id': 'someid'}}
@@ -1061,7 +1059,8 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
     def test_create_port_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
                                             mocked.APIC_NETWORK,
-                                            TEST_SEGMENT1)
+                                            TEST_SEGMENT1,
+                                            seg_type=ofcst.TYPE_OPFLEX)
         port_ctx = self._get_port_context(mocked.APIC_TENANT,
                                           mocked.APIC_NETWORK,
                                           'vm1', net_ctx, HOST_ID1,
@@ -1070,10 +1069,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.assertTrue(self.driver._check_segment_for_agent(
             port_ctx._bound_segment, self.agent))
         self.driver.create_port_postcommit(port_ctx)
-        mgr.ensure_path_created_for_port.assert_called_once_with(
-            self._tenant(), mocked.APIC_NETWORK, HOST_ID1,
-            ENCAP, transaction='transaction',
-            app_profile_name=self._app_profile())
+        mgr.ensure_path_created_for_port.assert_not_called()
 
     def test_create_port_postcommit_opflex(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
@@ -2049,7 +2045,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             self.assertEqual(net['id'], p2['network_id'])
             self.mgr.ensure_path_created_for_port = mock.Mock()
             # Bind port to trigger path binding
-            newp2 = self._bind_net_port_to_host(p2['id'], 'h1')
+            newp2 = self._bind_dhcp_port_to_host(p2['id'], 'h1')
             # Called on the network's tenant
             vif_det = newp2['port']['binding:vif_details']
             self.assertIsNone(vif_det.get('dvs_port_group', None))
@@ -2081,7 +2077,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             self.assertEqual(net['id'], p2['network_id'])
             self.mgr.ensure_path_created_for_port = mock.Mock()
             # Bind port to trigger path binding
-            newp2 = self._bind_net_port_to_host(p2['id'], 'h1')
+            newp2 = self._bind_dhcp_port_to_host(p2['id'], 'h1')
             # Called on the network's tenant
             vif_det = newp2['port']['binding:vif_details']
             self.assertIsNone(vif_det.get('dvs_port_group', None))
