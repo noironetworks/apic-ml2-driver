@@ -117,6 +117,9 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
                            'ml2_cisco_apic')
         self.override_conf('per_tenant_context', False,
                            'ml2_cisco_apic')
+        self.override_conf('path_mtu', 1000, group='ml2')
+        self.override_conf('segment_mtu', 1000, group='ml2')
+        self.override_conf('advertise_mtu', True, None)
         service_plugins = (
             service_plugins or
             {'L3_ROUTER_NAT': 'apic_ml2.neutron.services.l3_router.'
@@ -288,6 +291,8 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             self.assertTrue(details['enable_dhcp_optimization'])
             self.assertEqual(1, len(details['subnets']))
             self.assertEqual(sub['subnet']['id'], details['subnets'][0]['id'])
+            # Verify Interface MTU correctly set
+            self.assertEqual(1000, details['interface_mtu'])
 
     def test_enhanced_subnet_options(self):
         self._register_agent('h1')

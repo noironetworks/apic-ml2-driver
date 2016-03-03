@@ -301,6 +301,7 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
         self.l3out_vlan_alloc = l3out_vlan_alloc.L3outVlanAlloc()
         self.l3out_vlan_alloc.sync_vlan_allocations(
             self.apic_manager.ext_net_dict)
+        self.advertise_mtu = cfg.CONF.advertise_mtu
 
     def _setup_opflex_rpc_listeners(self):
         self.opflex_endpoints = [o_rpc.GBPServerRpcCallback(self)]
@@ -434,6 +435,10 @@ class APICMechanismDriver(mech_agent.AgentMechanismDriverBase,
                 details['endpoint_group_name'], details['ptg_tenant'])
         except AttributeError:
             pass    # EP attestation not supported by APICAPI
+
+        if self.advertise_mtu and network.get('mtu'):
+            details['interface_mtu'] = network['mtu']
+
         return details
 
     def _add_port_binding(self, session, port_id, host):
