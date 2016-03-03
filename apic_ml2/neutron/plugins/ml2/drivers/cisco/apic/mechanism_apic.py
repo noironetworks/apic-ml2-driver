@@ -292,13 +292,16 @@ class APICMechanismDriver(api.MechanismDriver,
            mapping is specifified, then all OpFlex segments are
            supported.
         """
-        if segment[api.NETWORK_TYPE] == ofcst.TYPE_OPFLEX:
+        network_type = segment[api.NETWORK_TYPE]
+        if network_type == ofcst.TYPE_OPFLEX:
             opflex_mappings = agent['configurations'].get('opflex_networks')
             LOG.debug(_("Checking segment: %(segment)s "
                         "for physical network: %(mappings)s "),
                       {'segment': segment, 'mappings': opflex_mappings})
             return (opflex_mappings is None or
                     segment[api.PHYSICAL_NETWORK] in opflex_mappings)
+        elif network_type == 'local':
+            return True
         else:
             return False
 

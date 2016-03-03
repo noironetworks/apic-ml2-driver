@@ -88,8 +88,7 @@ AGENT_CONF = {'alive': True, 'binary': 'somebinary',
 AGENT_TYPE_DVS = acst.AGENT_TYPE_DVS
 AGENT_CONF_DVS = {'alive': True, 'binary': 'anotherbinary',
                   'topic': 'anothertopic', 'agent_type': AGENT_TYPE_DVS,
-                  'configurations':
-                      {'bridge_mappings': {'physnet1': 'br-eth1'}}}
+                  'configurations': {'opflex_networks': None}}
 
 
 def echo(context, id, prefix=''):
