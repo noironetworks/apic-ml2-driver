@@ -325,7 +325,7 @@ def launch(binary, manager, topic=None):
     server = service.Service.create(
         binary=binary, manager=manager, topic=topic,
         report_interval=report_period, periodic_interval=poll_period)
-    svc.launch(server).wait()
+    svc.launch(cfg.CONF, server).wait()
 
 
 def service_main():
