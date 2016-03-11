@@ -5,7 +5,7 @@ After=syslog.target network.target
 [Service]
 Type=simple
 User=neutron
-ExecStart=/usr/bin/neutron-cisco-apic-host-agent --config-file=/etc/neutron/neutron.conf --config-file=/etc/neutron/plugins/ml2/ml2_conf_cisco_apic.ini --config-dir=/etc/neutron/conf.d/common --log-file=/var/log/neutron/cisco-apic-host-agent.log
+ExecStart=/usr/bin/neutron-cisco-apic-host-agent --config-file=/etc/neutron/neutron.conf --config-file=/usr/share/neutron/neutron-dist.conf --config-file=/etc/neutron/plugins/ml2/ml2_conf_cisco_apic.ini --config-dir=/etc/neutron/conf.d/common --log-file=/var/log/neutron/cisco-apic-host-agent.log
 PrivateTmp=false
 KillMode=process
 Restart=always
