@@ -1311,6 +1311,8 @@ class APICMechanismDriver(api.MechanismDriver,
             return
         dev_owner = router_port['device_owner']
         admin_ctx = nctx.get_admin_context()
+        skip = [n_constants.DEVICE_OWNER_ROUTER_INTF,
+                n_constants.DEVICE_OWNER_ROUTER_GW]
         if dev_owner == n_constants.DEVICE_OWNER_ROUTER_INTF:
             subnet_ids = self._get_port_subnets(router_port)
         elif dev_owner == n_constants.DEVICE_OWNER_ROUTER_GW:
@@ -1325,9 +1327,10 @@ class APICMechanismDriver(api.MechanismDriver,
         ports = core_plugin.get_ports(
             admin_ctx, filters={'network_id': list(nets)})
         for p in ports:
-            port_sn_ids = self._get_port_subnets(p)
-            if (subnet_ids & port_sn_ids) and self._is_port_bound(p):
-                self.notifier.port_update(admin_ctx, p)
+            if p['device_owner'] not in skip:
+                port_sn_ids = self._get_port_subnets(p)
+                if (subnet_ids & port_sn_ids) and self._is_port_bound(p):
+                    self.notifier.port_update(admin_ctx, p)
 
     def _is_nat_enabled_on_ext_net(self, network):
         ext_info = self.apic_manager.ext_net_dict.get(network['name'])
