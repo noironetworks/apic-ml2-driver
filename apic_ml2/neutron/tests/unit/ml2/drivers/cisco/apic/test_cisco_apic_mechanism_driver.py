@@ -61,7 +61,7 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
     rpc as mech_rpc)
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import constants as acst
-from apic_ml2.neutron.services.l3_router import l3_apic
+from apic_ml2.neutron.services.l3_router import apic_driver as driver
 from apic_ml2.neutron.tests.unit.ml2.drivers.cisco.apic import (
     test_cisco_apic_common as mocked)
 
@@ -159,7 +159,6 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
         self.mgr.apic.fvTenant.name = name
         self.l3_plugin = manager.NeutronManager.get_service_plugins()[
             'L3_ROUTER_NAT']
-        l3_apic.apic_mapper.mapper_context = self.fake_transaction
         self.driver.apic_manager.vmm_shared_secret = base64.b64encode(
             'dirtylittlesecret')
         self.driver.notifier = mock.Mock()
@@ -737,7 +736,7 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             expected_calls, self.driver.notify_port_update.call_args_list)
 
     def test_notify_router_interface_update(self):
-        exc = l3_apic.InterTenantRouterInterfaceNotAllowedOnPerTenantContext
+        exc = driver.InterTenantRouterInterfaceNotAllowedOnPerTenantContext
         net = self.create_network(
             tenant_id='onetenant', expected_res_status=201, shared=True,
             is_admin_context=True)['network']
@@ -2253,14 +2252,14 @@ class ApicML2IntegratedTestCaseSingleVRF(ApicML2IntegratedTestCase):
 
         # Per subnet
         self.assertRaises(
-            l3_apic.InterTenantRouterInterfaceNotAllowedOnPerTenantContext,
+            driver.InterTenantRouterInterfaceNotAllowedOnPerTenantContext,
             self.l3_plugin.add_router_interface, context.get_admin_context(),
             router['id'], {'subnet_id': sub['subnet']['id']})
 
         # Per port
         with self.port(subnet=sub, tenant_id='anothertenant') as p1:
             self.assertRaises(
-                l3_apic.InterTenantRouterInterfaceNotAllowedOnPerTenantContext,
+                driver.InterTenantRouterInterfaceNotAllowedOnPerTenantContext,
                 self.l3_plugin.add_router_interface,
                 context.get_admin_context(), router['id'],
                 {'port_id': p1['port']['id']})

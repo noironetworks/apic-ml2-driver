@@ -13,26 +13,18 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from apicapi import apic_mapper
 from neutron.common import constants as q_const
-from neutron.common import exceptions as n_exc
 from neutron.db import common_db_mixin
 from neutron.db import extraroute_db
 from neutron.db import l3_db
 from neutron.db import l3_gwmode_db
-from neutron.extensions import l3
 from neutron.plugins.common import constants
 from oslo_log import log as logging
 from oslo_utils import excutils
 
-from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import mechanism_apic
+from apic_ml2.neutron.services.l3_router import apic_driver
 
 LOG = logging.getLogger(__name__)
-
-
-class InterTenantRouterInterfaceNotAllowedOnPerTenantContext(n_exc.BadRequest):
-    message = _("Cannot attach s router interface to a network owned by "
-                "another tenant when per_tenant_context is enabled.")
 
 
 class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
@@ -42,40 +34,8 @@ class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
 
     def __init__(self):
         super(ApicL3ServicePlugin, self).__init__()
-        self.manager = mechanism_apic.APICMechanismDriver.get_apic_manager()
-        self.name_mapper = mechanism_apic.NameMapper(self.manager.apic_mapper)
         self.synchronizer = None
-        self.manager.ensure_infra_created_on_apic()
-        self.manager.ensure_bgp_pod_policy_created_on_apic()
-        self._aci_mech_driver = None
-
-    @property
-    def aci_mech_driver(self):
-        if not self._aci_mech_driver:
-            self._aci_mech_driver = (
-                self._core_plugin.mechanism_manager.mech_drivers[
-                    'cisco_apic_ml2'].obj)
-        return self._aci_mech_driver
-
-    def _map_names(self, context, tenant_id, router, network, subnet):
-        context._plugin = self
-        with apic_mapper.mapper_context(context) as ctx:
-            atenant_id = tenant_id and self.name_mapper.tenant(ctx, tenant_id)
-            arouter_id = router and router['id'] and self.name_mapper.router(
-                ctx, router['id'], openstack_owner=router['tenant_id'])
-            anet_id = (network and network['id'] and
-                       self.name_mapper.endpoint_group(ctx, network['id']))
-            asubnet_id = subnet and subnet['id'] and self.name_mapper.subnet(
-                ctx, subnet['id'])
-        return atenant_id, arouter_id, anet_id, asubnet_id
-
-    def _get_port_id_for_router_interface(self, context, router_id, subnet_id):
-        filters = {'device_id': [router_id],
-                   'device_owner': [q_const.DEVICE_OWNER_ROUTER_INTF],
-                   'fixed_ips': {'subnet_id': [subnet_id]}}
-        ports = self._core_plugin.get_ports(context.elevated(),
-                                            filters=filters)
-        return ports[0]['id']
+        self._apic_driver = apic_driver.ApicL3Driver(self)
 
     def _update_router_gw_info(self, context, router_id, info, router=None):
         super(ApicL3ServicePlugin, self)._update_router_gw_info(
@@ -97,107 +57,6 @@ class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
     def get_plugin_description():
         """Returns string description of the plugin."""
         return _("L3 Router Service Plugin for basic L3 using the APIC")
-
-    def add_router_interface_postcommit(self, context, router_id,
-                                        interface_info):
-        # Update router's state first
-        router = self.get_router(context, router_id)
-        self.update_router_postcommit(context, router)
-
-        # Add router interface
-        if 'subnet_id' in interface_info:
-            subnet = self._core_plugin.get_subnet(context,
-                                                  interface_info['subnet_id'])
-            network_id = subnet['network_id']
-            port_id = self._get_port_id_for_router_interface(
-                context, router_id, interface_info['subnet_id'])
-        else:
-            port = self._core_plugin.get_port(context,
-                                              interface_info['port_id'])
-            network_id = port['network_id']
-            port_id = interface_info['port_id']
-
-        network = self._core_plugin.get_network(context, network_id)
-        tenant_id = network['tenant_id']
-        if (tenant_id != router['tenant_id'] and
-                self.aci_mech_driver.per_tenant_context and
-                not self.aci_mech_driver._is_nat_enabled_on_ext_net(network)):
-            # This operation is disallowed. Can't trespass VRFs without NAT.
-            raise InterTenantRouterInterfaceNotAllowedOnPerTenantContext()
-
-        # Map openstack IDs to APIC IDs
-        atenant_id, arouter_id, anetwork_id, _ = self._map_names(
-            context, tenant_id, router, network, None)
-
-        # Program APIC
-        self.manager.add_router_interface(
-            self.aci_mech_driver._get_network_aci_tenant(network),
-            arouter_id, anetwork_id,
-            app_profile_name=self.aci_mech_driver._get_network_app_profile(
-                network))
-        self._core_plugin.update_port_status(context, port_id,
-                                             q_const.PORT_STATUS_ACTIVE)
-
-    def remove_router_interface_precommit(self, context, router_id,
-                                          interface_info):
-        if 'subnet_id' in interface_info:
-            subnet = self._core_plugin.get_subnet(context,
-                                                  interface_info['subnet_id'])
-            network_id = subnet['network_id']
-            port_id = self._get_port_id_for_router_interface(
-                context, router_id, interface_info['subnet_id'])
-        else:
-            port = self._core_plugin.get_port(context,
-                                              interface_info['port_id'])
-            network_id = port['network_id']
-            port_id = interface_info['port_id']
-
-        network = self._core_plugin.get_network(context, network_id)
-        tenant_id = network['tenant_id']
-
-        router = self.get_router(context, router_id)
-        # Map openstack IDs to APIC IDs
-        atenant_id, arouter_id, anetwork_id, _ = self._map_names(
-            context, tenant_id, router, network, None)
-
-        # Program APIC
-        self.manager.remove_router_interface(
-            self.aci_mech_driver._get_network_aci_tenant(network),
-            arouter_id, anetwork_id,
-            app_profile_name=self.aci_mech_driver._get_network_app_profile(
-                network))
-        self._core_plugin.update_port_status(context, port_id,
-                                             q_const.PORT_STATUS_DOWN)
-
-    def delete_router_precommit(self, context, router_id):
-        context._plugin = self
-        router = self.get_router(context, router_id)
-        with apic_mapper.mapper_context(context) as ctx:
-            arouter_id = router_id and self.name_mapper.router(
-                ctx, router['id'], openstack_owner=router['id'])
-        self.manager.delete_router(arouter_id)
-
-    def update_router_postcommit(self, context, router):
-        context._plugin = self
-        with apic_mapper.mapper_context(context) as ctx:
-            arouter_id = router['id'] and self.name_mapper.router(
-                ctx, router['id'], openstack_owner=router['tenant_id'])
-            tenant_id = self.aci_mech_driver._get_router_aci_tenant(router)
-
-        with self.manager.apic.transaction() as trs:
-            vrf = self.aci_mech_driver._get_tenant_vrf(router['tenant_id'])
-            # A Neutron router is rendered as a contract. This contract
-            # Will exist in the COMMON tenant when single tenant mode is false,
-            # in the sys_id tenant otherwise.
-            self.manager.create_router(arouter_id, owner=tenant_id,
-                                       transaction=trs,
-                                       context=vrf['aci_name'])
-            if router['admin_state_up']:
-                self.manager.enable_router(arouter_id, owner=tenant_id,
-                                           transaction=trs)
-            else:
-                self.manager.disable_router(arouter_id, owner=tenant_id,
-                                            transaction=trs)
 
     # Router API
 
@@ -221,7 +80,7 @@ class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
     def update_router(self, context, id, router):
         result = super(ApicL3ServicePlugin, self).update_router(context,
                                                                 id, router)
-        self.update_router_postcommit(context, result)
+        self._apic_driver.update_router_postcommit(context, result)
         return result
 
     def get_router(self, *args, **kwargs):
@@ -235,7 +94,7 @@ class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
                                                                   **kwargs)
 
     def delete_router(self, context, router_id):
-        self.delete_router_precommit(context, router_id)
+        self._apic_driver.delete_router_precommit(context, router_id)
         result = super(ApicL3ServicePlugin, self).delete_router(context,
                                                                 router_id)
         return result
@@ -247,8 +106,8 @@ class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
         result = super(ApicL3ServicePlugin, self).add_router_interface(
             context, router_id, interface_info)
         try:
-            self.add_router_interface_postcommit(context, router_id,
-                                                 interface_info)
+            self._apic_driver.add_router_interface_postcommit(
+                context, router_id, interface_info)
         except Exception:
             with excutils.save_and_reraise_exception():
                 # Rollback db operation
@@ -257,8 +116,8 @@ class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
         return result
 
     def remove_router_interface(self, context, router_id, interface_info):
-        self.remove_router_interface_precommit(context, router_id,
-                                               interface_info)
+        self._apic_driver.remove_router_interface_precommit(context, router_id,
+                                                            interface_info)
         return super(ApicL3ServicePlugin, self).remove_router_interface(
             context, router_id, interface_info)
 
@@ -266,50 +125,19 @@ class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
     def create_floatingip(self, context, floatingip):
         res = super(ApicL3ServicePlugin, self).create_floatingip(
             context, floatingip)
-        port_id = floatingip.get('floatingip', {}).get('port_id')
-        self._notify_port_update(port_id)
-        if res:
-            res['status'] = self._update_floatingip_status(context, res['id'])
+        self._apic_driver.create_floatingip_postcommit(context, res)
         return res
 
     def update_floatingip(self, context, id, floatingip):
-        port_id = [self._get_port_mapped_to_floatingip(context, id)]
+        self._apic_driver.update_floatingip_precommit(context, id, floatingip)
         res = super(ApicL3ServicePlugin, self).update_floatingip(
             context, id, floatingip)
-        port_id.append(floatingip.get('floatingip', {}).get('port_id'))
-        for p in port_id:
-            self._notify_port_update(p)
-        status = self._update_floatingip_status(context, id)
-        if res:
-            res['status'] = status
+        context.current = res
+        self._apic_driver.update_floatingip_postcommit(context, id, floatingip)
         return res
 
     def delete_floatingip(self, context, id):
-        port_id = self._get_port_mapped_to_floatingip(context, id)
+        self._apic_driver.delete_floatingip_precommit(context, id)
         res = super(ApicL3ServicePlugin, self).delete_floatingip(context, id)
-        self._notify_port_update(port_id)
+        self._apic_driver.delete_floatingip_postcommit(context, id)
         return res
-
-    def _get_port_mapped_to_floatingip(self, context, fip_id):
-        try:
-            fip = self.get_floatingip(context, fip_id)
-            return fip.get('port_id')
-        except l3.FloatingIPNotFound:
-            pass
-        return None
-
-    def _notify_port_update(self, port_id):
-        l2 = mechanism_apic.APICMechanismDriver.get_driver_instance()
-        if l2 and port_id:
-            l2.notify_port_update_for_fip(port_id)
-
-    def _update_floatingip_status(self, context, fip_id):
-        status = q_const.FLOATINGIP_STATUS_DOWN
-        try:
-            fip = self.get_floatingip(context, fip_id)
-            if fip.get('port_id'):
-                status = q_const.FLOATINGIP_STATUS_ACTIVE
-            self.update_floatingip_status(context, fip_id, status)
-        except l3.FloatingIPNotFound:
-            pass
-        return status
