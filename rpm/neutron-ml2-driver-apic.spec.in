@@ -90,8 +90,8 @@ apic-ml2-db-manage --config-file /etc/neutron/neutron.conf upgrade head
 %{_bindir}/opflex-ns-proxy
 %{_unitdir}/%{host_agent}
 %{_unitdir}/%{service_agent}
-%{_sysconfdir}/neutron/plugins/ml2/ml2_conf_cisco_apic.ini
-%{_sysconfdir}/neutron/plugins/ml2/cisco_apic_network_constraints.ini
+%config(noreplace) %{_sysconfdir}/neutron/plugins/ml2/ml2_conf_cisco_apic.ini
+%config(noreplace) %{_sysconfdir}/neutron/plugins/ml2/cisco_apic_network_constraints.ini
 %{_sysconfdir}/neutron/rootwrap.d/cisco-apic.filters
 
 %changelog
