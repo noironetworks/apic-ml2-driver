@@ -3,6 +3,7 @@
 # process, which may cause wedges in the gate later.
 
 -e git+https://github.com/openstack/neutron.git@stable/kilo#egg=neutron
+-e git+https://github.com/Mirantis/vmware-dvs.git@master#egg=vmware_dvs
 hacking<0.11,>=0.10.0
 
 cliff<1.11.0,>=1.10.0 # Apache-2.0
