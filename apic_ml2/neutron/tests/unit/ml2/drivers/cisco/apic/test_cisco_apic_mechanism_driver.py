@@ -734,6 +734,7 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             expected_calls, self.driver.notify_port_update.call_args_list)
 
     def test_notify_router_interface_update(self):
+        exc = l3_apic.InterTenantRouterInterfaceNotAllowedOnPerTenantContext
         net = self.create_network(
             tenant_id='onetenant', expected_res_status=201, shared=True,
             is_admin_context=True)['network']
@@ -748,21 +749,27 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             with self.port(subnet=sub, tenant_id='anothertenant') as p2:
                 self._bind_port_to_host(p2['port']['id'], 'h1')
                 self.mgr.add_router_interface = mock.Mock()
-                self.l3_plugin.add_router_interface(
-                    context.get_admin_context(), router['id'],
-                    {'port_id': p1['port']['id']})
-                self.assertEqual(n_constants.DEVICE_OWNER_ROUTER_INTF,
-                                 p1['port']['device_owner'])
-                self.driver.notifier.port_update = mock.Mock()
-                self.driver._notify_ports_due_to_router_update(p1['port'])
-                self.assertEqual(1,
-                                 self.driver.notifier.port_update.call_count)
-                self.assertEqual(
-                    p2['port']['id'],
-                    self.driver.notifier.port_update.call_args_list[
-                        0][0][1]['id'])
-
-
+                if self.driver.per_tenant_context:
+                    self.assertRaises(
+                        exc,
+                        self.l3_plugin.add_router_interface,
+                        context.get_admin_context(),
+                        router['id'], {'port_id': p1['port']['id']}
+                    )
+                else:
+                    self.l3_plugin.add_router_interface(
+                        context.get_admin_context(), router['id'],
+                        {'port_id': p1['port']['id']})
+                    self.assertEqual(n_constants.DEVICE_OWNER_ROUTER_INTF,
+                                     p1['port']['device_owner'])
+                    self.driver.notifier.port_update = mock.Mock()
+                    self.driver._notify_ports_due_to_router_update(p1['port'])
+                    self.assertEqual(
+                        1, self.driver.notifier.port_update.call_count)
+                    self.assertEqual(
+                        p2['port']['id'],
+                        self.driver.notifier.port_update.call_args_list[
+                            0][0][1]['id'])
 
 
 class TestCiscoApicML2SubnetScope(ApicML2IntegratedTestCase):
