@@ -139,6 +139,7 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
         self.driver = self.plugin.mechanism_manager.mech_drivers[
             'cisco_apic_ml2'].obj
         self.synchronizer = mock.Mock()
+        md.importutils = mock.Mock()
         md.APICMechanismDriver.get_base_synchronizer = mock.Mock(
             return_value=self.synchronizer)
         self.driver.name_mapper.aci_mapper.tenant = echo
@@ -2029,7 +2030,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
         # (but only for types not defined by the
         # mechanism driver class itself).
         self.driver.agent_type = ofcst.AGENT_TYPE_OPFLEX_OVS
-        self.driver.dvs_notifier = mock.MagicMock()
+        self.driver._dvs_notifier = mock.MagicMock()
         self.driver.dvs_notifier.bind_port_call = mock.Mock(
             return_value=BOOKED_PORT_VALUE)
 
