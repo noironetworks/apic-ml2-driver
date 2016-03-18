@@ -4,4 +4,3 @@
 
 -e git+https://github.com/noironetworks/apicapi.git@master#egg=apicapi
 -e git+https://github.com/noironetworks/python-opflex-agent.git@master#egg=python-opflexagent-agent
--e git+https://github.com/Mirantis/vmware-dvs.git@master#egg=vmware_dvs

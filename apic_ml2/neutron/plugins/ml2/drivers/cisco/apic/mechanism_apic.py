@@ -42,6 +42,7 @@ from opflexagent import rpc as o_rpc
 from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
+from oslo_utils import importutils
 
 from apic_ml2.neutron.db import l3out_vlan_allocation as l3out_vlan_alloc
 from apic_ml2.neutron.db import port_ha_ipaddress_binding as ha_ip_db
@@ -55,8 +56,8 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import constants as acst
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import exceptions as aexc
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import nova_client
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import rpc as t_rpc
-from vmware_dvs.api import dvs_agent_rpc_api as dvs_rpc
 
+DVS_AGENT_KLASS = 'vmware_dvs.api.dvs_agent_rpc_api.DVSClientAPI'
 LOG = logging.getLogger(__name__)
 n_db.AUTO_DELETE_PORT_OWNERS.append(acst.DEVICE_OWNER_SNAT_PORT)
 _apic_driver_instance = None
@@ -183,6 +184,15 @@ class APICMechanismDriver(api.MechanismDriver,
         return self._l3_plugin
 
     @property
+    def dvs_notifier(self):
+        if not self._dvs_notifier:
+            self._dvs_notifier = importutils.import_object(
+                DVS_AGENT_KLASS,
+                nctx.get_admin_context_without_session()
+            )
+        return self._dvs_notifier
+
+    @property
     def db_plugin(self):
         if not self._db_plugin:
             self._db_plugin = n_db.NeutronDbPluginV2()
@@ -190,10 +200,9 @@ class APICMechanismDriver(api.MechanismDriver,
 
     def __init__(self):
         self.sg_enabled = securitygroups_rpc.is_firewall_enabled()
-        self.dvs_notifier = dvs_rpc.DVSClientAPI(
-            nctx.get_admin_context_without_session())
         super(APICMechanismDriver, self).__init__()
         ha_ip_db.HAIPOwnerDbMixin.__init__(self)
+        self._dvs_notifier = None
 
     def _agent_bind_port(self, context, agent_list, bind_strategy):
         """Attempt port binding per agent.
@@ -266,12 +275,13 @@ class APICMechanismDriver(api.MechanismDriver,
                                              '|' + str(project_name) +
                                              '|' + str(network_name))
             context.current['portgroup_name'] = vif_details['dvs_port_group']
-            booked_port_key = self.dvs_notifier.bind_port_call(
-                context.current,
-                context.network.network_segments,
-                context.network.current,
-                context.host
-            )
+            if self.dvs_notifier:
+                booked_port_key = self.dvs_notifier.bind_port_call(
+                    context.current,
+                    context.network.network_segments,
+                    context.network.current,
+                    context.host
+                )
             if booked_port_key:
                 vif_details['dvs_port_key'] = booked_port_key
 
@@ -950,7 +960,8 @@ class APICMechanismDriver(api.MechanismDriver,
             self._delete_path_if_last(context, host=context.original_host)
         self._perform_port_operations(context)
         port = context.current
-        if (port.get('binding:vif_details') and
+        if self.dvs_notifier and (
+                port.get('binding:vif_details') and
                 port['binding:vif_details'].get('dvs_port_group')):
             self.dvs_notifier.update_postcommit_port_call(
                 context.current,
@@ -982,7 +993,8 @@ class APICMechanismDriver(api.MechanismDriver,
             else:
                 self._delete_contract(context)
         self._notify_ports_due_to_router_update(port)
-        if (port.get('binding:vif_details') and
+        if self.dvs_notifier and (
+                port.get('binding:vif_details') and
                 port['binding:vif_details'].get('dvs_port_group')):
             self.dvs_notifier.delete_port_call(
                 context.current,
