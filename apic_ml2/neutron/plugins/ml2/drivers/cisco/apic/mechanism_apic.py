@@ -55,6 +55,7 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import constants as acst
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import exceptions as aexc
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import nova_client
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import rpc as t_rpc
+from vmware_dvs.api import dvs_agent_rpc_api as dvs_rpc
 
 LOG = logging.getLogger(__name__)
 n_db.AUTO_DELETE_PORT_OWNERS.append(acst.DEVICE_OWNER_SNAT_PORT)
@@ -189,6 +190,8 @@ class APICMechanismDriver(api.MechanismDriver,
 
     def __init__(self):
         self.sg_enabled = securitygroups_rpc.is_firewall_enabled()
+        self.dvs_notifier = dvs_rpc.DVSClientAPI(
+            nctx.get_admin_context_without_session())
         super(APICMechanismDriver, self).__init__()
         ha_ip_db.HAIPOwnerDbMixin.__init__(self)
 
@@ -262,6 +265,16 @@ class APICMechanismDriver(api.MechanismDriver,
             vif_details['dvs_port_group'] = (cfg.CONF.apic_system_id +
                                              '|' + str(project_name) +
                                              '|' + str(network_name))
+            context.current['portgroup_name'] = vif_details['dvs_port_group']
+            booked_port_key = self.dvs_notifier.bind_port_call(
+                context.current,
+                context.network.network_segments,
+                context.network.current,
+                context.host
+            )
+            if booked_port_key:
+                vif_details['dvs_port_key'] = booked_port_key
+
             context.set_binding(segment[api.ID],
                                 acst.VIF_TYPE_DVS, vif_details)
             return True
@@ -936,6 +949,15 @@ class APICMechanismDriver(api.MechanismDriver,
             # The VM was migrated
             self._delete_path_if_last(context, host=context.original_host)
         self._perform_port_operations(context)
+        port = context.current
+        if (port.get('binding:vif_details') and
+                port['binding:vif_details'].get('dvs_port_group')):
+            self.dvs_notifier.update_postcommit_port_call(
+                context.current,
+                context.original,
+                context.network.network_segments[0],
+                context.host
+            )
         if context.current['device_owner'] == n_constants.DEVICE_OWNER_DHCP:
             if context.current['fixed_ips'] != context.original['fixed_ips']:
                 # Notify on modified subnets
@@ -960,6 +982,14 @@ class APICMechanismDriver(api.MechanismDriver,
             else:
                 self._delete_contract(context)
         self._notify_ports_due_to_router_update(port)
+        if (port.get('binding:vif_details') and
+                port['binding:vif_details'].get('dvs_port_group')):
+            self.dvs_notifier.delete_port_call(
+                context.current,
+                context.original,
+                context.network.network_segments[0],
+                context.host
+            )
 
     @sync_init
     def create_network_postcommit(self, context):
