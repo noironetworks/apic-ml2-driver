@@ -79,6 +79,8 @@ SUBNET_NETMASK = '24'
 TEST_SEGMENT1 = 'test-segment1'
 TEST_SEGMENT2 = 'test-segment2'
 
+BOOKED_PORT_VALUE = 'myBookedPort'
+
 PLUGIN_NAME = 'neutron.plugins.ml2.plugin.Ml2Plugin'
 AGENT_TYPE = n_constants.AGENT_TYPE_OVS
 AGENT_CONF = {'alive': True, 'binary': 'somebinary',
@@ -734,6 +736,7 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             expected_calls, self.driver.notify_port_update.call_args_list)
 
     def test_notify_router_interface_update(self):
+        exc = l3_apic.InterTenantRouterInterfaceNotAllowedOnPerTenantContext
         net = self.create_network(
             tenant_id='onetenant', expected_res_status=201, shared=True,
             is_admin_context=True)['network']
@@ -748,21 +751,27 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             with self.port(subnet=sub, tenant_id='anothertenant') as p2:
                 self._bind_port_to_host(p2['port']['id'], 'h1')
                 self.mgr.add_router_interface = mock.Mock()
-                self.l3_plugin.add_router_interface(
-                    context.get_admin_context(), router['id'],
-                    {'port_id': p1['port']['id']})
-                self.assertEqual(n_constants.DEVICE_OWNER_ROUTER_INTF,
-                                 p1['port']['device_owner'])
-                self.driver.notifier.port_update = mock.Mock()
-                self.driver._notify_ports_due_to_router_update(p1['port'])
-                self.assertEqual(1,
-                                 self.driver.notifier.port_update.call_count)
-                self.assertEqual(
-                    p2['port']['id'],
-                    self.driver.notifier.port_update.call_args_list[
-                        0][0][1]['id'])
-
-
+                if self.driver.per_tenant_context:
+                    self.assertRaises(
+                        exc,
+                        self.l3_plugin.add_router_interface,
+                        context.get_admin_context(),
+                        router['id'], {'port_id': p1['port']['id']}
+                    )
+                else:
+                    self.l3_plugin.add_router_interface(
+                        context.get_admin_context(), router['id'],
+                        {'port_id': p1['port']['id']})
+                    self.assertEqual(n_constants.DEVICE_OWNER_ROUTER_INTF,
+                                     p1['port']['device_owner'])
+                    self.driver.notifier.port_update = mock.Mock()
+                    self.driver._notify_ports_due_to_router_update(p1['port'])
+                    self.assertEqual(
+                        1, self.driver.notifier.port_update.call_count)
+                    self.assertEqual(
+                        p2['port']['id'],
+                        self.driver.notifier.port_update.call_args_list[
+                            0][0][1]['id'])
 
 
 class TestCiscoApicML2SubnetScope(ApicML2IntegratedTestCase):
@@ -2010,6 +2019,29 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
         # (but only for types not defined by the
         # mechanism driver class itself).
         self.driver.agent_type = ofcst.AGENT_TYPE_OPFLEX_OVS
+        self.driver.dvs_notifier = mock.MagicMock()
+        self.driver.dvs_notifier.bind_port_call = mock.Mock(
+            return_value=BOOKED_PORT_VALUE)
+
+    def _verify_dvs_notifier(self, notifier, port, host):
+            # can't use getattr() with mock, so use eval instead
+            try:
+                dvs_mock = eval('self.driver.dvs_notifier.' + notifier)
+            except Exception:
+                self.assertTrue(True,
+                                "The method " + notifier + " was not called")
+                return
+
+            dvs_mock.assert_called_once_with(
+                mock.ANY,
+                mock.ANY,
+                mock.ANY,
+                mock.ANY
+            )
+            a1, a2, a3, a4 = dvs_mock.call_args[0]
+            self.assertEqual(a1['id'], port['id'])
+            self.assertEqual(a2['id'], port['id'])
+            self.assertEqual(a4, host)
 
     def test_bind_port_dvs(self):
         # Register a DVS agent
@@ -2031,6 +2063,14 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
                            net['tenant_id'] + '|' + net['id'])
             pg = newp1['port']['binding:vif_details']['dvs_port_group']
             self.assertEqual(pg, expected_pg)
+            port_key = newp1['port']['binding:vif_details'].get('dvs_port_key')
+            self.assertIsNotNone(port_key)
+            self.assertEqual(port_key, BOOKED_PORT_VALUE)
+            self._verify_dvs_notifier('update_postcommit_port_call', p1, 'h1')
+            net_ctx = FakeNetworkContext(net, [mock.Mock()])
+            port_ctx = FakePortContext(newp1['port'], net_ctx)
+            self.driver.delete_port_postcommit(port_ctx)
+            self._verify_dvs_notifier('delete_port_call', p1, 'h1')
 
     def test_bind_port_dvs_with_opflex_diff_hosts(self):
         # Register an OpFlex agent and DVS agent
@@ -2055,6 +2095,14 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             vif_det = newp1['port']['binding:vif_details']
             self.assertIsNotNone(vif_det.get('dvs_port_group', None))
             self.assertEqual(expected_pg, vif_det.get('dvs_port_group'))
+            port_key = newp1['port']['binding:vif_details'].get('dvs_port_key')
+            self.assertIsNotNone(port_key)
+            self.assertEqual(port_key, BOOKED_PORT_VALUE)
+            self._verify_dvs_notifier('update_postcommit_port_call', p1, 'h2')
+            net_ctx = FakeNetworkContext(net, [mock.Mock()])
+            port_ctx = FakePortContext(newp1['port'], net_ctx)
+            self.driver.delete_port_postcommit(port_ctx)
+            self._verify_dvs_notifier('delete_port_call', p1, 'h2')
 
     def test_bind_ports_opflex_same_host(self):
         # Register an OpFlex agent and DVS agent
@@ -2075,6 +2123,16 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             # Called on the network's tenant
             vif_det = newp1['port']['binding:vif_details']
             self.assertIsNone(vif_det.get('dvs_port_group', None))
+            port_key = newp1['port']['binding:vif_details'].get('dvs_port_key')
+            self.assertIsNone(port_key)
+            dvs_mock = self.driver.dvs_notifier.update_postcommit_port_call
+            dvs_mock.assert_not_called()
+            net_ctx = FakeNetworkContext(net, [mock.Mock()])
+            port_ctx = FakePortContext(newp1['port'], net_ctx)
+            self.driver.delete_port_postcommit(port_ctx)
+            dvs_mock = self.driver.dvs_notifier.delete_port_call
+            dvs_mock.assert_not_called()
+        self.driver.dvs_notifier.reset_mock()
         with self.port(subnet=sub, tenant_id='onetenant') as p2:
             p2 = p2['port']
             self.assertEqual(net['id'], p2['network_id'])
@@ -2084,6 +2142,14 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             # Called on the network's tenant
             vif_det = newp2['port']['binding:vif_details']
             self.assertIsNone(vif_det.get('dvs_port_group', None))
+            port_key = newp2['port']['binding:vif_details'].get('dvs_port_key')
+            self.assertIsNone(port_key)
+            dvs_mock.assert_not_called()
+            net_ctx = FakeNetworkContext(net, [mock.Mock()])
+            port_ctx = FakePortContext(newp2['port'], net_ctx)
+            self.driver.delete_port_postcommit(port_ctx)
+            dvs_mock = self.driver.dvs_notifier.delete_port_call
+            dvs_mock.assert_not_called()
 
     def test_bind_ports_dvs_with_opflex_same_host(self):
         # Register an OpFlex agent and DVS agent
@@ -2107,6 +2173,15 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             vif_det = newp1['port']['binding:vif_details']
             self.assertIsNotNone(vif_det.get('dvs_port_group', None))
             self.assertEqual(expected_pg, vif_det.get('dvs_port_group'))
+            port_key = newp1['port']['binding:vif_details'].get('dvs_port_key')
+            self.assertIsNotNone(port_key)
+            self.assertEqual(port_key, BOOKED_PORT_VALUE)
+            self._verify_dvs_notifier('update_postcommit_port_call', p1, 'h1')
+            net_ctx = FakeNetworkContext(net, [mock.Mock()])
+            port_ctx = FakePortContext(newp1['port'], net_ctx)
+            self.driver.delete_port_postcommit(port_ctx)
+            self._verify_dvs_notifier('delete_port_call', p1, 'h1')
+        self.driver.dvs_notifier.reset_mock()
         with self.port(subnet=sub, tenant_id='onetenant') as p2:
             p2 = p2['port']
             self.assertEqual(net['id'], p2['network_id'])
@@ -2116,6 +2191,15 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             # Called on the network's tenant
             vif_det = newp2['port']['binding:vif_details']
             self.assertIsNone(vif_det.get('dvs_port_group', None))
+            port_key = newp2['port']['binding:vif_details'].get('dvs_port_key')
+            self.assertIsNone(port_key)
+            dvs_mock = self.driver.dvs_notifier.update_postcommit_port_call
+            dvs_mock.assert_not_called()
+            net_ctx = FakeNetworkContext(net, [mock.Mock()])
+            port_ctx = FakePortContext(newp2['port'], net_ctx)
+            self.driver.delete_port_postcommit(port_ctx)
+            dvs_mock = self.driver.dvs_notifier.delete_port_call
+            dvs_mock.assert_not_called()
 
     def test_bind_port_dvs_shared(self):
         # Register a DVS agent
@@ -2137,6 +2221,14 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
                            net['tenant_id'] + '|' + net['id'])
             pg = newp1['port']['binding:vif_details']['dvs_port_group']
             self.assertEqual(pg, expected_pg)
+            port_key = newp1['port']['binding:vif_details'].get('dvs_port_key')
+            self.assertIsNotNone(port_key)
+            self.assertEqual(port_key, BOOKED_PORT_VALUE)
+            self._verify_dvs_notifier('update_postcommit_port_call', p1, 'h1')
+            net_ctx = FakeNetworkContext(net, [mock.Mock()])
+            port_ctx = FakePortContext(newp1['port'], net_ctx)
+            self.driver.delete_port_postcommit(port_ctx)
+            self._verify_dvs_notifier('delete_port_call', p1, 'h1')
 
 
 class ApicML2IntegratedTestCaseSingleVRF(ApicML2IntegratedTestCase):
@@ -2534,6 +2626,7 @@ class FakePortContext(object):
             self._bound_segment = None
 
         self.current = self._port
+        self.original = self._port
         self.network = self._network
         self.top_bound_segment = self._bound_segment
         self.host = self._port.get(portbindings.HOST_ID)
