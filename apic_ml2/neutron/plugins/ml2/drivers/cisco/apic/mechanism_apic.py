@@ -186,10 +186,13 @@ class APICMechanismDriver(api.MechanismDriver,
     @property
     def dvs_notifier(self):
         if not self._dvs_notifier:
-            self._dvs_notifier = importutils.import_object(
-                DVS_AGENT_KLASS,
-                nctx.get_admin_context_without_session()
-            )
+            try:
+                self._dvs_notifier = importutils.import_object(
+                    DVS_AGENT_KLASS,
+                    nctx.get_admin_context_without_session()
+                )
+            except ImportError:
+                self._dvs_notifier = None
         return self._dvs_notifier
 
     @property
@@ -960,9 +963,9 @@ class APICMechanismDriver(api.MechanismDriver,
             self._delete_path_if_last(context, host=context.original_host)
         self._perform_port_operations(context)
         port = context.current
-        if self.dvs_notifier and (
-                port.get('binding:vif_details') and
-                port['binding:vif_details'].get('dvs_port_group')):
+        if (port.get('binding:vif_details') and
+                port['binding:vif_details'].get('dvs_port_group')) and (
+                self.dvs_notifier):
             self.dvs_notifier.update_postcommit_port_call(
                 context.current,
                 context.original,
@@ -993,9 +996,9 @@ class APICMechanismDriver(api.MechanismDriver,
             else:
                 self._delete_contract(context)
         self._notify_ports_due_to_router_update(port)
-        if self.dvs_notifier and (
-                port.get('binding:vif_details') and
-                port['binding:vif_details'].get('dvs_port_group')):
+        if (port.get('binding:vif_details') and
+                port['binding:vif_details'].get('dvs_port_group')) and (
+                self.dvs_notifier):
             self.dvs_notifier.delete_port_call(
                 context.current,
                 context.original,
