@@ -387,8 +387,7 @@ class APICMechanismDriver(api.MechanismDriver,
         details = {
             'vrf_tenant': self.apic_manager.apic.fvTenant.name(
                 vrf['aci_tenant']),
-            'vrf_name': self.apic_manager.apic.fvCtx.name(
-                str(vrf['aci_name'])),
+            'vrf_name': self.apic_manager.apic.fvCtx.name(vrf['aci_name']),
             'vrf_subnets': subnets
         }
         details['l3_policy_id'] = (
