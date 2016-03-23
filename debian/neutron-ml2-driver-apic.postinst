@@ -20,7 +20,7 @@ set -e
 
 case "$1" in
     configure)
-        apic-ml2-db-manage --config-file /etc/neutron/neutron.conf upgrade head
+        apic-ml2-db-manage --config-file /etc/neutron/neutron.conf upgrade head || true
     ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)
