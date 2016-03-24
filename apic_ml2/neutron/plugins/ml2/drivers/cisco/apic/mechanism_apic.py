@@ -160,15 +160,11 @@ class APICMechanismDriver(api.MechanismDriver,
 
     @staticmethod
     def get_base_synchronizer(inst):
-        apic_config = cfg.CONF.ml2_cisco_apic
-        return apic_sync.ApicBaseSynchronizer(inst,
-                                              apic_config.apic_sync_interval)
+        return apic_sync.ApicBaseSynchronizer(inst)
 
     @staticmethod
     def get_router_synchronizer(inst):
-        apic_config = cfg.CONF.ml2_cisco_apic
-        return apic_sync.ApicRouterSynchronizer(inst,
-                                                apic_config.apic_sync_interval)
+        return apic_sync.ApicRouterSynchronizer(inst)
 
     @staticmethod
     def get_driver_instance():
@@ -939,7 +935,6 @@ class APICMechanismDriver(api.MechanismDriver,
     def create_port_precommit(self, context):
         self._check_gw_port_operation(context, context.current)
 
-    @sync_init
     def create_port_postcommit(self, context):
         self._perform_port_operations(context)
         if context.current['device_owner'] == n_constants.DEVICE_OWNER_DHCP:
@@ -951,7 +946,6 @@ class APICMechanismDriver(api.MechanismDriver,
     def update_port_precommit(self, context):
         self._check_gw_port_operation(context, context.current)
 
-    @sync_init
     def update_port_postcommit(self, context):
         if (not self._is_apic_network_type(context) and
                 context.original_host and (context.original_host !=
@@ -1031,7 +1025,6 @@ class APICMechanismDriver(api.MechanismDriver,
         else:
             self._create_real_external_network(context, context.current)
 
-    @sync_init
     def update_network_postcommit(self, context):
         super(APICMechanismDriver, self).update_network_postcommit(context)
 
@@ -1083,7 +1076,6 @@ class APICMechanismDriver(api.MechanismDriver,
                     raise CidrOverlapsApicExternalSubnet(
                         subnet_cidr=cidr, ext_net=network['name'])
 
-    @sync_init
     def create_subnet_postcommit(self, context):
         info = self._get_subnet_info(context, context.current)
         if info:
@@ -1094,7 +1086,6 @@ class APICMechanismDriver(api.MechanismDriver,
                 scope=getattr(context, 'subnet_scope', None))
         self.notify_subnet_update(context.current)
 
-    @sync_init
     def update_subnet_postcommit(self, context):
         if context.current['gateway_ip'] != context.original['gateway_ip']:
             with self.apic_manager.apic.transaction() as trs:
