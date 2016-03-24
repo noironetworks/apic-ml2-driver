@@ -98,16 +98,6 @@ class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
         """Returns string description of the plugin."""
         return _("L3 Router Service Plugin for basic L3 using the APIC")
 
-    def sync_init(f):
-        def inner(inst, *args, **kwargs):
-            if not inst.synchronizer:
-                inst.synchronizer = (
-                    mechanism_apic.APICMechanismDriver.
-                    get_router_synchronizer(inst))
-                inst.synchronizer.sync_router()
-            return f(inst, *args, **kwargs)
-        return inner
-
     def add_router_interface_postcommit(self, context, router_id,
                                         interface_info):
         # Update router's state first
@@ -211,7 +201,6 @@ class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
 
     # Router API
 
-    @sync_init
     def create_router(self, context, router):
         r = router['router']
         gw_info = r.pop(l3_db.EXTERNAL_GW_INFO, None)
@@ -229,22 +218,18 @@ class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
 
         return self._make_router_dict(router_db)
 
-    @sync_init
     def update_router(self, context, id, router):
         result = super(ApicL3ServicePlugin, self).update_router(context,
                                                                 id, router)
         self.update_router_postcommit(context, result)
         return result
 
-    @sync_init
     def get_router(self, *args, **kwargs):
         return super(ApicL3ServicePlugin, self).get_router(*args, **kwargs)
 
-    @sync_init
     def get_routers(self, *args, **kwargs):
         return super(ApicL3ServicePlugin, self).get_routers(*args, **kwargs)
 
-    @sync_init
     def get_routers_count(self, *args, **kwargs):
         return super(ApicL3ServicePlugin, self).get_routers_count(*args,
                                                                   **kwargs)
@@ -257,7 +242,6 @@ class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
 
     # Router Interface API
 
-    @sync_init
     def add_router_interface(self, context, router_id, interface_info):
         # Create interface in parent
         result = super(ApicL3ServicePlugin, self).add_router_interface(
