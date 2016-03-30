@@ -275,9 +275,14 @@ class APICMechanismDriver(api.MechanismDriver,
                                              '|' + str(network_name))
             context.current['portgroup_name'] = vif_details['dvs_port_group']
             if self.dvs_notifier:
+                # DVS agent doesn't support opflex network, so let's use vlan
+                # to satisfy network_type checks in it
+                net_segments = copy.deepcopy(context.network.network_segments)
+                for segment in net_segments:
+                    segment['network_type'] = constants.TYPE_VLAN
                 booked_port_key = self.dvs_notifier.bind_port_call(
                     context.current,
-                    context.network.network_segments,
+                    net_segments,
                     context.network.current,
                     context.host
                 )
@@ -959,10 +964,14 @@ class APICMechanismDriver(api.MechanismDriver,
         if (port.get('binding:vif_details') and
                 port['binding:vif_details'].get('dvs_port_group')) and (
                 self.dvs_notifier):
+            # DVS agent doesn't support opflex network, so let's use vlan
+            # to satisfy network_type checks in it
+            net_segment = copy.deepcopy(context.network.network_segments[0])
+            net_segment['network_type'] = constants.TYPE_VLAN
             self.dvs_notifier.update_postcommit_port_call(
                 context.current,
                 context.original,
-                context.network.network_segments[0],
+                net_segment,
                 context.host
             )
         if context.current['device_owner'] == n_constants.DEVICE_OWNER_DHCP:
@@ -992,10 +1001,14 @@ class APICMechanismDriver(api.MechanismDriver,
         if (port.get('binding:vif_details') and
                 port['binding:vif_details'].get('dvs_port_group')) and (
                 self.dvs_notifier):
+            # DVS agent doesn't support opflex network, so let's use vlan
+            # to satisfy network_type checks in it
+            net_segment = copy.deepcopy(context.network.network_segments[0])
+            net_segment['network_type'] = constants.TYPE_VLAN
             self.dvs_notifier.delete_port_call(
                 context.current,
                 context.original,
-                context.network.network_segments[0],
+                net_segment,
                 context.host
             )
 
