@@ -2067,7 +2067,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             # Called on the network's tenant
             expected_pg = (mocked.APIC_SYSTEM_ID + '|' +
                            net['tenant_id'] + '|' + net['id'])
-            pg = newp1['port']['binding:vif_details']['dvs_port_group']
+            pg = newp1['port']['binding:vif_details']['dvs_port_group_name']
             self.assertEqual(pg, expected_pg)
             port_key = newp1['port']['binding:vif_details'].get('dvs_port_key')
             self.assertIsNotNone(port_key)
@@ -2099,8 +2099,8 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             expected_pg = (mocked.APIC_SYSTEM_ID + '|' +
                            net['tenant_id'] + '|' + net['id'])
             vif_det = newp1['port']['binding:vif_details']
-            self.assertIsNotNone(vif_det.get('dvs_port_group', None))
-            self.assertEqual(expected_pg, vif_det.get('dvs_port_group'))
+            self.assertIsNotNone(vif_det.get('dvs_port_group_name', None))
+            self.assertEqual(expected_pg, vif_det.get('dvs_port_group_name'))
             port_key = newp1['port']['binding:vif_details'].get('dvs_port_key')
             self.assertIsNotNone(port_key)
             self.assertEqual(port_key, BOOKED_PORT_VALUE)
@@ -2128,7 +2128,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             newp1 = self._bind_port_to_host(p1['id'], 'h1')
             # Called on the network's tenant
             vif_det = newp1['port']['binding:vif_details']
-            self.assertIsNone(vif_det.get('dvs_port_group', None))
+            self.assertIsNone(vif_det.get('dvs_port_group_name', None))
             port_key = newp1['port']['binding:vif_details'].get('dvs_port_key')
             self.assertIsNone(port_key)
             dvs_mock = self.driver.dvs_notifier.update_postcommit_port_call
@@ -2147,7 +2147,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             newp2 = self._bind_dhcp_port_to_host(p2['id'], 'h1')
             # Called on the network's tenant
             vif_det = newp2['port']['binding:vif_details']
-            self.assertIsNone(vif_det.get('dvs_port_group', None))
+            self.assertIsNone(vif_det.get('dvs_port_group_name', None))
             port_key = newp2['port']['binding:vif_details'].get('dvs_port_key')
             self.assertIsNone(port_key)
             dvs_mock.assert_not_called()
@@ -2177,8 +2177,8 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             expected_pg = (mocked.APIC_SYSTEM_ID + '|' +
                            net['tenant_id'] + '|' + net['id'])
             vif_det = newp1['port']['binding:vif_details']
-            self.assertIsNotNone(vif_det.get('dvs_port_group', None))
-            self.assertEqual(expected_pg, vif_det.get('dvs_port_group'))
+            self.assertIsNotNone(vif_det.get('dvs_port_group_name', None))
+            self.assertEqual(expected_pg, vif_det.get('dvs_port_group_name'))
             port_key = newp1['port']['binding:vif_details'].get('dvs_port_key')
             self.assertIsNotNone(port_key)
             self.assertEqual(port_key, BOOKED_PORT_VALUE)
@@ -2196,7 +2196,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             newp2 = self._bind_dhcp_port_to_host(p2['id'], 'h1')
             # Called on the network's tenant
             vif_det = newp2['port']['binding:vif_details']
-            self.assertIsNone(vif_det.get('dvs_port_group', None))
+            self.assertIsNone(vif_det.get('dvs_port_group_name', None))
             port_key = newp2['port']['binding:vif_details'].get('dvs_port_key')
             self.assertIsNone(port_key)
             dvs_mock = self.driver.dvs_notifier.update_postcommit_port_call
@@ -2225,7 +2225,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             # Called on the network's tenant
             expected_pg = (mocked.APIC_SYSTEM_ID + '|' +
                            net['tenant_id'] + '|' + net['id'])
-            pg = newp1['port']['binding:vif_details']['dvs_port_group']
+            pg = newp1['port']['binding:vif_details']['dvs_port_group_name']
             self.assertEqual(pg, expected_pg)
             port_key = newp1['port']['binding:vif_details'].get('dvs_port_key')
             self.assertIsNotNone(port_key)

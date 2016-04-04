@@ -268,10 +268,11 @@ class APICMechanismDriver(api.MechanismDriver,
             project_name = self.name_mapper.tenant(None, net['tenant_id'])
             # Use default security groups from MD
             vif_details = {portbindings.CAP_PORT_FILTER: self.sg_enabled}
-            vif_details['dvs_port_group'] = (cfg.CONF.apic_system_id +
-                                             '|' + str(project_name) +
-                                             '|' + str(network_name))
-            context.current['portgroup_name'] = vif_details['dvs_port_group']
+            vif_details['dvs_port_group_name'] = (cfg.CONF.apic_system_id +
+                                                  '|' + str(project_name) +
+                                                  '|' + str(network_name))
+            context.current['portgroup_name'] = (
+                vif_details['dvs_port_group_name'])
             if self.dvs_notifier:
                 booked_port_key = self.dvs_notifier.bind_port_call(
                     context.current,
@@ -955,7 +956,7 @@ class APICMechanismDriver(api.MechanismDriver,
         self._perform_port_operations(context)
         port = context.current
         if (port.get('binding:vif_details') and
-                port['binding:vif_details'].get('dvs_port_group')) and (
+                port['binding:vif_details'].get('dvs_port_group_name')) and (
                 self.dvs_notifier):
             self.dvs_notifier.update_postcommit_port_call(
                 context.current,
@@ -988,7 +989,7 @@ class APICMechanismDriver(api.MechanismDriver,
                 self._delete_contract(context)
         self._notify_ports_due_to_router_update(port)
         if (port.get('binding:vif_details') and
-                port['binding:vif_details'].get('dvs_port_group')) and (
+                port['binding:vif_details'].get('dvs_port_group_name')) and (
                 self.dvs_notifier):
             self.dvs_notifier.delete_port_call(
                 context.current,
