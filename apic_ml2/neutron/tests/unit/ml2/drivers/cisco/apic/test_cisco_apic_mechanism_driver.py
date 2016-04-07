@@ -2011,6 +2011,8 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             'tenant_network_types': ['opflex'],
             'type_drivers': ['opflex'],
         }
+        self.override_conf('single_tenant_mode', True,
+                           'ml2_cisco_apic')
         super(ApicML2IntegratedTestCaseDvs, self).setUp(
             service_plugins, ml2_opts=ml2_opts)
         # This is required for the test. Without it,
@@ -2039,6 +2041,14 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             self.assertEqual(a2['id'], port['id'])
             self.assertEqual(a4, host)
 
+    def _get_expected_pg(self, net):
+        if self.driver.single_tenant_mode:
+            return (mocked.APIC_SYSTEM_ID + '|' +
+                    net['tenant_id'] + '|' + net['id'])
+        else:
+            return (net['tenant_id'] + '|' +
+                    mocked.APIC_SYSTEM_ID + '|' + net['id'])
+
     def test_bind_port_dvs(self):
         # Register a DVS agent
         self._register_agent('h1', agent_cfg=AGENT_CONF_DVS)
@@ -2055,8 +2065,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             # Bind port to trigger path binding
             newp1 = self._bind_port_to_host(p1['id'], 'h1')
             # Called on the network's tenant
-            expected_pg = (mocked.APIC_SYSTEM_ID + '|' +
-                           net['tenant_id'] + '|' + net['id'])
+            expected_pg = self._get_expected_pg(net)
             pg = newp1['port']['binding:vif_details']['dvs_port_group_name']
             self.assertEqual(pg, expected_pg)
             port_key = newp1['port']['binding:vif_details'].get('dvs_port_key')
@@ -2086,8 +2095,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             # Bind port to trigger path binding
             newp1 = self._bind_port_to_host(p1['id'], 'h2')
             # Called on the network's tenant
-            expected_pg = (mocked.APIC_SYSTEM_ID + '|' +
-                           net['tenant_id'] + '|' + net['id'])
+            expected_pg = self._get_expected_pg(net)
             vif_det = newp1['port']['binding:vif_details']
             self.assertIsNotNone(vif_det.get('dvs_port_group_name', None))
             self.assertEqual(expected_pg, vif_det.get('dvs_port_group_name'))
@@ -2164,8 +2172,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             # Bind port to trigger path binding
             newp1 = self._bind_port_to_host(p1['id'], 'h1')
             # Called on the network's tenant
-            expected_pg = (mocked.APIC_SYSTEM_ID + '|' +
-                           net['tenant_id'] + '|' + net['id'])
+            expected_pg = self._get_expected_pg(net)
             vif_det = newp1['port']['binding:vif_details']
             self.assertIsNotNone(vif_det.get('dvs_port_group_name', None))
             self.assertEqual(expected_pg, vif_det.get('dvs_port_group_name'))
@@ -2213,8 +2220,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             # Bind port to trigger path binding
             newp1 = self._bind_port_to_host(p1['id'], 'h1')
             # Called on the network's tenant
-            expected_pg = (mocked.APIC_SYSTEM_ID + '|' +
-                           net['tenant_id'] + '|' + net['id'])
+            expected_pg = self._get_expected_pg(net)
             pg = newp1['port']['binding:vif_details']['dvs_port_group_name']
             self.assertEqual(pg, expected_pg)
             port_key = newp1['port']['binding:vif_details'].get('dvs_port_key')
@@ -2225,6 +2231,15 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             port_ctx = FakePortContext(newp1['port'], net_ctx)
             self.driver.delete_port_postcommit(port_ctx)
             self._verify_dvs_notifier('delete_port_call', p1, 'h1')
+
+
+class ApicML2IntegratedTestCaseDvsMultiTenantMode(
+    ApicML2IntegratedTestCaseDvs):
+
+    def setUp(self, service_plugins=None):
+        self.override_conf('single_tenant_mode', False,
+                           'ml2_cisco_apic')
+        super(ApicML2IntegratedTestCaseDvsMultiTenantMode, self).setUp()
 
 
 class ApicML2IntegratedTestCaseSingleVRF(ApicML2IntegratedTestCase):

@@ -264,17 +264,18 @@ class APICMechanismDriver(api.MechanismDriver,
         """
         if self._check_segment_for_agent(segment, agent):
             network_id = context.current.get('network_id')
-            network_name = self.name_mapper.network(context, network_id)
+            epg = self.name_mapper.network(context, network_id)
             net = self._get_plugin().get_network(context._plugin_context,
                                                  network_id)
-            project_name = self.name_mapper.tenant(None, net['tenant_id'])
             # Use default security groups from MD
             vif_details = {portbindings.CAP_PORT_FILTER: self.sg_enabled}
-            vif_details['dvs_port_group_name'] = (cfg.CONF.apic_system_id +
-                                                  '|' + str(project_name) +
-                                                  '|' + str(network_name))
+            tenant = self._get_network_aci_tenant(net)
+            app_profile = self._get_network_app_profile(net)
+            vif_details['dvs_port_group_name'] = ('%s|%s|%s' %
+                                                  (tenant, app_profile, epg))
             context.current['portgroup_name'] = (
                 vif_details['dvs_port_group_name'])
+            booked_port_key = None
             if self.dvs_notifier:
                 booked_port_key = self.dvs_notifier.bind_port_call(
                     context.current,
