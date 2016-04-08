@@ -15,7 +15,6 @@
 
 import mock
 from neutron.common import constants as q_const
-from neutron.common import exceptions as n_exc
 from neutron import context
 from neutron import manager
 
@@ -43,11 +42,11 @@ class FakeContract(object):
         self.contract_id = '123'
 
 
-class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
+class TestCiscoApicL3Driver(testlib_api.SqlTestCase,
                             mocked.ControllerMixin,
                             mocked.ConfigMixin):
     def setUp(self):
-        super(TestCiscoApicL3Plugin, self).setUp()
+        super(TestCiscoApicL3Driver, self).setUp()
         mock.patch('apic_ml2.neutron.plugins.ml2.drivers.cisco.apic.'
                    'apic_model.ApicDbModel').start()
         mocked.ControllerMixin.set_up_mocks(self)
@@ -123,10 +122,8 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
         mock.patch('neutron.db.l3_db.L3_NAT_db_mixin.'
                    'delete_floatingip').start()
 
-        def _get_router_aci_tenant(router):
-            return 'common'
-        apic_driver.aci_mech_driver._get_router_aci_tenant = (
-            _get_router_aci_tenant)
+        apic_driver.aci_mech_driver._get_router_aci_tenant = mock.Mock(
+            return_value='common')
         self.addCleanup(self.plugin._apic_driver.manager.reset_mock)
 
     def _check_call_list(self, expected, observed):
@@ -144,10 +141,44 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
                 if not self.plugin._apic_driver.single_tenant_mode else
                 mocked.APIC_TENANT)
 
-    def _test_add_router_interface(self, interface_info):
-        mgr = self.plugin._apic_driver.manager
-        mgr.reset_mock()
+    def test_update_router_postcommit(self):
         apic_driver = self.plugin._apic_driver
+        mgr = apic_driver.manager
+        router = {'id': ROUTER,
+                  'tenant_id': TENANT,
+                  'admin_state_up': True}
+        apic_driver._aci_mech_driver._get_tenant_vrf.return_value = {
+            'aci_tenant': 'common',
+            'aci_name': 'some_name'}
+        apic_driver.update_router_postcommit(self.context, router)
+        mgr.create_router.assert_called_once_with(mocked.APIC_ROUTER,
+                                                  owner=self._tenant(),
+                                                  context='some_name',
+                                                  transaction='transaction')
+        mgr.enable_router.assert_called_once_with(mocked.APIC_ROUTER,
+                                                  owner=self._tenant(),
+                                                  transaction='transaction')
+        router['admin_state_up'] = False
+        mgr.reset_mock()
+        apic_driver.update_router_postcommit(self.context, router)
+        mgr.create_router.assert_called_once_with(mocked.APIC_ROUTER,
+                                                  owner=self._tenant(),
+                                                  context='some_name',
+                                                  transaction='transaction')
+        mgr.disable_router.assert_called_once_with(mocked.APIC_ROUTER,
+                                                   owner=self._tenant(),
+                                                   transaction='transaction')
+
+    def test_delete_router_precommit(self):
+        apic_driver = self.plugin._apic_driver
+        mgr = apic_driver.manager
+        apic_driver.delete_router_precommit(self.context, ROUTER)
+        mgr.delete_router.assert_called_once_with(mocked.APIC_ROUTER)
+
+    def _test_add_router_interface_postcommit(self, interface_info):
+        apic_driver = self.plugin._apic_driver
+        mgr = apic_driver.manager
+        mgr.reset_mock()
         apic_driver._aci_mech_driver._get_tenant_vrf.return_value = {
             'aci_tenant': 'common',
             'aci_name': 'some_name'}
@@ -155,7 +186,8 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
             mocked.APIC_TENANT)
         apic_driver._aci_mech_driver._get_network_app_profile.return_value = (
             mocked.APIC_AP)
-        self.plugin.add_router_interface(self.context, ROUTER, interface_info)
+        apic_driver.add_router_interface_postcommit(self.context,
+                                                    ROUTER, interface_info)
         mgr.create_router.assert_called_once_with(mocked.APIC_ROUTER,
                                                   owner=self._tenant(),
                                                   context='some_name',
@@ -164,100 +196,67 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
             mocked.APIC_TENANT, mocked.APIC_ROUTER, mocked.APIC_NETWORK,
             app_profile_name=mocked.APIC_AP)
 
-    def _test_remove_router_interface(self, interface_info):
-        mgr = self.plugin._apic_driver.manager
-        self.plugin.remove_router_interface(self.context, ROUTER,
-                                            interface_info)
+    def test_add_router_interface_postcommit_subnet(self):
+        self._test_add_router_interface_postcommit(
+            self.interface_info['subnet'])
+
+    def test_add_router_interface_postcommit_port(self):
+        self._test_add_router_interface_postcommit(self.interface_info['port'])
+
+    def _test_remove_router_interface_precommit(self, interface_info):
+        plugin = self.plugin._core_plugin
+        apic_driver = self.plugin._apic_driver
+        mgr = apic_driver.manager
+        apic_driver.remove_router_interface_precommit(self.context, ROUTER,
+                                                      interface_info)
         self.assertEqual(1, mgr.remove_router_interface.call_count)
+        plugin.update_port_status.assert_called_once_with(
+            self.context, mock.ANY, q_const.PORT_STATUS_DOWN)
 
-    def test_add_router_interface_subnet(self):
-        self._test_add_router_interface(self.interface_info['subnet'])
+    def test_remove_router_interface_precommit_subnet(self):
+        self._test_remove_router_interface_precommit(
+            self.interface_info['subnet'])
 
-    def test_add_router_interface_port(self):
-        self._test_add_router_interface(self.interface_info['port'])
+    def test_remove_router_interface_precommit_port(self):
+        self._test_remove_router_interface_precommit(
+            self.interface_info['port'])
 
-    def test_remove_router_interface_subnet(self):
-        self._test_remove_router_interface(self.interface_info['subnet'])
-
-    def test_remove_router_interface_port(self):
-        self._test_remove_router_interface(self.interface_info['port'])
-
-    def test_create_router_gateway_fails(self):
-        # Force _update_router_gw_info failure
-        self.plugin._update_router_gw_info = mock.Mock(
-            side_effect=n_exc.NeutronException)
-        data = {'router': {
-            'name': 'router1', 'admin_state_up': True,
-            'external_gateway_info': {'network_id': 'some_uuid'}}}
-
-        # Verify router doesn't persist on failure
-        self.assertRaises(n_exc.NeutronException,
-                          self.plugin.create_router, self.context, data)
-        routers = self.plugin.get_routers(self.context)
-        self.assertEqual(0, len(routers))
-
-    def test_floatingip_port_notify_on_create(self):
-        # create floating-ip with mapped port
-        self.plugin.create_floatingip(self.context,
-                                      {'floatingip': self.floatingip})
+    def test_create_floatingip_postcommit(self):
+        fip = {'floatingip': self.floatingip,
+               'id': FLOATINGIP, 'port_id': PORT}
+        apic_driver = self.plugin._apic_driver
+        apic_driver.create_floatingip_postcommit(self.context, fip)
         self.ml2_driver.notify_port_update_for_fip.assert_called_once_with(
             PORT)
-
-    def test_floatingip_port_notify_on_reassociate(self):
-        # associate with different port
-        new_fip = {'port_id': 'port-another'}
-        self.ml2_driver.notify_port_update_for_fip.reset_mock()
-        self.plugin.update_floatingip(self.context, FLOATINGIP,
-                                      {'floatingip': new_fip})
-        self._check_call_list(
-            [mock.call(PORT), mock.call('port-another')],
-            self.ml2_driver.notify_port_update_for_fip.call_args_list)
-
-    def test_floatingip_port_notify_on_disassociate(self):
-        # dissociate mapped port
-        self.ml2_driver.notify_port_update_for_fip.reset_mock()
-        self.plugin.update_floatingip(self.context, FLOATINGIP,
-                                      {'floatingip': {}})
-        self.ml2_driver.notify_port_update_for_fip.assert_called_once_with(
-            PORT)
-
-    def test_floatingip_port_notify_on_delete(self):
-        # delete
-        self.ml2_driver.notify_port_update_for_fip.reset_mock()
-        self.plugin.delete_floatingip(self.context, FLOATINGIP)
-        self.ml2_driver.notify_port_update_for_fip.assert_called_once_with(
-            PORT)
-
-    def test_floatingip_status(self):
-        # create floating-ip with mapped port
-        fip = self.plugin.create_floatingip(self.context,
-                                            {'floatingip': self.floatingip})
-        self.plugin.update_floatingip_status.assert_called_once_with(
+        apic_driver._plugin.update_floatingip_status.assert_called_once_with(
             mock.ANY, FLOATINGIP, q_const.FLOATINGIP_STATUS_ACTIVE)
         self.assertEqual(q_const.FLOATINGIP_STATUS_ACTIVE, fip['status'])
 
-        # dissociate mapped-port
-        self.plugin.update_floatingip_status.reset_mock()
-        self.floatingip.pop('port_id')
-        fip = self.plugin.update_floatingip(self.context, FLOATINGIP,
-                                            {'floatingip': self.floatingip})
-        self.plugin.update_floatingip_status.assert_called_once_with(
-            mock.ANY, FLOATINGIP, q_const.FLOATINGIP_STATUS_DOWN)
-        self.assertEqual(q_const.FLOATINGIP_STATUS_DOWN, fip['status'])
+    def test_update_floatingip_precommit(self):
+        fip = {'floatingip': self.floatingip}
+        apic_driver = self.plugin._apic_driver
+        apic_driver.update_floatingip_precommit(self.context, FLOATINGIP, fip)
+        self.assertEqual(PORT, self.context.port_id_list[0])
 
-        # re-associate mapped-port
-        self.plugin.update_floatingip_status.reset_mock()
-        self.floatingip['port_id'] = PORT
-        fip = self.plugin.update_floatingip(self.context, FLOATINGIP,
-                                            {'floatingip': self.floatingip})
-        self.plugin.update_floatingip_status.assert_called_once_with(
-            mock.ANY, FLOATINGIP, q_const.FLOATINGIP_STATUS_ACTIVE)
-        self.assertEqual(q_const.FLOATINGIP_STATUS_ACTIVE, fip['status'])
+    def test_update_floatingip_postcommit(self):
+        fip = {'floatingip': self.floatingip,
+               'id': FLOATINGIP, 'port_id': PORT}
+        self.context.port_id_list = [self.port['id']]
+        apic_driver = self.plugin._apic_driver
+        apic_driver.update_floatingip_postcommit(self.context, FLOATINGIP, fip)
+        self.assertEqual(self.port['id'], self.context.port_id_list[0])
+        self.assertEqual(PORT, self.context.port_id_list[1])
+        calls = [mock.call(self.port['id']), mock.call(PORT)]
+        self.ml2_driver.notify_port_update_for_fip.assert_has_calls(calls)
 
+    def test_delete_floatingip_precommit(self):
+        apic_driver = self.plugin._apic_driver
+        apic_driver.delete_floatingip_precommit(self.context, FLOATINGIP)
+        self.assertEqual(PORT, self.context.port_id_list[0])
 
-class TestCiscoApicL3PluginPerTenantVRF(TestCiscoApicL3Plugin):
-
-    def setUp(self):
-        self.override_conf('per_tenant_context', True,
-                           'ml2_cisco_apic')
-        super(TestCiscoApicL3PluginPerTenantVRF, self).setUp()
+    def test_delete_floatingip_postcommit(self):
+        self.context.port_id_list = [PORT]
+        apic_driver = self.plugin._apic_driver
+        apic_driver.delete_floatingip_postcommit(self.context, FLOATINGIP)
+        self.ml2_driver.notify_port_update_for_fip.assert_called_once_with(
+            PORT)
