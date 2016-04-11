@@ -197,7 +197,7 @@ class ApicL3Driver(apic_driver_api.ApicL3DriverBase):
         context.port_id_list = [port_id]
 
     def update_floatingip_postcommit(self, context, id, floatingip):
-        port_id_list = context.port_id_list or []
+        port_id_list = getattr(context, 'port_id_list', [])
         port_id_list.append(floatingip.get('floatingip', {}).get('port_id'))
         for p in port_id_list:
             self._notify_port_update(p)
