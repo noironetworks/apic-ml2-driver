@@ -118,7 +118,7 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
         self.override_conf('per_tenant_context', False,
                            'ml2_cisco_apic')
         self.override_conf('path_mtu', 1000, group='ml2')
-        self.override_conf('segment_mtu', 1000, group='ml2')
+        self.override_conf('global_physnet_mtu', 1000)
         self.override_conf('advertise_mtu', True, None)
         service_plugins = (
             service_plugins or
@@ -483,6 +483,8 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                                         is_admin_context=True)['port']
                     p2 = self.show_port(p2['port']['id'],
                                         is_admin_context=True)['port']
+                    p1['dns_name'] = None
+                    p2['dns_name'] = None
                     expected_calls = [
                         mock.call(mock.ANY, p1),
                         mock.call(mock.ANY, p2)]
@@ -537,6 +539,8 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                                         is_admin_context=True)['port']
                     p2 = self.show_port(p2['port']['id'],
                                         is_admin_context=True)['port']
+                    p1['dns_name'] = None
+                    p2['dns_name'] = None
                     expected_calls = [
                         mock.call(mock.ANY, p1),
                         mock.call(mock.ANY, p2)]
@@ -3034,6 +3038,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
         args = {'network': {'name': mocked.APIC_NETWORK_HOST_SNAT + '-name',
                             'admin_state_up': True, 'shared': True,
                             'status': n_constants.NET_STATUS_ACTIVE,
+                            'tenant_id': 'onetenant',
                             'router:external': True}}
         db_net = self.driver.db_plugin.create_network(ctx, args)
         net_ctx = self._get_network_context(self.actual_core_plugin,
@@ -3164,6 +3169,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
         ctx = context.get_admin_context()
         args = {'network': {'name': mocked.APIC_NETWORK_HOST_SNAT + '-name',
                             'admin_state_up': True, 'shared': True,
+                            'tenant_id': 'onetenant',
                             'status': n_constants.NET_STATUS_ACTIVE}}
         db_net = self.driver.db_plugin.create_network(ctx, args)
         net_ctx = self._get_network_context(self.actual_core_plugin,

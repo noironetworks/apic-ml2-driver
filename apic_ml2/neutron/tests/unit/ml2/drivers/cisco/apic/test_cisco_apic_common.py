@@ -327,7 +327,7 @@ class ConfigMixin(object):
         cfg.CONF.set_override('admin_tenant_name', 'admin',
                               group='keystone_authtoken')
 
-    def override_conf(self, opt, val, group):
+    def override_conf(self, opt, val, group=None):
         cfg.CONF.set_override(opt, val, group)
 
 
