@@ -1280,22 +1280,31 @@ class APICMechanismDriver(api.MechanismDriver,
             context._plugin_context, port.get('device_id'))
         vrf_info = self._get_tenant_vrf(router['tenant_id'])
         remove_contracts_only = False
+
+        # Determine all router-gateway ports on this external network
+        gw_port_filter = {
+            'device_owner': [n_constants.DEVICE_OWNER_ROUTER_GW],
+            'network_id': [network['id']]}
         if self.per_tenant_context:
             shadow_l3out = self.name_mapper.l3_out(
                 context, network['id'],
                 openstack_owner=router['tenant_id'])
             router_tenant = self._get_tenant(router)
+            # Narrow down the gateway-ports to the router in this tenant
+            tenant_routers = self.l3_plugin.get_routers(
+                context._plugin_context.elevated(),
+                filters={'tenant_id': [router['tenant_id']]})
+            gw_port_filter['device_id'] = [r['id'] for r in tenant_routers]
         else:
             shadow_l3out = self.name_mapper.l3_out(context, network['id'])
             router_tenant = vrf_info['aci_tenant']
-            # if there are other routers still connected, only dissociate
-            # the contract for the router from shadow external EPG
-            router_gw_ports = context._plugin.get_ports(
-                context._plugin_context.elevated(),
-                filters={'device_owner': [n_constants.DEVICE_OWNER_ROUTER_GW],
-                         'network_id': [network['id']]})
-            remove_contracts_only = bool(
-                [p for p in router_gw_ports if p['id'] != port['id']])
+
+        # if there are other routers still connected, only dissociate
+        # the contract for this router from shadow external EPG
+        router_gw_ports = context._plugin.get_ports(
+            context._plugin_context.elevated(), filters=gw_port_filter)
+        remove_contracts_only = bool(
+            [p for p in router_gw_ports if p['id'] != port['id']])
 
         shadow_l3out = self._get_shadow_name_for_nat(shadow_l3out)
 
