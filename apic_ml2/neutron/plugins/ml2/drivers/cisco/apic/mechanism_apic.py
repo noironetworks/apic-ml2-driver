@@ -85,14 +85,32 @@ class CidrOverlapsApicExternalSubnet(n_exc.BadRequest):
                 "APIC external network or host-pool subnet for %(ext_net)s.")
 
 
-class WouldRequireNAT(n_exc.BadRequest):
-    message = _("Setting gateway on router would require address translation, "
-                "but NAT-ing is disabled for external network %(ext_net)s.")
-
-
 class SubnetDisallowedByNetConstraints(n_exc.BadRequest):
     message = _("Network constraints disallow creation of subnet %(cidr)s "
                 "in network %(net)s")
+
+
+class OnlyOneRouterPermittedIfNatDisabled(n_exc.BadRequest):
+    message = _("Cannot connect more than one router to NAT-disabled external "
+                "network %(net)s")
+
+
+class PreExistingL3OutNotFound(n_exc.BadRequest):
+    message = _("No applicable External Routed Network named %(l3out)s was "
+                "found on APIC.")
+
+
+class PreExistingL3OutInIncorrectTenant(n_exc.BadRequest):
+    message = _("Since NAT is disabled, VRF (%(vrf_tenant)s, %(vrf_name)s) "
+                "for project %(tenant_id)s needs to be connected to existing "
+                "External Routed Network (%(l3out_tenant)s, %(l3out_name)s) "
+                "which is not a valid configuration. The existing External "
+                "Routed Network should be in a compatible tenant.")
+
+
+class VMsDisallowedOnExtNetworkIfNatDisabled(n_exc.BadRequest):
+    message = _("Compute ports cannot be created on external network %(net)s "
+                "because NAT is disabled")
 
 
 class NameMapper(object):
@@ -792,62 +810,90 @@ class APICMechanismDriver(api.MechanismDriver,
             else:
                 l3out_name_pre = None
 
-            nat_reqd = self._is_nat_required(
-                context, network, vrf, router_info)
             nat_enabled = self._is_nat_enabled_on_ext_net(network)
+            l3out_tenant = network_tenant
+            if not nat_enabled and self._is_pre_existing(router_info):
+                l3out_info = self._query_l3out_info(
+                    l3out_name_pre, l3out_tenant)
+                if not l3out_info:
+                    raise PreExistingL3OutNotFound(l3out=l3out_name_pre)
+                l3out_tenant = l3out_info['l3out_tenant']
 
-            if nat_reqd and not nat_enabled:
-                LOG.error(_("NAT-ing needed to use External Routed network "
-                            "%s, but NAT-ing is disabled") % l3out_name)
-            nat_ok = False
-            if nat_reqd and nat_enabled:
-                nat_ok = self._create_shadow_ext_net_for_nat(
+            if nat_enabled:
+                self._create_shadow_ext_net_for_nat(
                     context, l3out_name, external_epg, cid, network, router)
-
-            # Use non-NAT config
-            if not nat_ok:
-                # Set contract for L3Out EPGs
+            else:
                 with self.apic_manager.apic.transaction() as trs:
+                    # Connect L3-out to tenant's VRF
+                    self.apic_manager.set_context_for_external_routed_network(
+                        l3out_tenant, l3out_name_pre or l3out_name,
+                        vrf['aci_name'], transaction=trs)
+                    # Set contract for L3Out EPGs
                     self.apic_manager.ensure_external_epg_consumed_contract(
                         l3out_name_pre or l3out_name, cid,
                         external_epg=external_epg,
-                        owner=network_tenant, transaction=trs)
+                        owner=l3out_tenant, transaction=trs)
                     self.apic_manager.ensure_external_epg_provided_contract(
                         l3out_name_pre or l3out_name, cid,
                         external_epg=external_epg,
-                        owner=network_tenant, transaction=trs)
-                # Set contract for EXT EPG too.
-                ext_epg_name = self._get_ext_epg_for_ext_net(l3out_name)
-                app_profile = self._get_network_app_profile(network)
-                with self.apic_manager.apic.transaction() as trs:
-                    # set the EPG to provide this contract
-                    self.apic_manager.set_contract_for_epg(
-                        network_tenant, ext_epg_name, cid, provider=True,
-                        app_profile_name=app_profile, transaction=trs)
-                    # set the EPG to consume this contract
-                    self.apic_manager.set_contract_for_epg(
-                        network_tenant, ext_epg_name, cid, provider=False,
-                        app_profile_name=app_profile, transaction=trs)
+                        owner=l3out_tenant, transaction=trs)
 
     def _check_gw_port_operation(self, context, port):
         if port.get('device_owner') != n_constants.DEVICE_OWNER_ROUTER_GW:
             return
         router_id = port.get('device_id')
         network = context.network.current
-        ext_info = self.apic_manager.ext_net_dict.get(network['name'])
-        router = self.l3_plugin.get_router(context._plugin_context, router_id)
+        if not router_id or not network.get('router:external'):
+            return
 
-        # Other L3 plugins (e.g. ASR) create db-only routers, which
-        # are indicated by an empty string tenant. Don't do anything
-        # for these devices
+        router = self.l3_plugin.get_router(context._plugin_context, router_id)
         if router['tenant_id'] == '':
             return
-        vrf_info = self._get_tenant_vrf(router['tenant_id'])
-        if router_id and ext_info:
-            nat_reqd = self._is_nat_required(
-                context, network, vrf_info, ext_info)
-            if nat_reqd and not self._is_nat_enabled_on_ext_net(network):
-                raise WouldRequireNAT(ext_net=network['name'])
+        nat_disabled = not self._is_nat_enabled_on_ext_net(network)
+        ext_info = self.apic_manager.ext_net_dict.get(network['name'], {})
+
+        # If NAT is disabled on L3-out, then we can connect exactly one VRF
+        # to the L3-out because shadow L3-outs are not created.
+        # If each OS tenant has its own VRF, it means at any time only
+        # one tenant can connect to the NAT-disabled L3-out.
+        if self.per_tenant_context and nat_disabled:
+            # get routers on this network belonging to other tenants
+            router_gw_ports = context._plugin.get_ports(
+                context._plugin_context.elevated(),
+                filters={'device_owner': [n_constants.DEVICE_OWNER_ROUTER_GW],
+                         'network_id': [network['id']]})
+            routers = self.l3_plugin.get_routers(
+                context._plugin_context,
+                filters={'id': [p['device_id'] for p in router_gw_ports]})
+            routers = [r for r in routers
+                       if r['tenant_id'] != router['tenant_id']]
+            if routers:
+                raise OnlyOneRouterPermittedIfNatDisabled(net=network['name'])
+
+        # A NAT-disabled, pre-existing L3-out is directly connected to the
+        # OS tenant's VRF. So the OS tenant's VRF must be visible to the L3-out
+        # in ACI, i.e. the tenant's VRF must be in 'common' in ACI, or the
+        # L3-out and the tenant's VRF must in the same ACI tenant.
+        if nat_disabled and self._is_pre_existing(ext_info):
+            vrf_info = self._get_tenant_vrf(router['tenant_id'])
+            vrf_aci_tenant = str(vrf_info['aci_tenant'])
+
+            l3out_name_pre = self.name_mapper.pre_existing(
+                context, network['name'])
+            ext_net_tenant = self._get_network_aci_tenant(network)
+            l3out_info = self._query_l3out_info(l3out_name_pre, ext_net_tenant)
+            if not l3out_info:
+                raise PreExistingL3OutNotFound(l3out=l3out_name_pre)
+            l3out_tenant = str(l3out_info['l3out_tenant'])
+            if (vrf_aci_tenant != str(apic_manager.TENANT_COMMON) and
+                    vrf_aci_tenant != l3out_tenant):
+                ac = self.apic_manager.apic
+                raise PreExistingL3OutInIncorrectTenant(
+                    l3out_name=l3out_name_pre,
+                    l3out_tenant=ac.fvTenant.name(l3out_info['l3out_tenant']),
+                    vrf_name=ac.fvCtx.name(vrf_info['aci_name']),
+                    vrf_tenant=ac.fvTenant.name(vrf_info['aci_tenant']),
+                    tenant_id=router['tenant_id'])
 
     def _perform_port_operations(self, context):
         # Get port
@@ -859,9 +905,14 @@ class APICMechanismDriver(api.MechanismDriver,
             self._perform_path_port_operations(context, port)
         self._notify_ports_due_to_router_update(port)
 
-    def _delete_contract(self, context):
+    def _delete_gw_port_nat_disabled(self, context):
         port = context.current
         network = context.network.current
+        router_info = self.apic_manager.ext_net_dict.get(network['name'], {})
+        if not router_info:
+            return
+
+        network_tenant = self._get_network_aci_tenant(network)
         l3out_name = self.name_mapper.l3_out(
             context, network['id'],
             openstack_owner=network['tenant_id'])
@@ -876,26 +927,41 @@ class APICMechanismDriver(api.MechanismDriver,
         arouter_id = self.name_mapper.router(
             context, port.get('device_id'),
             openstack_owner=router['tenant_id'])
-        router_info = self.apic_manager.ext_net_dict.get(network['name'], {})
-        if router_info:
-            if 'external_epg' not in router_info:
-                self.apic_manager.delete_external_epg_contract(arouter_id,
-                                                               l3out_name)
+
+        # check if there are other routers
+        is_last_gw_port = self._is_last_gw_port(context, port, router)
+
+        with self.apic_manager.apic.transaction() as trs:
+            if not self._is_pre_existing(router_info):
+                self.apic_manager.delete_external_epg_contract(
+                    arouter_id, l3out_name, transaction=trs)
+                l3out_name_pre = None
             else:
                 l3out_name_pre = self.name_mapper.pre_existing(
                     context, network['name'])
                 external_epg = self.name_mapper.pre_existing(
-                    context, router_info['external_epg'])
-                tenant_id = self._get_network_aci_tenant(network)
-                l3out_info = self._query_l3out_info(l3out_name_pre, tenant_id)
+                    context,
+                    router_info.get('external_epg', apic_manager.EXT_EPG))
+                l3out_info = self._query_l3out_info(l3out_name_pre,
+                                                    network_tenant)
                 contract_id = 'contract-%s' % router['id']
-                if l3out_info:
-                    self.apic_manager.unset_contract_for_external_epg(
-                        l3out_name_pre, contract_id, external_epg=external_epg,
-                        owner=l3out_info['l3out_tenant'], provided=True)
-                    self.apic_manager.unset_contract_for_external_epg(
-                        l3out_name_pre, contract_id, external_epg=external_epg,
-                        owner=l3out_info['l3out_tenant'], provided=False)
+                if not l3out_info:
+                    return
+                network_tenant = l3out_info['l3out_tenant']
+                self.apic_manager.unset_contract_for_external_epg(
+                    l3out_name_pre, contract_id, external_epg=external_epg,
+                    owner=network_tenant, provided=True,
+                    transaction=trs)
+                self.apic_manager.unset_contract_for_external_epg(
+                    l3out_name_pre, contract_id, external_epg=external_epg,
+                    owner=network_tenant, provided=False,
+                    transaction=trs)
+
+            # detach VRF from L3-out if last router
+            if is_last_gw_port:
+                self.apic_manager.set_context_for_external_routed_network(
+                    network_tenant, l3out_name_pre or l3out_name, None,
+                    transaction=trs)
 
     def _get_active_path_count(self, context, host=None):
         return context._plugin_context.session.query(
@@ -955,6 +1021,12 @@ class APICMechanismDriver(api.MechanismDriver,
 
     def create_port_precommit(self, context):
         self._check_gw_port_operation(context, context.current)
+        port = context.current
+        network = context.network.current
+        if (network.get('router:external') and
+                not self._is_nat_enabled_on_ext_net(network) and
+                port.get('device_owner').startswith('compute:')):
+            raise VMsDisallowedOnExtNetworkIfNatDisabled(net=network['name'])
 
     def create_port_postcommit(self, context):
         self._perform_port_operations(context)
@@ -1006,7 +1078,7 @@ class APICMechanismDriver(api.MechanismDriver,
             if self._is_nat_enabled_on_ext_net(network):
                 self._delete_shadow_ext_net_for_nat(context, port, network)
             else:
-                self._delete_contract(context)
+                self._delete_gw_port_nat_disabled(context)
         self._notify_ports_due_to_router_update(port)
         if (port.get('binding:vif_details') and
                 port['binding:vif_details'].get('dvs_port_group_name')) and (
@@ -1305,30 +1377,17 @@ class APICMechanismDriver(api.MechanismDriver,
         # for these devices
         if router['tenant_id'] == '':
             return
-        # Determine all router-gateway ports on this external network
-        gw_port_filter = {
-            'device_owner': [n_constants.DEVICE_OWNER_ROUTER_GW],
-            'network_id': [network['id']]}
         if self.per_tenant_context:
             shadow_l3out = self.name_mapper.l3_out(
                 context, network['id'],
                 openstack_owner=router['tenant_id'])
             router_tenant = self._get_tenant(router)
-            # Narrow down the gateway-ports to the router in this tenant
-            tenant_routers = self.l3_plugin.get_routers(
-                context._plugin_context.elevated(),
-                filters={'tenant_id': [router['tenant_id']]})
-            gw_port_filter['device_id'] = [r['id'] for r in tenant_routers]
         else:
             shadow_l3out = self.name_mapper.l3_out(context, network['id'])
             router_tenant = vrf_info['aci_tenant']
 
-        # if there are other routers still connected, only dissociate
-        # the contract for this router from shadow external EPG
-        router_gw_ports = context._plugin.get_ports(
-            context._plugin_context.elevated(), filters=gw_port_filter)
-        remove_contracts_only = bool(
-            [p for p in router_gw_ports if p['id'] != port['id']])
+        remove_contracts_only = (
+            not self._is_last_gw_port(context, port, router))
 
         shadow_l3out = self._get_shadow_name_for_nat(shadow_l3out)
 
@@ -1554,17 +1613,14 @@ class APICMechanismDriver(api.MechanismDriver,
             # determine l3-out tenant and private VRF by querying ACI
             l3out_info = self._query_l3out_info(l3out_name_pre, tenant_id)
             if not l3out_info:
-                LOG.error(
-                    _("External Routed Network %s not found") % l3out_name_pre)
-                return
+                raise PreExistingL3OutNotFound(l3out=l3out_name_pre)
             if not (l3out_info.get('vrf_name') and
                     l3out_info.get('vrf_tenant')):
                 LOG.error(
                     _("External Routed Network %s doesn't have private "
                       "network set") % l3out_name_pre)
                 return
-            l3out_tenant = self.name_mapper.pre_existing(
-                context, l3out_info['l3out_tenant'])
+            l3out_tenant = l3out_info['l3out_tenant']
             external_vrf = self.name_mapper.pre_existing(
                 context, l3out_info['vrf_name'])
             external_vrf_tenant = self.name_mapper.pre_existing(
@@ -1627,25 +1683,27 @@ class APICMechanismDriver(api.MechanismDriver,
                 external_epg=l3out_external_epg, provided=False,
                 owner=l3out_tenant, transaction=trs)
 
-        # Create EPG and BD for external network. This EPG will hold
-        # NAT-ed endpoints as well as ports of VM created in the
+        # If NAT is enabled, create EPG and BD for external network. This EPG
+        # will hold NAT-ed endpoints as well as ports of VM created in the
         # external network.
-        with self.apic_manager.apic.transaction() as trs:
-            # create EPG, BD for external network and connect to external VRF
-            ext_bd_name = self._get_ext_bd_for_ext_net(l3out_name)
-            ext_epg_name = self._get_ext_epg_for_ext_net(l3out_name)
-            app_profile_name = self._get_network_app_profile(network)
-            self.apic_manager.ensure_bd_created_on_apic(
-                tenant_id, ext_bd_name, ctx_owner=external_vrf_tenant,
-                ctx_name=external_vrf, transaction=trs)
-            self.apic_manager.set_l3out_for_bd(
-                tenant_id, ext_bd_name, l3out_name_pre or l3out_name,
-                transaction=trs)
-            self.apic_manager.ensure_epg_created(
-                tenant_id, ext_epg_name, bd_name=ext_bd_name,
-                app_profile_name=app_profile_name, transaction=trs)
-            # create any required subnets in BD
-            if self._is_nat_enabled_on_ext_net(network):
+        if self._is_nat_enabled_on_ext_net(network):
+            with self.apic_manager.apic.transaction() as trs:
+                # create EPG, BD for external network and
+                # connect to external VRF
+                ext_bd_name = self._get_ext_bd_for_ext_net(l3out_name)
+                ext_epg_name = self._get_ext_epg_for_ext_net(l3out_name)
+                app_profile_name = self._get_network_app_profile(network)
+                self.apic_manager.ensure_bd_created_on_apic(
+                    tenant_id, ext_bd_name, ctx_owner=external_vrf_tenant,
+                    ctx_name=external_vrf, transaction=trs)
+                self.apic_manager.set_l3out_for_bd(
+                    tenant_id, ext_bd_name, l3out_name_pre or l3out_name,
+                    transaction=trs)
+                self.apic_manager.ensure_epg_created(
+                    tenant_id, ext_epg_name, bd_name=ext_bd_name,
+                    app_profile_name=app_profile_name, transaction=trs)
+
+                # create any required subnets in BD
                 gw, plen = net_info.get('host_pool_cidr', '/').split('/', 1)
                 if gw and plen:
                     self.apic_manager.ensure_subnet_created_on_apic(
@@ -1654,14 +1712,14 @@ class APICMechanismDriver(api.MechanismDriver,
                     self._create_snat_ip_allocation_subnet(
                         context, network, net_info.get('host_pool_cidr'), gw)
 
-            # make EPG use allow-everything contract
-            self.apic_manager.set_contract_for_epg(
-                tenant_id, ext_epg_name, contract_name,
-                app_profile_name=app_profile_name, transaction=trs)
-            self.apic_manager.set_contract_for_epg(
-                tenant_id, ext_epg_name, contract_name,
-                app_profile_name=app_profile_name, provider=True,
-                transaction=trs)
+                # make EPG use allow-everything contract
+                self.apic_manager.set_contract_for_epg(
+                    tenant_id, ext_epg_name, contract_name,
+                    app_profile_name=app_profile_name, transaction=trs)
+                self.apic_manager.set_contract_for_epg(
+                    tenant_id, ext_epg_name, contract_name,
+                    app_profile_name=app_profile_name, provider=True,
+                    transaction=trs)
 
     def _delete_snat_ip_allocation_network(self, context, network):
         """This deletes all the SNAT pool resources we created in the DB """
@@ -1718,8 +1776,7 @@ class APICMechanismDriver(api.MechanismDriver,
                 LOG.error(
                     _("External Routed Network %s not found") % l3out_name_pre)
                 return
-            l3out_tenant = self.name_mapper.pre_existing(
-                context, l3out_info['l3out_tenant'])
+            l3out_tenant = l3out_info['l3out_tenant']
             l3out_external_epg = self.name_mapper.pre_existing(
                 context, net_info.get('external_epg', apic_manager.EXT_EPG))
         else:
@@ -1727,17 +1784,18 @@ class APICMechanismDriver(api.MechanismDriver,
             l3out_tenant = tenant_id
             l3out_external_epg = apic_manager.EXT_EPG
 
-        with self.apic_manager.apic.transaction() as trs:
-            # delete EPG, BD for external network
-            ext_bd_name = self._get_ext_bd_for_ext_net(l3out_name)
-            ext_epg_name = self._get_ext_epg_for_ext_net(l3out_name)
-            app_profile_name = self._get_network_app_profile(network)
+        # If NAT ius enabled, delete EPG, BD for external network
+        if self._is_nat_enabled_on_ext_net(network):
+            with self.apic_manager.apic.transaction() as trs:
+                ext_bd_name = self._get_ext_bd_for_ext_net(l3out_name)
+                ext_epg_name = self._get_ext_epg_for_ext_net(l3out_name)
+                app_profile_name = self._get_network_app_profile(network)
 
-            self.apic_manager.delete_bd_on_apic(
-                tenant_id, ext_bd_name, transaction=trs)
-            self.apic_manager.delete_epg_for_network(
-                tenant_id, ext_epg_name,
-                app_profile_name=app_profile_name, transaction=trs)
+                self.apic_manager.delete_bd_on_apic(
+                    tenant_id, ext_bd_name, transaction=trs)
+                self.apic_manager.delete_epg_for_network(
+                    tenant_id, ext_epg_name,
+                    app_profile_name=app_profile_name, transaction=trs)
 
         with self.apic_manager.apic.transaction() as trs:
             # remove contract from L3Out's external EPG, then delete contract.
@@ -1768,31 +1826,6 @@ class APICMechanismDriver(api.MechanismDriver,
         self._delete_snat_ip_allocation_network(
             context._plugin_context, network)
 
-    def _is_nat_required(self, context, network, vrf_info, ext_info):
-        l3out_name = self.name_mapper.l3_out(
-            context, network['id'], openstack_owner=network['tenant_id'])
-        network_tenant = self._get_network_aci_tenant(network)
-        if ext_info and self._is_pre_existing(ext_info):
-            l3out_name_pre = self.name_mapper.pre_existing(
-                context, network['name'])
-            l3out_info = self._query_l3out_info(
-                l3out_name_pre, network_tenant)
-        else:
-            network_vrf = self._get_network_vrf(context, network)
-            l3out_info = {'l3out_tenant': network_tenant,
-                          'vrf_name': network_vrf['aci_name'],
-                          'vrf_tenant': network_vrf['aci_tenant']}
-
-        if (l3out_info and l3out_info.get('vrf_name') and
-                l3out_info.get('vrf_tenant')):
-            return (l3out_info['vrf_name'] != str(vrf_info['aci_name']) or
-                    l3out_info['vrf_tenant'] != vrf_info['aci_tenant'])
-        else:
-            LOG.error(
-                _("External Routed Network %s not found, or doesn't "
-                  "have private network configured") % l3out_name)
-        return True
-
     def _query_l3out_info(self, l3out_name, tenant_id):
         info = {'l3out_tenant': tenant_id}
         l3out_children = self.apic_manager.apic.l3extOut.get_subtree(
@@ -1822,3 +1855,19 @@ class APICMechanismDriver(api.MechanismDriver,
     def _is_asr_router_type(self, ext_info):
         router_type = ext_info.get('router_type', 'none')
         return router_type.lower() == 'asr'
+
+    def _is_last_gw_port(self, context, gw_port, router):
+        gw_port_filter = {
+            'device_owner': [n_constants.DEVICE_OWNER_ROUTER_GW],
+            'network_id': [gw_port['network_id']]}
+        if self.per_tenant_context:
+            # Narrow down the gateway-ports to the routers in this tenant
+            tenant_routers = self.l3_plugin.get_routers(
+                context._plugin_context.elevated(),
+                filters={'tenant_id': [router['tenant_id']]})
+            gw_port_filter['device_id'] = [r['id'] for r in tenant_routers]
+
+        # Return false if there are other routers still connected
+        router_gw_ports = context._plugin.get_ports(
+            context._plugin_context.elevated(), filters=gw_port_filter)
+        return (not [p for p in router_gw_ports if p['id'] != gw_port['id']])
