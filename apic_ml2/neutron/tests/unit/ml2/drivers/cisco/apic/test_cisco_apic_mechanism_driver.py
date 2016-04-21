@@ -1299,7 +1299,9 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
     def test_update_cross_tenant_pre_gw_port_postcommit(self):
         self._test_update_pre_gw_port_postcommit('admin_tenant')
 
-    def test_update_pre_no_nat_gw_port_postcommit(self):
+    def _test_update_pre_no_nat_gw_port_postcommit(self, l3out_tenant):
+        self.external_network_dict[mocked.APIC_NETWORK_PRE + '-name'][
+            'enable_nat'] = 'False'
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
                                             mocked.APIC_NETWORK_PRE,
                                             TEST_SEGMENT1, external=True)
@@ -1313,7 +1315,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             nat_vrf=False, net_name=self._scoped_name(net_ctx.current['id']))
         self.driver._query_l3out_info = mock.Mock()
         self.driver._query_l3out_info.return_value = {
-            'l3out_tenant': self._tenant(),
+            'l3out_tenant': l3out_tenant,
             'vrf_name': ctx_name,
             'vrf_tenant': self._tenant(vrf=True)}
         self.driver.update_port_postcommit(port_ctx)
@@ -1325,13 +1327,19 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.assertFalse(mgr.ensure_external_routed_network_created.called)
         self.assertFalse(mgr.ensure_external_epg_created.called)
 
+        mgr.set_context_for_external_routed_network.assert_called_once_with(
+            l3out_tenant,
+            self._scoped_name(net_ctx.current['name'], preexisting=True),
+            self._network_vrf_name(),
+            transaction=mock.ANY)
+
         expected_calls = [
             mock.call(
                 self._scoped_name(net_ctx.current['name'], preexisting=True),
                 mgr.get_router_contract.return_value,
                 external_epg=self._scoped_name(mocked.APIC_EXT_EPG,
                                                preexisting=True),
-                owner=self._tenant(), transaction=mock.ANY)]
+                owner=l3out_tenant, transaction=mock.ANY)]
         self._check_call_list(
             expected_calls,
             mgr.ensure_external_epg_consumed_contract.call_args_list)
@@ -1342,24 +1350,17 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
                 mgr.get_router_contract.return_value,
                 external_epg=self._scoped_name(mocked.APIC_EXT_EPG,
                                                preexisting=True),
-                owner=self._tenant(), transaction=mock.ANY)]
+                owner=l3out_tenant, transaction=mock.ANY)]
         self._check_call_list(
             expected_calls,
             mgr.ensure_external_epg_provided_contract.call_args_list)
+        self.assertFalse(mgr.set_contract_for_epg.called)
 
-        epg_name = "EXT-epg-%s" % self._scoped_name(mocked.APIC_NETWORK_PRE)
-        expected_calls = [
-            mock.call(self._tenant(), epg_name,
-                      mgr.get_router_contract.return_value, provider=True,
-                      app_profile_name=self._app_profile(),
-                      transaction=mock.ANY),
-            mock.call(self._tenant(), epg_name,
-                      mgr.get_router_contract.return_value, provider=False,
-                      app_profile_name=self._app_profile(),
-                      transaction=mock.ANY)]
-        self._check_call_list(
-            expected_calls,
-            mgr.set_contract_for_epg.call_args_list)
+    def test_update_pre_no_nat_gw_port_postcommit_tenant(self):
+        self._test_update_pre_no_nat_gw_port_postcommit(self._tenant())
+
+    def test_update_pre_no_nat_gw_port_postcommit_common(self):
+        self._test_update_pre_no_nat_gw_port_postcommit('common')
 
     def test_delete_gw_port_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
@@ -1409,6 +1410,11 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             self._scoped_name(port_ctx.current['device_id']),
             owner=self._router_tenant())
 
+        mgr.set_context_for_external_routed_network.assert_called_once_with(
+            self._tenant(), self._scoped_name(mocked.APIC_NETWORK_NO_NAT),
+            self._network_vrf_name(),
+            transaction=mock.ANY)
+
         mgr.ensure_external_epg_consumed_contract.assert_called_once_with(
             self._scoped_name(mocked.APIC_NETWORK_NO_NAT),
             mgr.get_router_contract.return_value,
@@ -1421,23 +1427,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             external_epg=mocked.APIC_EXT_EPG, transaction=mock.ANY,
             owner=self._tenant())
 
-        expected_calls = [
-            mock.call(self._tenant(),
-                      "EXT-epg-%s" % self._scoped_name(
-                          mocked.APIC_NETWORK_NO_NAT),
-                      mgr.get_router_contract.return_value,
-                      provider=True,
-                      app_profile_name=self._app_profile(mocked.APIC_TENANT),
-                      transaction=mock.ANY),
-            mock.call(self._tenant(),
-                      "EXT-epg-%s" % self._scoped_name(
-                          mocked.APIC_NETWORK_NO_NAT),
-                      mgr.get_router_contract.return_value,
-                      provider=False,
-                      app_profile_name=self._app_profile(mocked.APIC_TENANT),
-                      transaction=mock.ANY)]
-        self._check_call_list(
-            expected_calls, mgr.set_contract_for_epg.call_args_list)
+        self.assertFalse(mgr.set_contract_for_epg.called)
 
     def test_delete_unrelated_gw_port_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
@@ -1470,16 +1460,65 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
                         mocked.APIC_NETWORK_PRE),
             owner=self._tenant(ext_nat=True))
 
-    def test_update_gw_port_postcommit_fail_contract_create(self):
+    def _test_delete_no_nat_gw_port_postcommit(self, pre):
+        if pre:
+            self.external_network_dict[mocked.APIC_NETWORK_NO_NAT + '-name'][
+                'preexisting'] = 'True'
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
-                                            mocked.APIC_NETWORK,
+                                            mocked.APIC_NETWORK_NO_NAT,
                                             TEST_SEGMENT1, external=True)
         port_ctx = self._get_port_context(mocked.APIC_TENANT,
-                                          mocked.APIC_NETWORK,
+                                          mocked.APIC_NETWORK_NO_NAT,
                                           'vm1', net_ctx, HOST_ID1, gw=True)
+        self.driver._delete_path_if_last = mock.Mock()
         mgr = self.driver.apic_manager
-        self.driver.update_port_postcommit(port_ctx)
-        mgr.ensure_external_routed_network_deleted.assert_called_once()
+        mgr.get_router_contract.return_value = mocked.FakeDbContract(
+            mocked.APIC_CONTRACT)
+        if pre:
+            self.driver._query_l3out_info = mock.Mock()
+            self.driver._query_l3out_info.return_value = {
+                'l3out_tenant': self._tenant(),
+                'vrf_name': self._network_vrf_name(),
+                'vrf_tenant': self._tenant(vrf=True)}
+
+        self.driver.delete_port_postcommit(port_ctx)
+
+        if pre:
+            l3out_name = self._scoped_name(net_ctx.current['name'],
+                                           preexisting=True)
+        else:
+            l3out_name = self._scoped_name(mocked.APIC_NETWORK_NO_NAT)
+
+        mgr.set_context_for_external_routed_network.assert_called_once_with(
+            self._tenant(), l3out_name, None, transaction=mock.ANY)
+        if pre:
+            expected_calls = [
+                mock.call(
+                    l3out_name,
+                    'contract-%s' % mocked.APIC_ROUTER,
+                    external_epg=mocked.APIC_EXT_EPG, owner=self._tenant(),
+                    provided=True, transaction=mock.ANY),
+                mock.call(
+                    l3out_name,
+                    'contract-%s' % mocked.APIC_ROUTER,
+                    external_epg=mocked.APIC_EXT_EPG, owner=self._tenant(),
+                    provided=False, transaction=mock.ANY)]
+            self._check_call_list(
+                expected_calls,
+                mgr.unset_contract_for_external_epg.call_args_list)
+        else:
+            mgr.delete_external_epg_contract.assert_called_once_with(
+                self._scoped_name(mocked.APIC_ROUTER),
+                l3out_name,
+                transaction=mock.ANY)
+
+        self.assertFalse(mgr.delete_external_routed_network.called)
+
+    def test_delete_no_nat_gw_port_postcommit(self):
+        self._test_delete_no_nat_gw_port_postcommit(False)
+
+    def test_delete_no_nat_pre_gw_port_postcommit(self):
+        self._test_delete_no_nat_gw_port_postcommit(True)
 
     def test_create_network_postcommit(self):
         ctx = self._get_network_context(mocked.APIC_TENANT,
@@ -1636,7 +1675,9 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         mgr = self.driver.apic_manager
         self.driver._query_l3out_info = mock.Mock()
         self.driver._query_l3out_info.return_value = None
-        self.driver.create_network_postcommit(net_ctx)
+        self.assertRaises(
+            md.PreExistingL3OutNotFound,
+            self.driver.create_network_postcommit, net_ctx)
 
         self.assertFalse(mgr.ensure_context_enforced.called)
         self.assertFalse(mgr.ensure_external_routed_network_created.called)
@@ -1872,17 +1913,54 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         port_ctx = self._get_port_context(mocked.APIC_TENANT,
                                           mocked.APIC_NETWORK,
                                           'vm1', net_ctx, HOST_ID1, gw=True)
-        raised = False
         mgr = self.driver.apic_manager
         mgr.get_router_contract.return_value = mocked.FakeDbContract(
             mocked.APIC_CONTRACT)
-        try:
-            self.driver.update_port_precommit(port_ctx)
-        except md.WouldRequireNAT:
-            raised = True
-        self.assertFalse(raised)
+        self.driver.update_port_precommit(port_ctx)
 
-    def test_no_nat_gw_port_precommit(self):
+    def _test_no_nat_multiple_gw_port_precommit_exception(self, pre):
+        if pre:
+            self.external_network_dict[mocked.APIC_NETWORK_NO_NAT + '-name'][
+                'preexisting'] = 'True'
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK_NO_NAT,
+                                            TEST_SEGMENT1, external=True)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK_NO_NAT,
+                                          'vm1', net_ctx, HOST_ID1, gw=True,
+                                          router_owner='r2')
+        self.driver._l3_plugin.get_routers.return_value = [
+            {'id': 'r1', 'tenant_id': 't1'},
+            {'id': 'r2', 'tenant_id': mocked.APIC_TENANT},
+            {'id': 'r3', 'tenant_id': mocked.APIC_TENANT}]
+        mgr = self.driver.apic_manager
+        mgr.get_router_contract.return_value = mocked.FakeDbContract(
+            mocked.APIC_CONTRACT)
+
+        if pre:
+            self.driver._query_l3out_info = mock.Mock()
+            self.driver._query_l3out_info.return_value = {
+                'l3out_tenant': self._tenant(),
+                'vrf_name': self._network_vrf_name(),
+                'vrf_tenant': self._tenant(vrf=True)}
+
+        if self.driver.per_tenant_context:
+            self.assertRaises(md.OnlyOneRouterPermittedIfNatDisabled,
+                              self.driver.update_port_precommit,
+                              port_ctx)
+        else:
+            self.driver.update_port_precommit(port_ctx)
+
+        del self.driver._l3_plugin.get_routers.return_value[0]
+        self.driver.update_port_precommit(port_ctx)
+
+    def test_no_nat_multiple_gw_port_precommit_exception(self):
+        self._test_no_nat_multiple_gw_port_precommit_exception(False)
+
+    def test_no_nat_multiple_pre_gw_port_precommit_exception(self):
+        self._test_no_nat_multiple_gw_port_precommit_exception(True)
+
+    def test_no_nat_pre_gw_port_precommit_l3out_wrong_tenant(self):
         self.external_network_dict[mocked.APIC_NETWORK_NO_NAT + '-name'][
             'preexisting'] = 'True'
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
@@ -1891,7 +1969,6 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         port_ctx = self._get_port_context(mocked.APIC_TENANT,
                                           mocked.APIC_NETWORK_NO_NAT,
                                           'vm1', net_ctx, HOST_ID1, gw=True)
-        raised = False
         mgr = self.driver.apic_manager
         mgr.get_router_contract.return_value = mocked.FakeDbContract(
             mocked.APIC_CONTRACT)
@@ -1900,21 +1977,14 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             'l3out_tenant': 'bar_tenant',
             'vrf_name': 'bar_ctx',
             'vrf_tenant': 'bar_tenant'}
-        try:
-            self.driver.update_port_precommit(port_ctx)
-        except md.WouldRequireNAT:
-            raised = True
-        self.assertTrue(raised)
-
-    def _test_delete_gw_port_multiple_postcommit(self, pre):
-        if pre:
-            ext_net_name = mocked.APIC_NETWORK_PRE
-            ext_epg = self._scoped_name(mocked.APIC_EXT_EPG,
-                                        preexisting=True)
+        if self.driver.per_tenant_context or self.driver.single_tenant_mode:
+            self.assertRaises(md.PreExistingL3OutInIncorrectTenant,
+                              self.driver.update_port_precommit,
+                              port_ctx)
         else:
-            ext_net_name = mocked.APIC_NETWORK
-            ext_epg = mocked.APIC_EXT_EPG
+            self.driver.update_port_precommit(port_ctx)
 
+    def _setup_multiple_routers(self, ext_net_name, net_ctx):
         routers = [{'id': 'r1', 'tenant_id': 't1'},
                    {'id': 'r2', 'tenant_id': 't1'},
                    {'id': 'r3', 'tenant_id': 't2'}]
@@ -1932,16 +2002,6 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.driver._l3_plugin.get_router = get_router
         self.driver._l3_plugin.get_routers = get_routers
 
-        if self.driver.per_tenant_context:
-            shadow_l3out = "Shd-%s" % ext_net_name
-            shadow_ext_epg = "Shd-%s" % ext_epg
-        else:
-            shadow_l3out = "Shd-%s" % ext_net_name
-            shadow_ext_epg = "Shd-%s" % ext_epg
-
-        net_ctx = self._get_network_context(mocked.APIC_TENANT,
-                                            ext_net_name,
-                                            TEST_SEGMENT1, external=True)
         gw_ports = [
             self._get_port_context(mocked.APIC_TENANT,
                                    ext_net_name,
@@ -1957,6 +2017,25 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             gw_ports[i].current['id'] += i
             gw_ports[i]._plugin.get_ports = get_ports
 
+        return gw_ports
+
+    def _test_delete_gw_port_multiple_postcommit(self, pre):
+        if pre:
+            ext_net_name = mocked.APIC_NETWORK_PRE
+            ext_epg = self._scoped_name(mocked.APIC_EXT_EPG,
+                                        preexisting=True)
+        else:
+            ext_net_name = mocked.APIC_NETWORK
+            ext_epg = mocked.APIC_EXT_EPG
+
+        shadow_l3out = "Shd-%s" % ext_net_name
+        shadow_ext_epg = "Shd-%s" % ext_epg
+
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            ext_net_name,
+                                            TEST_SEGMENT1, external=True)
+        gw_ports = self._setup_multiple_routers(ext_net_name, net_ctx)
+
         self.driver._delete_path_if_last = mock.Mock()
         mgr = self.driver.apic_manager
         mgr.get_router_contract.return_value = mocked.FakeDbContract(
@@ -1965,6 +2044,9 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         # Delete first GW port
         self.driver.delete_port_postcommit(gw_ports[0])
         self.assertFalse(mgr.delete_external_routed_network.called)
+        if self.driver.single_tenant_mode and self.driver.per_tenant_context:
+            shadow_l3out = (
+                "Shd-%s" % self._scoped_name(ext_net_name, tenant='t1'))
         exp_calls = [
             mock.call(shadow_l3out,
                       mgr.get_router_contract.return_value,
@@ -1986,7 +2068,11 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         mgr.get_router_contract.return_value = mocked.FakeDbContract(
             mocked.APIC_CONTRACT + 'r2')
         self.driver.delete_port_postcommit(gw_ports[0])
+
         if self.driver.per_tenant_context:
+            if self.driver.single_tenant_mode:
+                shadow_l3out = (
+                    "Shd-%s" % self._scoped_name(ext_net_name, tenant='t1'))
             mgr.delete_external_routed_network.assert_called_once_with(
                 shadow_l3out,
                 owner=self._tenant(ext_nat=True, neutron_tenant='t1'))
@@ -2013,6 +2099,9 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         mgr.get_router_contract.return_value = mocked.FakeDbContract(
             mocked.APIC_CONTRACT + 'r3')
         self.driver.delete_port_postcommit(gw_ports[0])
+        if self.driver.single_tenant_mode and self.driver.per_tenant_context:
+            shadow_l3out = (
+                "Shd-%s" % self._scoped_name(ext_net_name, tenant='t2'))
         mgr.delete_external_routed_network.assert_called_once_with(
             shadow_l3out, owner=self._tenant(ext_nat=True,
                                              neutron_tenant='t2'))
@@ -2022,6 +2111,66 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
 
     def test_delete_pre_gw_port_multiple_postcommit(self):
         self._test_delete_gw_port_multiple_postcommit(pre=True)
+
+    def _test_delete_no_nat_gw_port_multiple_postcommit(self, pre):
+        ext_net_name = mocked.APIC_NETWORK_NO_NAT
+        if pre:
+            self.external_network_dict[mocked.APIC_NETWORK_NO_NAT + '-name'][
+                'preexisting'] = 'True'
+
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            ext_net_name,
+                                            TEST_SEGMENT1, external=True)
+        gw_ports = self._setup_multiple_routers(ext_net_name, net_ctx)
+        mgr = self.driver.apic_manager
+        l3out = net_ctx.current['name'] if pre else ext_net_name
+        if pre:
+            self.driver._query_l3out_info = mock.Mock()
+            self.driver._query_l3out_info.return_value = {
+                'l3out_tenant': self._tenant()}
+
+        # Delete first GW port
+        self.driver.delete_port_postcommit(gw_ports[0])
+        self.assertFalse(mgr.set_context_for_external_routed_network.called)
+        del gw_ports[0]
+
+        # delete second GW port
+        self.driver.delete_port_postcommit(gw_ports[0])
+        if self.driver.single_tenant_mode:
+            l3out = self._scoped_name(
+                net_ctx.current['name'] if pre else ext_net_name,
+                preexisting=pre)
+
+        if self.driver.per_tenant_context:
+            mgr.set_context_for_external_routed_network.assert_called_with(
+                self._tenant(), l3out, None, transaction=mock.ANY)
+        else:
+            self.assertFalse(
+                mgr.set_context_for_external_routed_network.called)
+        del gw_ports[0]
+
+        # delete third GW port
+        mgr.set_context_for_external_routed_network.reset_mock()
+        self.driver.delete_port_postcommit(gw_ports[0])
+        mgr.set_context_for_external_routed_network.assert_called_with(
+            self._tenant(), l3out, None, transaction=mock.ANY)
+
+    def test_delete_no_nat_gw_port_multiple_postcommit(self):
+        self._test_delete_no_nat_gw_port_multiple_postcommit(False)
+
+    def test_delete_no_nat_pre_gw_port_multiple_postcommit(self):
+        self._test_delete_no_nat_gw_port_multiple_postcommit(True)
+
+    def test_no_nat_compute_port_precommit_exception(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK_NO_NAT,
+                                            TEST_SEGMENT1, external=True)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK_NO_NAT,
+                                          'vm1', net_ctx, HOST_ID1)
+        self.assertRaises(md.VMsDisallowedOnExtNetworkIfNatDisabled,
+                          self.driver.create_port_precommit,
+                          port_ctx)
 
     def _get_network_context(self, tenant_id, net_id, seg_id=None,
                              seg_type='vlan', external=False, shared=False):
@@ -2051,7 +2200,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         return FakeSubnetContext(subnet, network)
 
     def _get_port_context(self, tenant_id, net_id, vm_id, network_ctx, host,
-                          gw=False, device_owner='compute',
+                          gw=False, device_owner='compute:nova',
                           router_owner=None):
         port = {'device_id': vm_id,
                 'device_owner': device_owner,
@@ -2211,6 +2360,23 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
                            net['tenant_id'] + '|' + net['id'])
             pg = newp1['port']['binding:vif_details']['dvs_port_group']
             self.assertEqual(pg, expected_pg)
+            port_key = newp1['port']['binding:vif_details'].get('dvs_port_key')
+            self.assertIsNotNone(port_key)
+            self.assertEqual(port_key, BOOKED_PORT_VALUE)
+            self._verify_dvs_notifier('update_postcommit_port_call', p1, 'h1')
+            net_ctx = FakeNetworkContext(net, [mock.Mock()])
+            port_ctx = FakePortContext(newp1['port'], net_ctx)
+            self.driver.delete_port_postcommit(port_ctx)
+            self._verify_dvs_notifier('delete_port_call', p1, 'h1')
+
+
+class ApicML2IntegratedTestCaseDvsSingleTenantMode(
+    ApicML2IntegratedTestCaseDvs):
+
+    def setUp(self, service_plugins=None):
+        self.override_conf('single_tenant_mode', True,
+                           'ml2_cisco_apic')
+        super(ApicML2IntegratedTestCaseDvsSingleTenantMode, self).setUp()
 
 
 class ApicML2IntegratedTestCaseSingleVRF(ApicML2IntegratedTestCase):
@@ -2252,22 +2418,22 @@ class ApicML2IntegratedTestCaseSingleVRF(ApicML2IntegratedTestCase):
                 {'port_id': p1['port']['id']})
 
 
-class ApicML2IntegratedTestCaseNoSingleTenant(ApicML2IntegratedTestCase):
+class ApicML2IntegratedTestCaseSingleTenant(ApicML2IntegratedTestCase):
 
     def setUp(self, service_plugins=None):
-        self.override_conf('single_tenant_mode', False,
+        self.override_conf('single_tenant_mode', True,
                            'ml2_cisco_apic')
-        super(ApicML2IntegratedTestCaseNoSingleTenant, self).setUp(
+        super(ApicML2IntegratedTestCaseSingleTenant, self).setUp(
             service_plugins)
 
 
-class ApicML2IntegratedTestCaseNoSingleTenantSingleContext(
+class ApicML2IntegratedTestCaseSingleTenantSingleContext(
         ApicML2IntegratedTestCaseSingleVRF):
 
     def setUp(self, service_plugins=None):
-        self.override_conf('single_tenant_mode', False,
+        self.override_conf('single_tenant_mode', True,
                            'ml2_cisco_apic')
-        super(ApicML2IntegratedTestCaseNoSingleTenantSingleContext,
+        super(ApicML2IntegratedTestCaseSingleTenantSingleContext,
               self).setUp(service_plugins)
 
 
@@ -2279,21 +2445,21 @@ class TestCiscoApicMechDriverSingleVRF(TestCiscoApicMechDriver):
         super(TestCiscoApicMechDriverSingleVRF, self).setUp()
 
 
-class TestCiscoApicMechDriverMultiTenant(TestCiscoApicMechDriver):
+class TestCiscoApicMechDriverSingleTenant(TestCiscoApicMechDriver):
 
     def setUp(self):
-        self.override_conf('single_tenant_mode', False,
+        self.override_conf('single_tenant_mode', True,
                            'ml2_cisco_apic')
-        super(TestCiscoApicMechDriverMultiTenant, self).setUp()
+        super(TestCiscoApicMechDriverSingleTenant, self).setUp()
 
 
-class TestCiscoApicMechDriverMultiTenantSingleVRF(
+class TestCiscoApicMechDriverSingleTenantSingleVRF(
         TestCiscoApicMechDriverSingleVRF):
 
     def setUp(self):
-        self.override_conf('single_tenant_mode', False,
+        self.override_conf('single_tenant_mode', True,
                            'ml2_cisco_apic')
-        super(TestCiscoApicMechDriverMultiTenantSingleVRF, self).setUp()
+        super(TestCiscoApicMechDriverSingleTenantSingleVRF, self).setUp()
 
 
 class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
