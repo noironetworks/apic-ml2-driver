@@ -1074,6 +1074,45 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.driver.create_port_postcommit(port_ctx)
         mgr.ensure_path_created_for_port.assert_not_called()
 
+    def test_create_port_precommit_empty_tenant(self):
+        self.driver._is_nat_enabled_on_ext_net = mock.Mock(return_value=True)
+        self.driver._l3_plugin.get_router = mock.Mock(
+            return_value={'id': mocked.APIC_ROUTER, 'tenant_id': ''})
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK,
+                                            TEST_SEGMENT1,
+                                            seg_type=ofcst.TYPE_OPFLEX)
+        r_cnst = n_constants.DEVICE_OWNER_ROUTER_GW
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK,
+                                          mocked.APIC_ROUTER,
+                                          net_ctx, HOST_ID1,
+                                          device_owner=r_cnst)
+        self.assertTrue(self.driver._check_segment_for_agent(
+            port_ctx._bound_segment, self.agent))
+        self.driver.create_port_precommit(port_ctx)
+        self.driver._is_nat_enabled_on_ext_net.assert_not_called()
+
+    def test_create_port_postcommit_empty_tenant(self):
+        self.driver._create_shadow_ext_net_for_nat = mock.Mock()
+        self.driver._is_nat_enabled_on_ext_net = mock.Mock(return_value=True)
+        self.driver._l3_plugin.get_router = mock.Mock(
+            return_value={'id': mocked.APIC_ROUTER, 'tenant_id': ''})
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK,
+                                            TEST_SEGMENT1,
+                                            seg_type=ofcst.TYPE_OPFLEX)
+        r_cnst = n_constants.DEVICE_OWNER_ROUTER_GW
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK,
+                                          mocked.APIC_ROUTER,
+                                          net_ctx, HOST_ID1,
+                                          device_owner=r_cnst)
+        self.assertTrue(self.driver._check_segment_for_agent(
+            port_ctx._bound_segment, self.agent))
+        self.driver.create_port_postcommit(port_ctx)
+        self.driver._create_shadow_ext_net_for_nat.assert_not_called()
+
     def test_create_port_postcommit_opflex(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
                                             mocked.APIC_NETWORK,
@@ -1337,6 +1376,22 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
                         self._scoped_name(mocked.APIC_NETWORK) or
                         mocked.APIC_NETWORK),
             owner=self._tenant(ext_nat=True))
+
+    def test_delete_gw_port_postcommit_empty_tenant(self):
+        self.driver._l3_plugin.get_router = mock.Mock(
+            return_value={'id': mocked.APIC_ROUTER, 'tenant_id': ''})
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK,
+                                            TEST_SEGMENT1, external=True)
+        r_cnst = n_constants.DEVICE_OWNER_ROUTER_GW
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK,
+                                          mocked.APIC_ROUTER,
+                                          net_ctx, HOST_ID1, gw=True,
+                                          device_owner=r_cnst)
+        self.driver.delete_port_postcommit(port_ctx)
+        mgr = self.driver.apic_manager
+        mgr.delete_external_routed_network.assert_not_called()
 
     def test_update_no_nat_gw_port_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,

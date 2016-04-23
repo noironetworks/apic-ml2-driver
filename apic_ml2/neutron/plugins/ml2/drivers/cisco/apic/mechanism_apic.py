@@ -725,6 +725,11 @@ class APICMechanismDriver(api.MechanismDriver,
         network_tenant = self._get_network_aci_tenant(network)
         router = self.l3_plugin.get_router(context._plugin_context, router_id)
 
+        # Other L3 plugins (e.g. ASR) create db-only routers, which
+        # are indicated by an empty string tenant. Don't do anything
+        # for these devices
+        if router['tenant_id'] == '':
+            return
         vrf = self._get_tenant_vrf(router['tenant_id'])
         if router_id and router_info:
             external_epg = apic_manager.EXT_EPG
@@ -811,6 +816,12 @@ class APICMechanismDriver(api.MechanismDriver,
             openstack_owner=network['tenant_id'])
         router = self.l3_plugin.get_router(
             context._plugin_context, port.get('device_id'))
+
+        # Other L3 plugins (e.g. ASR) create db-only routers, which
+        # are indicated by an empty string tenant. Don't do anything
+        # for these devices
+        if router['tenant_id'] == '':
+            return
         arouter_id = self.name_mapper.router(
             context, port.get('device_id'),
             openstack_owner=router['tenant_id'])
