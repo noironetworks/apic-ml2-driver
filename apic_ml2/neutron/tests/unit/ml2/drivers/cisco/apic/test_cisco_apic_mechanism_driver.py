@@ -2360,23 +2360,6 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
                            net['tenant_id'] + '|' + net['id'])
             pg = newp1['port']['binding:vif_details']['dvs_port_group']
             self.assertEqual(pg, expected_pg)
-            port_key = newp1['port']['binding:vif_details'].get('dvs_port_key')
-            self.assertIsNotNone(port_key)
-            self.assertEqual(port_key, BOOKED_PORT_VALUE)
-            self._verify_dvs_notifier('update_postcommit_port_call', p1, 'h1')
-            net_ctx = FakeNetworkContext(net, [mock.Mock()])
-            port_ctx = FakePortContext(newp1['port'], net_ctx)
-            self.driver.delete_port_postcommit(port_ctx)
-            self._verify_dvs_notifier('delete_port_call', p1, 'h1')
-
-
-class ApicML2IntegratedTestCaseDvsSingleTenantMode(
-    ApicML2IntegratedTestCaseDvs):
-
-    def setUp(self, service_plugins=None):
-        self.override_conf('single_tenant_mode', True,
-                           'ml2_cisco_apic')
-        super(ApicML2IntegratedTestCaseDvsSingleTenantMode, self).setUp()
 
 
 class ApicML2IntegratedTestCaseSingleVRF(ApicML2IntegratedTestCase):
