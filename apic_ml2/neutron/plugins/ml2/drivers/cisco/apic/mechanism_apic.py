@@ -17,7 +17,10 @@ import copy
 import re
 
 from apicapi import apic_manager
-from keystoneclient.v2_0 import client as keyclient
+from apicapi import apic_mapper
+from keystoneclient import client as keyclient
+from keystoneclient import session as keysession
+from keystoneclient.auth.identity.generic import password as keypassword
 import netaddr
 from neutron.agent.linux import dhcp
 from neutron.agent import securitygroups_rpc
@@ -245,13 +248,25 @@ class APICMechanismDriver(api.MechanismDriver,
         }
         apic_system_id = cfg.CONF.apic_system_id
         keyclient_param = keyclient if client else None
-        keystone_authtoken = cfg.CONF.keystone_authtoken if client else None
+        keystone_authtoken = None
+        session = None
+        if client:
+            keystone_authtoken = cfg.CONF.keystone_authtoken
+            pass_params = apic_mapper.APICNameMapper.get_key_password_params(
+                keystone_authtoken)
+            admin_auth = keypassword.Password(
+                auth_url=pass_params[0],
+                username=pass_params[1], password=pass_params[2],
+                tenant_name=pass_params[3],
+                user_domain_id='Default', project_domain_id='Default')
+            session = keysession.Session(auth=admin_auth)
         if cfg.CONF.ml2_cisco_apic.single_tenant_mode:
             # Force scope names to False
             apic_config.scope_names = False
         APICMechanismDriver.apic_manager = apic_manager.APICManager(
             apic_model.ApicDbModel(), logging, network_config, apic_config,
-            keyclient_param, keystone_authtoken, apic_system_id)
+            keyclient_param, keystone_authtoken, apic_system_id,
+            keysession=session)
         return APICMechanismDriver.apic_manager
 
     @staticmethod
