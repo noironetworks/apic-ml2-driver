@@ -17,9 +17,9 @@ import copy
 
 from apicapi import apic_manager
 from apicapi import apic_mapper
+from keystoneclient.auth.identity.generic import password as keypassword
 from keystoneclient import client as keyclient
 from keystoneclient import session as keysession
-from keystoneclient.auth.identity.generic import password as keypassword
 import netaddr
 from neutron.agent.linux import dhcp
 from neutron.agent import securitygroups_rpc
