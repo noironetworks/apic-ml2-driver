@@ -14,6 +14,7 @@
 #    under the License.
 
 import copy
+import re
 
 from apicapi import apic_manager
 from keystoneclient.v2_0 import client as keyclient
@@ -43,6 +44,7 @@ from opflexagent import rpc as o_rpc
 from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
+from oslo_serialization import jsonutils
 from oslo_utils import importutils
 
 from apic_ml2.neutron.db import l3out_vlan_allocation as l3out_vlan_alloc
@@ -489,7 +491,7 @@ class APICMechanismDriver(api.MechanismDriver,
         owned_addr = self.ha_ip_handler.get_ha_ipaddresses_for_port(port['id'])
 
         ext_info = self.apic_manager.ext_net_dict.get(network['name'])
-        if ext_info and self._is_asr_router_type(ext_info):
+        if ext_info and self._is_edge_nat(ext_info):
             pass
         else:
             self._add_ip_mapping_details(context, port, kwargs['host'],
@@ -1269,14 +1271,115 @@ class APICMechanismDriver(api.MechanismDriver,
     def _get_nat_vrf_for_ext_net(self, l3out_name):
         return "NAT-vrf-%s" % l3out_name
 
-    def _get_shadow_name_for_nat(self, name):
-        return "Shd-%s" % name
+    def _get_shadow_name_for_nat(self, name, is_edge_nat=False):
+        if is_edge_nat:
+            return "Auto-%s" % name
+        else:
+            return "Shd-%s" % name
 
     def _get_ext_allow_all_contract(self, network):
         return "EXT-%s-allow-all" % network['id']
 
     def _get_snat_db_network_name(self, network):
         return acst.HOST_SNAT_NETWORK_PREFIX + network['id']
+
+    # return True if key exists in req_dict
+    def _trim_tDn_from_dict(self, req_dict, key):
+        try:
+            if req_dict.get(key) is not None:
+                del req_dict['tDn']
+                return True
+            else:
+                return False
+        except KeyError:
+            return True
+
+    def _trim_keys_from_dict(self, req_dict, keys, encap, l3p_name):
+        for key in keys:
+            try:
+                del req_dict[key]
+            except KeyError:
+                pass
+
+        # remove the default value parameter and replace encap
+        if (req_dict.get('targetDscp') and
+                req_dict['targetDscp'] == 'unspecified'):
+            del req_dict['targetDscp']
+        if req_dict.get('addr') and req_dict['addr'] == '0.0.0.0':
+            del req_dict['addr']
+        if req_dict.get('encap'):
+            if req_dict['encap'] == 'unknown':
+                del req_dict['encap']
+            elif req_dict['encap'].startswith('vlan-'):
+                req_dict['encap'] = encap
+
+        # this is for l3extRsEctx case that it
+        # doesn't allow tDn being present
+        if self._trim_tDn_from_dict(req_dict, 'tnFvCtxName'):
+            req_dict['tnFvCtxName'] = l3p_name
+        # this is for l3extRsNdIfPol case
+        self._trim_tDn_from_dict(req_dict, 'tnNdIfPolName')
+        # this is for l3extRsDampeningPol/l3extRsInterleakPol case
+        self._trim_tDn_from_dict(req_dict, 'tnRtctrlProfileName')
+        # this is for ospfRsIfPol case
+        self._trim_tDn_from_dict(req_dict, 'tnOspfIfPolName')
+        # this is for l3extRs[I|E]ngressQosDppPol case
+        self._trim_tDn_from_dict(req_dict, 'tnQosDppPolName')
+        # this is for bfdRsIfPol case
+        self._trim_tDn_from_dict(req_dict, 'tnBfdIfPolName')
+        # this is for bgpRsPeerPfxPol case
+        self._trim_tDn_from_dict(req_dict, 'tnBgpPeerPfxPolName')
+        # this is for eigrpRsIfPol case
+        self._trim_tDn_from_dict(req_dict, 'tnEigrpIfPolName')
+
+        for value in req_dict.values():
+            if isinstance(value, dict):
+                self._trim_keys_from_dict(value, keys, encap, l3p_name)
+            elif isinstance(value, list):
+                for element in value:
+                    if isinstance(element, dict):
+                        self._trim_keys_from_dict(element, keys,
+                                                  encap, l3p_name)
+        return req_dict
+
+    def _clone_l3out(self, context, network_tenant, router_tenant, vrf, es,
+                     es_name, encap):
+        pre_es_name = self.name_mapper.pre_existing(context, es['name'])
+        l3out_info = self._query_l3out_info(pre_es_name, network_tenant,
+                                            return_full=True)
+
+        old_tenant = self.apic_manager.apic.fvTenant.rn(
+            l3out_info['l3out_tenant'])
+        new_tenant = self.apic_manager.apic.fvTenant.rn(router_tenant)
+        old_l3_out = self.apic_manager.apic.l3extOut.rn(pre_es_name)
+        new_l3_out = self.apic_manager.apic.l3extOut.rn(es_name)
+
+        request = {}
+        request['children'] = l3out_info['l3out']
+        request['attributes'] = {"rn": new_l3_out}
+
+        # trim the request
+        keys = (['l3extInstP', 'l3extRtBDToOut',
+                 'l3extExtEncapAllocator',
+                 'l3extRsOutToBDPublicSubnetHolder', 'modTs',
+                 'uid', 'lcOwn', 'monPolDn', 'forceResolve',
+                 'rType', 'state', 'stateQual', 'tCl', 'tType',
+                 'type', 'tContextDn', 'tRn', 'tag', 'name',
+                 'configIssues'])
+        request = self._trim_keys_from_dict(request, keys, encap, vrf)
+        final_req = {}
+        final_req['l3extOut'] = request
+        request_json = jsonutils.dumps(final_req)
+        if old_tenant != new_tenant:
+            request_json = re.sub(old_tenant, new_tenant, request_json)
+        request_json = re.sub(old_l3_out, new_l3_out, request_json)
+        request_json = re.sub('{},*', '', request_json)
+
+        self.apic_manager.apic.post_body(
+            self.apic_manager.apic.l3extOut.mo,
+            request_json,
+            router_tenant,
+            es_name)
 
     def _create_shadow_ext_net_for_nat(self, context, l3out_name, ext_epg_name,
                                        router_contract, network, router):
@@ -1294,10 +1397,11 @@ class APICMechanismDriver(api.MechanismDriver,
             shadow_l3out = self.name_mapper.l3_out(context, network['id'])
             router_tenant = vrf_info['aci_tenant']
 
-        shadow_l3out = self._get_shadow_name_for_nat(shadow_l3out)
+        net_info = self.apic_manager.ext_net_dict.get(network['name'])
+        shadow_l3out = self._get_shadow_name_for_nat(
+            shadow_l3out, self._is_edge_nat(net_info))
 
         nat_epg_tenant = self._get_network_aci_tenant(network)
-        net_info = self.apic_manager.ext_net_dict.get(network['name'])
         try:
             with self.apic_manager.apic.transaction(None) as trs:
                 # create shadow L3-out and shadow external-epg
@@ -1305,34 +1409,52 @@ class APICMechanismDriver(api.MechanismDriver,
                 # Note: Only NAT l3Out may exist in a different tenant
                 # (eg. COMMON). NO NAT L3Outs always exists in the original
                 # network tenant
-                self.apic_manager.ensure_external_routed_network_created(
-                    shadow_l3out, owner=router_tenant,
-                    context=vrf_info['aci_name'], transaction=trs)
+
+                # don't need to explicitly create the shadow l3out in this case
+                # because we are going to query APIC then use the pre-existing
+                # l3out as a template then clone it accordingly
+                if (self._is_edge_nat(net_info) and
+                        self._is_pre_existing(net_info)):
+                    pass
+                else:
+                    self.apic_manager.ensure_external_routed_network_created(
+                        shadow_l3out, owner=router_tenant,
+                        context=vrf_info['aci_name'], transaction=trs)
+
+                # if its edge nat then we have to flesh
+                # out this shadow L3 out in APIC
+                if self._is_edge_nat(net_info):
+                    vlan_id = self.l3out_vlan_alloc.reserve_vlan(
+                        network['name'], str(vrf_info['aci_name']),
+                        router_tenant)
+                    encap = 'vlan-' + str(vlan_id)
+                    if not self._is_pre_existing(net_info):
+                        address = net_info['cidr_exposed']
+                        next_hop = net_info['gateway_ip']
+                        switch = net_info['switch']
+                        module, sport = net_info['port'].split('/')
+
+                        (self.apic_manager.
+                            set_domain_for_external_routed_network(
+                                shadow_l3out, owner=router_tenant,
+                                transaction=trs))
+                        self.apic_manager.ensure_logical_node_profile_created(
+                            shadow_l3out, switch, module, sport,
+                            encap, address, transaction=trs,
+                            owner=router_tenant)
+                        self.apic_manager.ensure_static_route_created(
+                            shadow_l3out, switch, next_hop,
+                            owner=router_tenant,
+                            transaction=trs)
+                    else:
+                        self._clone_l3out(context, str(nat_epg_tenant),
+                                          str(router_tenant),
+                                          str(vrf_info['aci_name']), network,
+                                          shadow_l3out, encap)
+
                 self.apic_manager.ensure_external_epg_created(
                     shadow_l3out, external_epg=shadow_ext_epg,
                     owner=router_tenant, transaction=trs)
-
-                # if there is a router_type (like ASR) then we have to flesh
-                # out this shadow L3 out in APIC
-                if self._is_asr_router_type(net_info):
-                    address = net_info['cidr_exposed']
-                    next_hop = net_info['gateway_ip']
-                    vlan_id = self.l3out_vlan_alloc.reserve_vlan(
-                        network['name'], vrf_info['aci_name'],
-                        vrf_info['aci_tenant'])
-                    switch = net_info['switch']
-                    module, sport = net_info['port'].split('/')
-
-                    self.apic_manager.set_domain_for_external_routed_network(
-                        shadow_l3out, owner=router_tenant, transaction=trs)
-                    self.apic_manager.ensure_logical_node_profile_created(
-                        shadow_l3out, switch, module, sport,
-                        'vlan-' + str(vlan_id), address, transaction=trs,
-                        owner=router_tenant)
-                    self.apic_manager.ensure_static_route_created(
-                        shadow_l3out, switch, next_hop,
-                        owner=router_tenant,
-                        transaction=trs)
 
                 # make them use router-contract
                 self.apic_manager.ensure_external_epg_consumed_contract(
@@ -1345,10 +1467,7 @@ class APICMechanismDriver(api.MechanismDriver,
                     owner=router_tenant, transaction=trs)
 
                 # link up shadow external-EPG to NAT EPG
-
-                # ASR is the only router we support now so any other values
-                # we treat it as none
-                if not self._is_asr_router_type(net_info):
+                if not self._is_edge_nat(net_info):
                     self.apic_manager.associate_external_epg_to_nat_epg(
                         router_tenant, shadow_l3out, shadow_ext_epg,
                         nat_epg_name, target_owner=nat_epg_tenant,
@@ -1387,7 +1506,8 @@ class APICMechanismDriver(api.MechanismDriver,
         remove_contracts_only = (
             not self._is_last_gw_port(context, port, router))
 
-        shadow_l3out = self._get_shadow_name_for_nat(shadow_l3out)
+        shadow_l3out = self._get_shadow_name_for_nat(
+            shadow_l3out, self._is_edge_nat(ext_info))
 
         if remove_contracts_only:
             external_epg = apic_manager.EXT_EPG
@@ -1409,9 +1529,9 @@ class APICMechanismDriver(api.MechanismDriver,
             # delete shadow L3-out and shadow external-EPG
             self.apic_manager.delete_external_routed_network(
                 shadow_l3out, owner=router_tenant)
-            # if there is a router_type (like ASR) then we have to release
+            # if its edge nat then we have to release
             # the vlan associated with this shadow L3out
-            if self._is_asr_router_type(ext_info):
+            if self._is_edge_nat(ext_info):
                 self.l3out_vlan_alloc.release_vlan(
                     network['name'], vrf_info['aci_name'],
                     vrf_info['aci_tenant'])
@@ -1824,7 +1944,7 @@ class APICMechanismDriver(api.MechanismDriver,
         self._delete_snat_ip_allocation_network(
             context._plugin_context, network)
 
-    def _query_l3out_info(self, l3out_name, tenant_id):
+    def _query_l3out_info(self, l3out_name, tenant_id, return_full=False):
         info = {'l3out_tenant': tenant_id}
         l3out_children = self.apic_manager.apic.l3extOut.get_subtree(
             info['l3out_tenant'], l3out_name)
@@ -1844,15 +1964,17 @@ class APICMechanismDriver(api.MechanismDriver,
                     info['vrf_tenant'] = ctx_dn[1][3:]
                 if ctx_dn[2].startswith('ctx-'):
                     info['vrf_name'] = ctx_dn[2][4:]
+        if return_full:
+            info['l3out'] = l3out_children
         return info
 
     def _is_pre_existing(self, ext_info):
         opt = ext_info.get('preexisting', 'false')
         return opt.lower() in ['true', 'yes', '1']
 
-    def _is_asr_router_type(self, ext_info):
-        router_type = ext_info.get('router_type', 'none')
-        return router_type.lower() == 'asr'
+    def _is_edge_nat(self, ext_info):
+        opt = ext_info.get('edge_nat', 'false')
+        return opt.lower() in ['true', 'yes', '1']
 
     def _is_last_gw_port(self, context, gw_port, router):
         gw_port_filter = {

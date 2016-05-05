@@ -16,6 +16,7 @@
 import base64
 import hashlib
 import hmac
+import re
 import sys
 import tempfile
 
@@ -1053,11 +1054,21 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
 
         def get_resource(context, resource_id):
             return {'id': resource_id, 'tenant_id': mocked.APIC_TENANT}
-
         self.driver._l3_plugin.get_router = get_resource
-
         self.driver._l3_plugin.get_routers = mock.Mock(return_value=[
             {'id': mocked.APIC_ROUTER, 'tenant_id': mocked.APIC_TENANT}])
+
+        self.trimmed_l3out = u'{"l3extOut": {"attributes": {"rn": "Auto-Sub\
+"}, "children": [    {"l3extRsNdIfPol": {"tnNdIfPolName": ""}}, \
+{"l3extRsDampeningPol": {"tnRtctrlProfileName": ""}}, {"ospfRsIfPol": \
+{"tnOspfIfPolName": ""}}, {"l3extRsEngressQosDppPol": {"tnQosDppPolName": ""}}\
+, {"bfdRsIfPol": {"tnBfdIfPolName": ""}}, {"bgpRsPeerPfxPol": \
+{"tnBgpPeerPfxPolName": ""}}, {"eigrpRsIfPol": {"tnEigrpIfPolName": ""}}, \
+{"l3extLNodeP": {"attributes": {"dn": "uni/tn-Sub/out-Auto-Sub/\
+lnodep-Leaf3-4_NP"}, "children": [{"l3extLIfP": {"children": [{"\
+l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
+"vlan-999"}}}]}}]}}, {"l3extRsEctx": {"attributes": {"dn": "uni/tn-Sub\
+/out-Auto-Sub/rsectx", "tnFvCtxName": "ctx-Sub"}}}]}}'
 
     def _check_call_list(self, expected, observed):
         exp_bkp = expected[:]
@@ -1271,12 +1282,13 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
     def test_update_cross_tenant_gw_port_postcommit(self):
         self._test_update_gw_port_postcommit('admin_tenant')
 
-    def test_update_asr_gw_port_postcommit(self):
-        net_ctx = self._get_network_context(mocked.APIC_TENANT,
-                                            mocked.APIC_NETWORK_ASR,
+    def _test_update_edge_nat_gw_port_postcommit(
+        self, net_tenant=mocked.APIC_TENANT):
+        net_ctx = self._get_network_context(net_tenant,
+                                            mocked.APIC_NETWORK_EDGE_NAT,
                                             TEST_SEGMENT1, external=True)
         port_ctx = self._get_port_context(mocked.APIC_TENANT,
-                                          mocked.APIC_NETWORK_ASR,
+                                          mocked.APIC_NETWORK_EDGE_NAT,
                                           'vm1', net_ctx, HOST_ID1, gw=True)
         mgr = self.driver.apic_manager
         mgr.get_router_contract.return_value = mocked.FakeDbContract(
@@ -1287,11 +1299,12 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             self._scoped_name(port_ctx.current['device_id']),
             owner=self._router_tenant())
 
-        shd_l3out = (self.driver.per_tenant_context and
-                     self._scoped_name(mocked.APIC_NETWORK_ASR) or
-                     mocked.APIC_NETWORK_ASR)
+        l3out_name = (self.driver.per_tenant_context and
+                      self._scoped_name(mocked.APIC_NETWORK_EDGE_NAT) or
+                      mocked.APIC_NETWORK_EDGE_NAT)
+        l3out_name = "Auto-%s" % l3out_name
         expected_calls = [
-            mock.call("Shd-%s" % shd_l3out,
+            mock.call(l3out_name,
                       owner=self._tenant(ext_nat=True), transaction=mock.ANY,
                       context=self._network_vrf_name())]
         self._check_call_list(
@@ -1299,21 +1312,22 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             mgr.ensure_external_routed_network_created.call_args_list)
 
         expected_calls = [
-            mock.call("Shd-%s" % shd_l3out,
+            mock.call(l3out_name,
                       external_epg="Shd-%s" % mocked.APIC_EXT_EPG,
                       owner=self._tenant(ext_nat=True), transaction=mock.ANY)]
-
         self._check_call_list(
             expected_calls, mgr.ensure_external_epg_created.call_args_list)
 
-        self.assertTrue(self.driver.l3out_vlan_alloc.reserve_vlan.called)
+        self.driver.l3out_vlan_alloc.reserve_vlan.assert_called_once_with(
+            mocked.APIC_NETWORK_EDGE_NAT + '-name', self._network_vrf_name(),
+            self._tenant(ext_nat=True))
         self.assertTrue(mgr.set_domain_for_external_routed_network.called)
         self.assertTrue(mgr.ensure_logical_node_profile_created.called)
         self.assertTrue(mgr.ensure_static_route_created.called)
 
         expected_calls = [
             mock.call(
-                "Shd-%s" % shd_l3out,
+                l3out_name,
                 mgr.get_router_contract.return_value,
                 external_epg="Shd-%s" % mocked.APIC_EXT_EPG,
                 owner=self._tenant(ext_nat=True), transaction=mock.ANY)]
@@ -1323,13 +1337,158 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
 
         expected_calls = [
             mock.call(
-                "Shd-%s" % shd_l3out,
+                l3out_name,
                 mgr.get_router_contract.return_value,
                 external_epg="Shd-%s" % mocked.APIC_EXT_EPG,
                 owner=self._tenant(ext_nat=True), transaction=mock.ANY)]
         self._check_call_list(
             expected_calls,
             mgr.ensure_external_epg_provided_contract.call_args_list)
+
+    def test_update_edge_nat_gw_port_postcommit(self):
+        self._test_update_edge_nat_gw_port_postcommit()
+
+    def test_update_cross_tenant_edge_nat_gw_port_postcommit(self):
+        self._test_update_edge_nat_gw_port_postcommit('admin_tenant')
+
+    def _test_update_pre_edge_nat_gw_port_postcommit(
+        self, net_tenant=mocked.APIC_TENANT):
+        net_ctx = self._get_network_context(net_tenant,
+                                            mocked.APIC_NETWORK_PRE_EDGE_NAT,
+                                            TEST_SEGMENT1, external=True)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK_PRE_EDGE_NAT,
+                                          'vm1', net_ctx, HOST_ID1, gw=True)
+        mgr = self.driver.apic_manager
+        mgr.get_router_contract.return_value = mocked.FakeDbContract(
+            mocked.APIC_CONTRACT)
+        self.driver.l3out_vlan_alloc.reserve_vlan = mock.Mock()
+        self.driver._query_l3out_info = mock.Mock()
+        self.driver._query_l3out_info.return_value = {
+            'l3out_tenant': 'bar_tenant',
+            'vrf_name': 'bar_ctx',
+            'vrf_tenant': 'bar_tenant',
+
+            # fake l3out response from APIC for testing purpose only
+            'l3out': ([{u'l3extExtEncapAllocator': {}},
+                       {u'l3extInstP': {}},
+                       {u'l3extRtBDToOut': {}},
+                       {u'l3extRsOutToBDPublicSubnetHolder': {}},
+                       {u'l3extRsNdIfPol': {u'tDn': u'',
+                                            u'tnNdIfPolName': u''}},
+                       {u'l3extRsDampeningPol':
+                           {u'tDn': u'', u'tnRtctrlProfileName': u''}},
+                       {u'ospfRsIfPol': {u'tDn': u'',
+                                         u'tnOspfIfPolName': u''}},
+                       {u'l3extRsEngressQosDppPol':
+                           {u'tDn': u'', u'tnQosDppPolName': u''}},
+                       {u'bfdRsIfPol': {u'tDn': u'',
+                                        u'tnBfdIfPolName': u''}},
+                       {u'bgpRsPeerPfxPol': {u'tDn': u'',
+                                             u'tnBgpPeerPfxPolName': u''}},
+                       {u'eigrpRsIfPol': {u'tDn': u'',
+                                          u'tnEigrpIfPolName': u''}},
+                       {u'l3extLNodeP': {u'attributes':
+                                         {u'dn': u'uni/tn-bar_tenant/out-netwo\
+rk_pre_edge_nat-name/lnodep-Leaf3-4_NP',
+                                          u'lcOwn': u'local',
+                                          u'name': u'Leaf3-4_NP',
+                                          u'targetDscp': u'unspecified',
+                                          u'configIssues': u'',
+                                          u'stateQual': u'', u'tCl': u'',
+                                          u'tContextDn': u'', u'tRn': u'',
+                                          u'type': u'', u'rType': u'',
+                                          u'state': u'', u'forceResolve': u'',
+                                          u'tag': u'yellow-green',
+                                          u'monPolDn': u'', u'modTs': u'',
+                                          u'uid': u'15374',
+                                          u'encap': u'unknown',
+                                          u'addr': u'0.0.0.0'},
+                                         u'children': [{u'l3extLIfP':
+                                                        {u'children':
+                                                         [{u'l3extRsPathL3OutA\
+tt':
+                                                           {u'attributes':
+                                                            {u'encap':
+                                                             u'vlan-3101',
+                                                             u'ifInstT':
+                                                             u'sub-interface'
+                                                             }}}]}}
+                                                       ]}},
+                       {u'l3extRsEctx':
+                        {u'attributes':
+                         {u'dn':
+                          u'uni/tn-bar_tenant/out-network_pre_edge_nat-name\
+/rsectx',
+                          u'tDn': u'', u'tnFvCtxName': u'default'}}}])}
+
+        def echo1(string):
+            return string
+        self.driver.apic_manager.apic.fvTenant.rn = echo1
+        self.driver.apic_manager.apic.l3extOut.rn = echo1
+        self.driver.l3out_vlan_alloc.reserve_vlan.return_value = 999
+
+        self.driver.update_port_postcommit(port_ctx)
+        mgr.get_router_contract.assert_called_once_with(
+            self._scoped_name(port_ctx.current['device_id']),
+            owner=self._router_tenant())
+
+        self.driver.l3out_vlan_alloc.reserve_vlan.assert_called_once_with(
+            mocked.APIC_NETWORK_PRE_EDGE_NAT + '-name',
+            self._network_vrf_name(), self._tenant(ext_nat=True))
+        self.assertFalse(mgr.mgr.ensure_external_routed_network_created.called)
+        self.assertFalse(mgr.set_domain_for_external_routed_network.called)
+        self.assertFalse(mgr.ensure_logical_node_profile_created.called)
+        self.assertFalse(mgr.ensure_static_route_created.called)
+
+        l3out_name = (self.driver.per_tenant_context and
+                      self._scoped_name(mocked.APIC_NETWORK_PRE_EDGE_NAT) or
+                      mocked.APIC_NETWORK_PRE_EDGE_NAT)
+        l3out_name = "Auto-%s" % l3out_name
+
+        final_req = re.sub('Auto-Sub',
+                           l3out_name, self.trimmed_l3out)
+        final_req = re.sub('tn-Sub',
+                           "tn-%s" % self._tenant(ext_nat=True), final_req)
+        final_req = re.sub('ctx-Sub',
+                           "%s" % self._network_vrf_name(), final_req)
+        mgr.apic.post_body.assert_called_once_with(
+            mgr.apic.l3extOut.mo, final_req, self._tenant(ext_nat=True),
+            l3out_name)
+
+        mgr.ensure_external_epg_created.assert_called_once_with(
+            l3out_name,
+            external_epg="Shd-%s" % self._scoped_name(mocked.APIC_EXT_EPG,
+                                                      preexisting=True),
+            owner=self._tenant(ext_nat=True), transaction=mock.ANY)
+
+        expected_calls = [
+            mock.call(
+                l3out_name,
+                mgr.get_router_contract.return_value,
+                external_epg="Shd-%s" % self._scoped_name(mocked.APIC_EXT_EPG,
+                                                          preexisting=True),
+                owner=self._tenant(ext_nat=True), transaction=mock.ANY)]
+        self._check_call_list(
+            expected_calls,
+            mgr.ensure_external_epg_consumed_contract.call_args_list)
+
+        expected_calls = [
+            mock.call(
+                l3out_name,
+                mgr.get_router_contract.return_value,
+                external_epg="Shd-%s" % self._scoped_name(mocked.APIC_EXT_EPG,
+                                                          preexisting=True),
+                owner=self._tenant(ext_nat=True), transaction=mock.ANY)]
+        self._check_call_list(
+            expected_calls,
+            mgr.ensure_external_epg_provided_contract.call_args_list)
+
+    def test_update_pre_edge_nat_gw_port_postcommit(self):
+        self._test_update_pre_edge_nat_gw_port_postcommit()
+
+    def test_update_cross_tenant_pre_edge_nat_gw_port_postcommit(self):
+        self._test_update_pre_edge_nat_gw_port_postcommit('admin_tenant')
 
     def _test_update_pre_gw_port_postcommit(self,
                                             net_tenant=mocked.APIC_TENANT):
@@ -1497,23 +1656,45 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         mgr = self.driver.apic_manager
         mgr.delete_external_routed_network.assert_not_called()
 
-    def test_delete_asr_gw_port_postcommit(self):
+    def test_delete_edge_nat_gw_port_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
-                                            mocked.APIC_NETWORK_ASR,
+                                            mocked.APIC_NETWORK_EDGE_NAT,
                                             TEST_SEGMENT1, external=True)
         port_ctx = self._get_port_context(mocked.APIC_TENANT,
-                                          mocked.APIC_NETWORK_ASR,
+                                          mocked.APIC_NETWORK_EDGE_NAT,
                                           'vm1', net_ctx, HOST_ID1, gw=True)
         self.driver._delete_path_if_last = mock.Mock()
         self.driver.l3out_vlan_alloc.release_vlan = mock.Mock()
         self.driver.delete_port_postcommit(port_ctx)
         mgr = self.driver.apic_manager
         mgr.delete_external_routed_network.assert_called_once_with(
-            "Shd-%s" % (self.driver.per_tenant_context and
-                        self._scoped_name(mocked.APIC_NETWORK_ASR) or
-                        mocked.APIC_NETWORK_ASR),
+            "Auto-%s" % (self.driver.per_tenant_context and
+                         self._scoped_name(mocked.APIC_NETWORK_EDGE_NAT) or
+                         mocked.APIC_NETWORK_EDGE_NAT),
             owner=self._tenant(ext_nat=True))
-        self.assertTrue(self.driver.l3out_vlan_alloc.release_vlan.called)
+        self.driver.l3out_vlan_alloc.release_vlan.assert_called_once_with(
+            mocked.APIC_NETWORK_EDGE_NAT + '-name', self._network_vrf_name(),
+            self._tenant(ext_nat=True))
+
+    def test_delete_pre_edge_nat_gw_port_postcommit(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK_PRE_EDGE_NAT,
+                                            TEST_SEGMENT1, external=True)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK_PRE_EDGE_NAT,
+                                          'vm1', net_ctx, HOST_ID1, gw=True)
+        self.driver._delete_path_if_last = mock.Mock()
+        self.driver.l3out_vlan_alloc.release_vlan = mock.Mock()
+        self.driver.delete_port_postcommit(port_ctx)
+        mgr = self.driver.apic_manager
+        mgr.delete_external_routed_network.assert_called_once_with(
+            "Auto-%s" % (self.driver.per_tenant_context and
+                         self._scoped_name(mocked.APIC_NETWORK_PRE_EDGE_NAT) or
+                         mocked.APIC_NETWORK_PRE_EDGE_NAT),
+            owner=self._tenant(ext_nat=True))
+        self.driver.l3out_vlan_alloc.release_vlan.assert_called_once_with(
+            mocked.APIC_NETWORK_PRE_EDGE_NAT + '-name',
+            self._network_vrf_name(), self._tenant(ext_nat=True))
 
     def test_update_no_nat_gw_port_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
