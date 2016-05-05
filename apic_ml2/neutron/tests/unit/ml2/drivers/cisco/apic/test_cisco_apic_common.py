@@ -100,6 +100,24 @@ SERVICE_PEER_PORT_DESC = ('topology/pod-1/paths-%s/pathep-[%s]' %
 
 HOST_POOL_CIDR = "192.168.0.1/24"
 
+opts = [
+    cfg.StrOpt('auth_uri',
+               default='http://127.0.0.1:5000/v2.0/',
+               help='Complete public Identity API endpoint'),
+    cfg.StrOpt('admin_user',
+               default='user',
+               help='Keystone account username'),
+    cfg.StrOpt('admin_password',
+               default='passw',
+               help='Keystone account password'),
+    cfg.StrOpt('admin_tenant_name',
+               default='admin',
+               help='Keystone service account tenant name to validate'
+               ' user tokens')
+]
+
+cfg.CONF.register_opts(opts, group='keystone_authtoken')
+
 
 class ControllerMixin(object):
 
@@ -214,7 +232,7 @@ class ConfigMixin(object):
         cfg.CONF.set_override('apic_system_id', APIC_SYSTEM_ID)
 
         # Configure option keystone_authtoken
-        cfg.CONF.keystone_authtoken = KEYSTONE_TOKEN
+        # cfg.CONF.keystone_authtoken = KEYSTONE_TOKEN
 
         # Configure the ML2 mechanism drivers and network types
         if ml2_opts is None:
