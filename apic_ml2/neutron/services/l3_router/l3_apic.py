@@ -106,14 +106,20 @@ class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
         result = super(ApicL3ServicePlugin, self).add_router_interface(
             context, router_id, interface_info)
         try:
-            self._apic_driver.add_router_interface_postcommit(
-                context, router_id, interface_info)
+            self.add_router_interface_postcommit(context, router_id,
+                                                 interface_info)
         except Exception:
             with excutils.save_and_reraise_exception():
                 # Rollback db operation
                 super(ApicL3ServicePlugin, self).remove_router_interface(
                     context, router_id, interface_info)
         return result
+
+    # Keep synchronizer happy
+    def add_router_interface_postcommit(self, context, router_id,
+                                        interface_info):
+        self._apic_driver.add_router_interface_postcommit(
+            context, router_id, interface_info)
 
     def remove_router_interface(self, context, router_id, interface_info):
         self._apic_driver.remove_router_interface_precommit(context, router_id,
