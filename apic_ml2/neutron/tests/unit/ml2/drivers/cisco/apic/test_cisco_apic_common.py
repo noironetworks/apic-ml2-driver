@@ -17,6 +17,7 @@ import contextlib
 import mock
 import requests
 
+from keystonemiddleware import auth_token  # noqa
 from neutron import context
 from neutron.plugins.ml2 import config  # noqa
 from neutron.tests import base
@@ -100,23 +101,12 @@ SERVICE_PEER_PORT_DESC = ('topology/pod-1/paths-%s/pathep-[%s]' %
 
 HOST_POOL_CIDR = "192.168.0.1/24"
 
-opts = [
-    cfg.StrOpt('auth_uri',
-               default='http://127.0.0.1:5000/v2.0/',
-               help='Complete public Identity API endpoint'),
-    cfg.StrOpt('admin_user',
-               default='user',
-               help='Keystone account username'),
-    cfg.StrOpt('admin_password',
-               default='passw',
-               help='Keystone account password'),
-    cfg.StrOpt('admin_tenant_name',
-               default='admin',
-               help='Keystone service account tenant name to validate'
-               ' user tokens')
-]
-
-cfg.CONF.register_opts(opts, group='keystone_authtoken')
+cfg.CONF.set_override('auth_uri', 'http://127.0.0.1:5000/v2.0/',
+                      group='keystone_authtoken')
+cfg.CONF.set_override('admin_user', 'user', group='keystone_authtoken')
+cfg.CONF.set_override('admin_password', 'passw', group='keystone_authtoken')
+cfg.CONF.set_override('admin_tenant_name', 'admin',
+                      group='keystone_authtoken')
 
 
 class ControllerMixin(object):
