@@ -101,13 +101,6 @@ SERVICE_PEER_PORT_DESC = ('topology/pod-1/paths-%s/pathep-[%s]' %
 
 HOST_POOL_CIDR = "192.168.0.1/24"
 
-cfg.CONF.set_override('auth_uri', 'http://127.0.0.1:5000/v2.0/',
-                      group='keystone_authtoken')
-cfg.CONF.set_override('admin_user', 'user', group='keystone_authtoken')
-cfg.CONF.set_override('admin_password', 'passw', group='keystone_authtoken')
-cfg.CONF.set_override('admin_tenant_name', 'admin',
-                      group='keystone_authtoken')
-
 
 class ControllerMixin(object):
 
@@ -317,6 +310,15 @@ class ConfigMixin(object):
                 'vlan_range': '1600:1610'
             },
         }
+        cfg.CONF.import_group('keystone_authtoken',
+                              'keystonemiddleware.auth_token')
+        cfg.CONF.set_override('auth_uri', 'http://127.0.0.1:5000/v2.0/',
+                              group='keystone_authtoken')
+        cfg.CONF.set_override('admin_user', 'user', group='keystone_authtoken')
+        cfg.CONF.set_override('admin_password', 'passw',
+                              group='keystone_authtoken')
+        cfg.CONF.set_override('admin_tenant_name', 'admin',
+                              group='keystone_authtoken')
 
     def override_conf(self, opt, val, group):
         cfg.CONF.set_override(opt, val, group)
