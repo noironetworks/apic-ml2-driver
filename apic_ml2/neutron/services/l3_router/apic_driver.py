@@ -59,7 +59,7 @@ class ApicL3Driver(apic_driver_api.ApicL3DriverBase):
         return self._aci_mech_driver
 
     def _map_names(self, context, tenant_id, router, network, subnet):
-        context._plugin = self
+        context._plugin = self._plugin
         with apic_mapper.mapper_context(context) as ctx:
             atenant_id = tenant_id and self.name_mapper.tenant(ctx, tenant_id)
             arouter_id = router and router['id'] and self.name_mapper.router(
@@ -156,7 +156,7 @@ class ApicL3Driver(apic_driver_api.ApicL3DriverBase):
 
     # TODO(tbachman): move to postcommit?
     def delete_router_precommit(self, context, router_id):
-        context._plugin = self
+        context._plugin = self._plugin
         router = self._plugin.get_router(context, router_id)
         with apic_mapper.mapper_context(context) as ctx:
             arouter_id = router_id and self.name_mapper.router(
@@ -164,7 +164,7 @@ class ApicL3Driver(apic_driver_api.ApicL3DriverBase):
         self.manager.delete_router(arouter_id)
 
     def update_router_postcommit(self, context, router):
-        context._plugin = self
+        context._plugin = self._plugin
         with apic_mapper.mapper_context(context) as ctx:
             arouter_id = router['id'] and self.name_mapper.router(
                 ctx, router['id'], openstack_owner=router['tenant_id'])
