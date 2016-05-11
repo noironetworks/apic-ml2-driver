@@ -115,6 +115,32 @@ class VMsDisallowedOnExtNetworkIfNatDisabled(n_exc.BadRequest):
                 "because NAT is disabled")
 
 
+class EdgeNatVlanRangeNotFound(n_exc.BadRequest):
+    message = _("No vlan range is specified for L3Out %(l3out)s "
+                "when edge_nat is enabled.")
+
+
+class EdgeNatBadVlanRange(n_exc.BadRequest):
+    message = _("Bad vlan range is specified for L3Out %(l3out)s "
+                "when edge_nat is enabled.")
+
+
+class EdgeNatWrongL3OutIFType(n_exc.BadRequest):
+    message = _("L3Out %(l3out)s can only support routed "
+                "sub-interfaces in the interface profiles when edge_nat"
+                "is enabled.")
+
+
+class EdgeNatWrongL3OutAuthTypeForBGP(n_exc.BadRequest):
+    message = _("L3Out %(l3out)s can only support no authentication "
+                "for BGP interface profile when edge_nat is enabled.")
+
+
+class EdgeNatWrongL3OutAuthTypeForOSPF(n_exc.BadRequest):
+    message = _("L3Out %(l3out)s can only support no authentication "
+                "for OSPF interface profile when edge_nat is enabled.")
+
+
 class NameMapper(object):
     scope_with_tenant_name = set([
         'network',
@@ -870,30 +896,59 @@ class APICMechanismDriver(api.MechanismDriver,
             if routers:
                 raise OnlyOneRouterPermittedIfNatDisabled(net=network['name'])
 
-        # A NAT-disabled, pre-existing L3-out is directly connected to the
-        # OS tenant's VRF. So the OS tenant's VRF must be visible to the L3-out
-        # in ACI, i.e. the tenant's VRF must be in 'common' in ACI, or the
-        # L3-out and the tenant's VRF must in the same ACI tenant.
-        if nat_disabled and self._is_pre_existing(ext_info):
-            vrf_info = self._get_tenant_vrf(router['tenant_id'])
-            vrf_aci_tenant = str(vrf_info['aci_tenant'])
+        is_edge_nat = self._is_edge_nat(ext_info)
+        if is_edge_nat:
+            vlan_range = ext_info.get('vlan_range')
+            if not vlan_range:
+                raise EdgeNatVlanRangeNotFound(l3out=network['name'])
+            elif not self.l3out_vlan_alloc.l3out_vlan_ranges.get(
+                network['name']):
+                raise EdgeNatBadVlanRange(l3out=network['name'])
 
+        if self._is_pre_existing(ext_info):
             l3out_name_pre = self.name_mapper.pre_existing(
                 context, network['name'])
             ext_net_tenant = self._get_network_aci_tenant(network)
-            l3out_info = self._query_l3out_info(l3out_name_pre, ext_net_tenant)
+            l3out_info = self._query_l3out_info(l3out_name_pre, ext_net_tenant,
+                                                return_full=is_edge_nat)
             if not l3out_info:
                 raise PreExistingL3OutNotFound(l3out=l3out_name_pre)
-            l3out_tenant = str(l3out_info['l3out_tenant'])
-            if (vrf_aci_tenant != str(apic_manager.TENANT_COMMON) and
-                    vrf_aci_tenant != l3out_tenant):
-                ac = self.apic_manager.apic
-                raise PreExistingL3OutInIncorrectTenant(
-                    l3out_name=l3out_name_pre,
-                    l3out_tenant=ac.fvTenant.name(l3out_info['l3out_tenant']),
-                    vrf_name=ac.fvCtx.name(vrf_info['aci_name']),
-                    vrf_tenant=ac.fvTenant.name(vrf_info['aci_tenant']),
-                    tenant_id=router['tenant_id'])
+
+            # A NAT-disabled, pre-existing L3-out is directly connected to the
+            # OS tenant's VRF. So the OS tenant's VRF must be visible to the
+            # L3-out in ACI, i.e. the tenant's VRF must be in 'common' in ACI,
+            # or the L3-out and the tenant's VRF must in the same ACI tenant.
+            if nat_disabled:
+                vrf_info = self._get_tenant_vrf(router['tenant_id'])
+                vrf_aci_tenant = str(vrf_info['aci_tenant'])
+                l3out_tenant = str(l3out_info['l3out_tenant'])
+                if (vrf_aci_tenant != str(apic_manager.TENANT_COMMON) and
+                        vrf_aci_tenant != l3out_tenant):
+                    ac = self.apic_manager.apic
+                    raise PreExistingL3OutInIncorrectTenant(
+                        l3out_name=l3out_name_pre,
+                        l3out_tenant=ac.fvTenant.name(
+                            l3out_info['l3out_tenant']),
+                        vrf_name=ac.fvCtx.name(vrf_info['aci_name']),
+                        vrf_tenant=ac.fvTenant.name(vrf_info['aci_tenant']),
+                        tenant_id=router['tenant_id'])
+            elif is_edge_nat:
+                l3out_str = str(l3out_info['l3out'])
+                for match in re.finditer("u'ifInstT': u'([^']+)'",
+                                         l3out_str):
+                    if match.group(1) != 'sub-interface':
+                        raise EdgeNatWrongL3OutIFType(l3out=network['name'])
+                for match in re.finditer("u'authType': u'([^']+)'",
+                                         l3out_str):
+                    if match.group(1) != 'none':
+                        raise EdgeNatWrongL3OutAuthTypeForOSPF(
+                            l3out=network['name'])
+                for match in re.finditer(
+                    "u'bfdIfP': {u'attributes': {((?!u'attributes': {).)*u"
+                        "'type': u'([^']+)'", l3out_str):
+                    if match.group(2) != 'none':
+                        raise EdgeNatWrongL3OutAuthTypeForBGP(
+                            l3out=network['name'])
 
     def _perform_port_operations(self, context):
         # Get port
@@ -1385,7 +1440,11 @@ class APICMechanismDriver(api.MechanismDriver,
                                        router_contract, network, router):
         vrf_info = self._get_tenant_vrf(router['tenant_id'])
         nat_epg_name = self._get_ext_epg_for_ext_net(l3out_name)
-        shadow_ext_epg = self._get_shadow_name_for_nat(ext_epg_name)
+
+        net_info = self.apic_manager.ext_net_dict.get(network['name'])
+        is_edge_nat = self._is_edge_nat(net_info)
+        shadow_ext_epg = self._get_shadow_name_for_nat(ext_epg_name,
+                                                       is_edge_nat)
         if self.per_tenant_context:
             shadow_l3out = self.name_mapper.l3_out(
                 context, network['id'],
@@ -1397,10 +1456,8 @@ class APICMechanismDriver(api.MechanismDriver,
             shadow_l3out = self.name_mapper.l3_out(context, network['id'])
             router_tenant = vrf_info['aci_tenant']
 
-        net_info = self.apic_manager.ext_net_dict.get(network['name'])
         shadow_l3out = self._get_shadow_name_for_nat(
-            shadow_l3out, self._is_edge_nat(net_info))
-
+            shadow_l3out, is_edge_nat)
         nat_epg_tenant = self._get_network_aci_tenant(network)
         try:
             with self.apic_manager.apic.transaction(None) as trs:
@@ -1413,8 +1470,7 @@ class APICMechanismDriver(api.MechanismDriver,
                 # don't need to explicitly create the shadow l3out in this case
                 # because we are going to query APIC then use the pre-existing
                 # l3out as a template then clone it accordingly
-                if (self._is_edge_nat(net_info) and
-                        self._is_pre_existing(net_info)):
+                if is_edge_nat and self._is_pre_existing(net_info):
                     pass
                 else:
                     self.apic_manager.ensure_external_routed_network_created(
@@ -1423,7 +1479,7 @@ class APICMechanismDriver(api.MechanismDriver,
 
                 # if its edge nat then we have to flesh
                 # out this shadow L3 out in APIC
-                if self._is_edge_nat(net_info):
+                if is_edge_nat:
                     vlan_id = self.l3out_vlan_alloc.reserve_vlan(
                         network['name'], str(vrf_info['aci_name']),
                         router_tenant)
@@ -1467,7 +1523,7 @@ class APICMechanismDriver(api.MechanismDriver,
                     owner=router_tenant, transaction=trs)
 
                 # link up shadow external-EPG to NAT EPG
-                if not self._is_edge_nat(net_info):
+                if not is_edge_nat:
                     self.apic_manager.associate_external_epg_to_nat_epg(
                         router_tenant, shadow_l3out, shadow_ext_epg,
                         nat_epg_name, target_owner=nat_epg_tenant,
@@ -1506,8 +1562,9 @@ class APICMechanismDriver(api.MechanismDriver,
         remove_contracts_only = (
             not self._is_last_gw_port(context, port, router))
 
+        is_edge_nat = self._is_edge_nat(ext_info)
         shadow_l3out = self._get_shadow_name_for_nat(
-            shadow_l3out, self._is_edge_nat(ext_info))
+            shadow_l3out, is_edge_nat)
 
         if remove_contracts_only:
             external_epg = apic_manager.EXT_EPG
@@ -1518,7 +1575,8 @@ class APICMechanismDriver(api.MechanismDriver,
             if self._is_pre_existing(ext_info) and 'external_epg' in ext_info:
                 external_epg = self.name_mapper.pre_existing(
                     context, ext_info['external_epg'])
-            shadow_ext_epg = self._get_shadow_name_for_nat(external_epg)
+            shadow_ext_epg = self._get_shadow_name_for_nat(external_epg,
+                                                           is_edge_nat)
             self.apic_manager.unset_contract_for_external_epg(
                 shadow_l3out, contract, external_epg=shadow_ext_epg,
                 owner=router_tenant, provided=True)
@@ -1531,7 +1589,7 @@ class APICMechanismDriver(api.MechanismDriver,
                 shadow_l3out, owner=router_tenant)
             # if its edge nat then we have to release
             # the vlan associated with this shadow L3out
-            if self._is_edge_nat(ext_info):
+            if is_edge_nat:
                 self.l3out_vlan_alloc.release_vlan(
                     network['name'], vrf_info['aci_name'],
                     vrf_info['aci_tenant'])
