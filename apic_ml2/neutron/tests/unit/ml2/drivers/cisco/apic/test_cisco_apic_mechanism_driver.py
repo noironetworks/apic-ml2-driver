@@ -1128,14 +1128,15 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
         self.driver.create_port_postcommit(port_ctx)
         mgr.ensure_path_created_for_port.assert_not_called()
 
-    def test_create_port_precommit_empty_tenant(self):
-        self.driver._is_nat_enabled_on_ext_net = mock.Mock(return_value=True)
+    def test_update_port_precommit_empty_tenant_1(self):
+        self.driver._is_nat_enabled_on_ext_net = mock.Mock()
         self.driver._l3_plugin.get_router = mock.Mock(
             return_value={'id': mocked.APIC_ROUTER, 'tenant_id': ''})
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
                                             mocked.APIC_NETWORK,
                                             TEST_SEGMENT1,
-                                            seg_type=ofcst.TYPE_OPFLEX)
+                                            seg_type=ofcst.TYPE_OPFLEX,
+                                            external=True)
         r_cnst = n_constants.DEVICE_OWNER_ROUTER_GW
         port_ctx = self._get_port_context(mocked.APIC_TENANT,
                                           mocked.APIC_NETWORK,
@@ -1144,8 +1145,35 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
                                           device_owner=r_cnst)
         self.assertTrue(self.driver._check_segment_for_agent(
             port_ctx._bound_segment, self.agent))
-        self.driver.create_port_precommit(port_ctx)
+        self.driver.update_port_precommit(port_ctx)
         self.driver._is_nat_enabled_on_ext_net.assert_not_called()
+
+    def test_update_port_precommit_empty_tenant_2(self):
+        self.driver._is_nat_enabled_on_ext_net = mock.Mock(return_value=False)
+        self.driver.per_tenant_context = True
+        self.driver._is_edge_nat = mock.Mock(return_value=False)
+        self.driver._is_pre_existing = mock.Mock(return_value=False)
+        self.driver._l3_plugin.get_router = mock.Mock(
+            return_value={'id': mocked.APIC_ROUTER, 'tenant_id': 'foo'})
+        self.driver._l3_plugin.get_routers = mock.Mock(
+            return_value=[{'id': mocked.APIC_ROUTER, 'tenant_id': ''}])
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK,
+                                            TEST_SEGMENT1,
+                                            seg_type=ofcst.TYPE_OPFLEX,
+                                            external=True)
+        r_cnst = n_constants.DEVICE_OWNER_ROUTER_GW
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK,
+                                          mocked.APIC_ROUTER,
+                                          net_ctx, HOST_ID1,
+                                          device_owner=r_cnst)
+        self.assertTrue(self.driver._check_segment_for_agent(
+            port_ctx._bound_segment, self.agent))
+        self.driver.update_port_precommit(port_ctx)
+        self.driver._l3_plugin.get_routers.assert_called_once_with(
+            mock.ANY, filters=mock.ANY)
+        self.driver._is_pre_existing.assert_called_once_with(mock.ANY)
 
     def test_create_port_postcommit_empty_tenant(self):
         self.driver._create_shadow_ext_net_for_nat = mock.Mock()

@@ -892,7 +892,8 @@ class APICMechanismDriver(api.MechanismDriver,
                 context._plugin_context,
                 filters={'id': [p['device_id'] for p in router_gw_ports]})
             routers = [r for r in routers
-                       if r['tenant_id'] != router['tenant_id']]
+                       if r['tenant_id'] and
+                       r['tenant_id'] != router['tenant_id']]
             if routers:
                 raise OnlyOneRouterPermittedIfNatDisabled(net=network['name'])
 
