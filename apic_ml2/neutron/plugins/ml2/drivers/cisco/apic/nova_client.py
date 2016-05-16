@@ -10,7 +10,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import novaclient.client as nclient
+from keystoneclient import auth as ks_auth
+from keystoneclient import session as ks_session
+from neutron.notifiers import nova as n_nova
+from novaclient import client as nclient
 from novaclient import exceptions as nova_exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -22,21 +25,34 @@ class NovaClient(object):
 
     def __init__(self):
 
-        bypass_url = "%s/%s" % (cfg.CONF.nova_url,
-                                cfg.CONF.nova_admin_tenant_id)
+        auth = ks_auth.load_from_conf_options(cfg.CONF, 'nova')
+        endpoint_override = None
 
-        self.client = nclient.Client(
-            '2', username=cfg.CONF.nova_admin_username,
-            api_key=cfg.CONF.nova_admin_password,
-            project_id=None,
-            tenant_id=cfg.CONF.nova_admin_tenant_id,
-            auth_url=cfg.CONF.nova_admin_auth_url,
-            bypass_url=bypass_url,
+        if not auth:
+
+            if cfg.CONF.nova_admin_tenant_id:
+                endpoint_override = "%s/%s" % (cfg.CONF.nova_url,
+                                               cfg.CONF.nova_admin_tenant_id)
+
+            auth = n_nova.DefaultAuthPlugin(
+                auth_url=cfg.CONF.nova_admin_auth_url,
+                username=cfg.CONF.nova_admin_username,
+                password=cfg.CONF.nova_admin_password,
+                tenant_id=cfg.CONF.nova_admin_tenant_id,
+                tenant_name=cfg.CONF.nova_admin_tenant_name,
+                endpoint_override=endpoint_override)
+
+        session = ks_session.Session.load_from_conf_options(
+            cfg.CONF, 'nova', auth=auth)
+        novaclient_cls = nclient.get_client_class(n_nova.NOVA_API_VERSION)
+
+        self.nclient = novaclient_cls(
+            session=session,
             region_name=cfg.CONF.nova.region_name)
 
     def get_server(self, server_id):
         try:
-            return self.client.servers.get(server_id)
+            return self.nclient.servers.get(server_id)
         except nova_exceptions.NotFound:
             LOG.warning(_("Nova returned NotFound for server: %s"),
                         server_id)
