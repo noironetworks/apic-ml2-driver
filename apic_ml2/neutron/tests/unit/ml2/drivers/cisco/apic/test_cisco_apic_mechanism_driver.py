@@ -1314,7 +1314,7 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
 
         expected_calls = [
             mock.call(l3out_name,
-                      external_epg="Shd-%s" % mocked.APIC_EXT_EPG,
+                      external_epg="Auto-%s" % mocked.APIC_EXT_EPG,
                       owner=self._tenant(ext_nat=True), transaction=mock.ANY)]
         self._check_call_list(
             expected_calls, mgr.ensure_external_epg_created.call_args_list)
@@ -1330,7 +1330,7 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
             mock.call(
                 l3out_name,
                 mgr.get_router_contract.return_value,
-                external_epg="Shd-%s" % mocked.APIC_EXT_EPG,
+                external_epg="Auto-%s" % mocked.APIC_EXT_EPG,
                 owner=self._tenant(ext_nat=True), transaction=mock.ANY)]
         self._check_call_list(
             expected_calls,
@@ -1340,7 +1340,7 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
             mock.call(
                 l3out_name,
                 mgr.get_router_contract.return_value,
-                external_epg="Shd-%s" % mocked.APIC_EXT_EPG,
+                external_epg="Auto-%s" % mocked.APIC_EXT_EPG,
                 owner=self._tenant(ext_nat=True), transaction=mock.ANY)]
         self._check_call_list(
             expected_calls,
@@ -1459,16 +1459,16 @@ tt':
 
         mgr.ensure_external_epg_created.assert_called_once_with(
             l3out_name,
-            external_epg="Shd-%s" % self._scoped_name(mocked.APIC_EXT_EPG,
-                                                      preexisting=True),
+            external_epg="Auto-%s" % self._scoped_name(mocked.APIC_EXT_EPG,
+                                                       preexisting=True),
             owner=self._tenant(ext_nat=True), transaction=mock.ANY)
 
         expected_calls = [
             mock.call(
                 l3out_name,
                 mgr.get_router_contract.return_value,
-                external_epg="Shd-%s" % self._scoped_name(mocked.APIC_EXT_EPG,
-                                                          preexisting=True),
+                external_epg="Auto-%s" % self._scoped_name(mocked.APIC_EXT_EPG,
+                                                           preexisting=True),
                 owner=self._tenant(ext_nat=True), transaction=mock.ANY)]
         self._check_call_list(
             expected_calls,
@@ -1478,8 +1478,8 @@ tt':
             mock.call(
                 l3out_name,
                 mgr.get_router_contract.return_value,
-                external_epg="Shd-%s" % self._scoped_name(mocked.APIC_EXT_EPG,
-                                                          preexisting=True),
+                external_epg="Auto-%s" % self._scoped_name(mocked.APIC_EXT_EPG,
+                                                           preexisting=True),
                 owner=self._tenant(ext_nat=True), transaction=mock.ANY)]
         self._check_call_list(
             expected_calls,
@@ -2284,6 +2284,150 @@ tt':
                               port_ctx)
         else:
             self.driver.update_port_precommit(port_ctx)
+
+    def test_pre_gw_port_precommit_l3out_not_exist(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK_PRE,
+                                            TEST_SEGMENT1, external=True)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK_PRE,
+                                          'vm1', net_ctx, HOST_ID1, gw=True)
+        mgr = self.driver.apic_manager
+        mgr.get_router_contract.return_value = mocked.FakeDbContract(
+            mocked.APIC_CONTRACT)
+        self.driver._query_l3out_info = mock.Mock()
+        self.driver._query_l3out_info.return_value = None
+        self.assertRaises(md.PreExistingL3OutNotFound,
+                          self.driver.update_port_precommit,
+                          port_ctx)
+
+    def test_gw_port_precommit_l3out_edge_nat_invalid_vlan_range(self):
+        self.driver.l3out_vlan_alloc.l3out_vlan_ranges = {}
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK_EDGE_NAT,
+                                            TEST_SEGMENT1, external=True)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK_EDGE_NAT,
+                                          'vm1', net_ctx, HOST_ID1, gw=True)
+        mgr = self.driver.apic_manager
+        mgr.get_router_contract.return_value = mocked.FakeDbContract(
+            mocked.APIC_CONTRACT)
+        self.assertRaises(md.EdgeNatBadVlanRange,
+                          self.driver.update_port_precommit,
+                          port_ctx)
+
+        del (self.external_network_dict[mocked.APIC_NETWORK_EDGE_NAT + '-name']
+             ['vlan_range'])
+        self.assertRaises(md.EdgeNatVlanRangeNotFound,
+                          self.driver.update_port_precommit,
+                          port_ctx)
+
+    def test_pre_gw_port_precommit_l3out_edge_nat_wrong_IF_type(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK_PRE_EDGE_NAT,
+                                            TEST_SEGMENT1, external=True)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK_PRE_EDGE_NAT,
+                                          'vm1', net_ctx, HOST_ID1, gw=True)
+        mgr = self.driver.apic_manager
+        mgr.get_router_contract.return_value = mocked.FakeDbContract(
+            mocked.APIC_CONTRACT)
+        self.driver._query_l3out_info = mock.Mock()
+        self.driver._query_l3out_info.return_value = {
+            'l3out_tenant': 'bar_tenant',
+            'vrf_name': 'bar_ctx',
+            'vrf_tenant': 'bar_tenant',
+            'l3out': [{u'l3extLNodeP':
+                       {u'attributes':
+                        {u'dn':
+                         u'uni/tn-common/out-supported/lnodep-Leaf3-4_NP'},
+                        u'children': [{u'l3extLIfP':
+                                       {u'children': [{u'l3extRsPathL3OutAtt':
+                                                       {u'attributes':
+                                                        {u'ifInstT': u'ext-svi'
+                                                         }}}]}}]}}]}
+        self.assertRaises(md.EdgeNatWrongL3OutIFType,
+                          self.driver.update_port_precommit,
+                          port_ctx)
+
+    def test_pre_gw_port_precommit_l3out_edge_nat_wrong_OSPF_auth(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK_PRE_EDGE_NAT,
+                                            TEST_SEGMENT1, external=True)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK_PRE_EDGE_NAT,
+                                          'vm1', net_ctx, HOST_ID1, gw=True)
+        mgr = self.driver.apic_manager
+        mgr.get_router_contract.return_value = mocked.FakeDbContract(
+            mocked.APIC_CONTRACT)
+        self.driver._query_l3out_info = mock.Mock()
+        self.driver._query_l3out_info.return_value = {
+            'l3out_tenant': 'bar_tenant',
+            'vrf_name': 'bar_ctx',
+            'vrf_tenant': 'bar_tenant',
+            'l3out': [{u'l3extLNodeP':
+                       {u'attributes':
+                        {u'dn':
+                         u'uni/tn-common/out-supported/lnodep-Leaf3-4_NP'},
+                        u'children': [{u'l3extLIfP':
+                                       {u'children': [{u'ospfIfP':
+                                                       {u'attributes':
+                                                        {u'authType': u'simple'
+                                                         }}}]}}]}}]}
+        self.assertRaises(md.EdgeNatWrongL3OutAuthTypeForOSPF,
+                          self.driver.update_port_precommit,
+                          port_ctx)
+
+    def test_pre_gw_port_precommit_l3out_edge_nat_wrong_BGP_auth(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK_PRE_EDGE_NAT,
+                                            TEST_SEGMENT1, external=True)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK_PRE_EDGE_NAT,
+                                          'vm1', net_ctx, HOST_ID1, gw=True)
+        mgr = self.driver.apic_manager
+        mgr.get_router_contract.return_value = mocked.FakeDbContract(
+            mocked.APIC_CONTRACT)
+        self.driver._query_l3out_info = mock.Mock()
+        self.driver._query_l3out_info.return_value = {
+            'l3out_tenant': 'bar_tenant',
+            'vrf_name': 'bar_ctx',
+            'vrf_tenant': 'bar_tenant',
+            'l3out': [{u'l3extLNodeP':
+                       {u'attributes':
+                        {u'dn':
+                         u'uni/tn-common/out-supported/lnodep-Leaf3-4_NP'},
+                        u'children': [{u'l3extLIfP':
+                                       {u'children': [{u'l3extRsNodeL3OutAtt':
+                                                       {u'attributes':
+                                                        {u'type': u'sha1'}}},
+                                                      {u'bfdIfP':
+                                                       {u'attributes':
+                                                        {u'type': u'sha1'}}},
+                                                      {u'l3extRsNodeL3OutAtt':
+                                                       {u'attributes':
+                                                        {u'type': u'sha1'}}}]}}
+                                      ]}}]}
+        self.assertRaises(md.EdgeNatWrongL3OutAuthTypeForBGP,
+                          self.driver.update_port_precommit,
+                          port_ctx)
+
+        # try again with a good input
+        self.driver._query_l3out_info.return_value['l3out'] = (
+            [{u'l3extLNodeP':
+              {u'attributes':
+               {u'dn': u'uni/tn-common/out-supported/lnodep-Leaf3-4_NP'},
+               u'children': [{u'l3extLIfP':
+                              {u'children': [{u'l3extRsNodeL3OutAtt':
+                                              {u'attributes':
+                                               {u'type': u'sha1'}}},
+                                             {u'bfdIfP':
+                                              {u'attributes':
+                                               {u'type': u'none'}}},
+                                             {u'l3extRsNodeL3OutAtt':
+                                              {u'attributes':
+                                               {u'type': u'sha1'}}}]}}]}}])
+        self.driver.update_port_precommit(port_ctx)
 
     def _setup_multiple_routers(self, ext_net_name, net_ctx):
         routers = [{'id': 'r1', 'tenant_id': 't1'},
