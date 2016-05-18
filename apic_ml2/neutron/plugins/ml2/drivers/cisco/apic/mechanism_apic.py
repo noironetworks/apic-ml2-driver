@@ -1745,6 +1745,7 @@ class APICMechanismDriver(api.MechanismDriver,
         attrs = {'network': {'name': net_name,
                              'admin_state_up': False,
                              'shared': False,
+                             'tenant_id': network['tenant_id'],
                              'status': n_constants.NET_STATUS_DOWN}}
         snat_network = self.db_plugin.create_network(
             context._plugin_context, attrs)
@@ -1767,6 +1768,7 @@ class APICMechanismDriver(api.MechanismDriver,
         attrs = {'subnet': {'name': acst.HOST_SNAT_POOL,
                             'cidr': host_pool_cidr,
                             'network_id': snat_network['id'],
+                            'tenant_id': snat_network['tenant_id'],
                             'ip_version': host_cidir_ver,
                             'enable_dhcp': False,
                             'gateway_ip': gateway,

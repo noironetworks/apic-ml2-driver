@@ -2,7 +2,7 @@
 # of appearance. Changing the order has an impact on the overall integration
 # process, which may cause wedges in the gate later.
 
--e git+https://github.com/openstack/neutron.git@stable/liberty#egg=neutron
+-e git+https://github.com/openstack/neutron.git@stable/mitaka#egg=neutron
 -e git+https://github.com/Mirantis/vmware-dvs.git@master#egg=vmware_dvs
 hacking<0.11,>=0.10.0
 
