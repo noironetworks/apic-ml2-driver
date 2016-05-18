@@ -6,6 +6,7 @@
 Name:		neutron-ml2-driver-apic
 Version:	@VERSION@
 Release:	@RELEASE@%{?dist}
+Epoch:          2
 Summary:	Neutron ML2 driver for Cisco APIC
 License:	ASL 2.0
 URL:		https://github.com/noironetworks/apic-ml2-driver
@@ -94,6 +95,8 @@ apic-ml2-db-manage --config-file /etc/neutron/neutron.conf upgrade head
 %{_sysconfdir}/neutron/rootwrap.d/cisco-apic.filters
 
 %changelog
+* Tue May 17 2016 Amit Bose <bose@noironetworks.com> - 5.0.1-1
+- Update to Mitaka
 * Mon Jan 11 2016 Amit Bose <bose@noironetworks.com> - 2015.2.0-1
 - Update to Liberty
 * Tue Aug 25 2015 Amit Bose <bose@noironetworks.com> - 2015.1.0-1

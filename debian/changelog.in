@@ -1,4 +1,10 @@
-neutron-ml2-driver-apic (@VERSION@-@REVISION@) trusty; urgency=low
+neutron-ml2-driver-apic (2:@VERSION@-@REVISION@) trusty; urgency=low
+
+  * Update to Mitaka
+
+ -- Amit Bose <bose@noironetworks.com>  Tue, 17 May 2016 17:19:39 -0700
+
+neutron-ml2-driver-apic (2015.2.0-1) trusty; urgency=low
 
   * Update to Liberty
 
