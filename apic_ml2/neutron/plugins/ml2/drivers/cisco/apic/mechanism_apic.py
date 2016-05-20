@@ -1301,10 +1301,7 @@ class APICMechanismDriver(api.MechanismDriver,
 
         if remove_contracts_only:
             external_epg = apic_manager.EXT_EPG
-            arouter_id = self.name_mapper.router(
-                context, router['id'], openstack_owner=router['tenant_id'])
-            contract = self.apic_manager.get_router_contract(
-                arouter_id, owner=self._get_router_aci_tenant(router))
+            contract = 'contract-%s' % router['id']
             if self._is_pre_existing(ext_info) and 'external_epg' in ext_info:
                 external_epg = self.name_mapper.pre_existing(
                     context, ext_info['external_epg'])
