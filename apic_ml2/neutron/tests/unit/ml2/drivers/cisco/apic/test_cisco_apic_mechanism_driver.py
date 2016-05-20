@@ -2512,8 +2512,6 @@ tt':
 
         self.driver._delete_path_if_last = mock.Mock()
         mgr = self.driver.apic_manager
-        mgr.get_router_contract.return_value = mocked.FakeDbContract(
-            mocked.APIC_CONTRACT + 'r1')
 
         # Delete first GW port
         self.driver.delete_port_postcommit(gw_ports[0])
@@ -2523,12 +2521,12 @@ tt':
                 "Shd-%s" % self._scoped_name(ext_net_name, tenant='t1'))
         exp_calls = [
             mock.call(shadow_l3out,
-                      mgr.get_router_contract.return_value,
+                      'contract-r1',
                       external_epg=shadow_ext_epg,
                       owner=self._tenant(ext_nat=True, neutron_tenant='t1'),
                       provided=True),
             mock.call(shadow_l3out,
-                      mgr.get_router_contract.return_value,
+                      'contract-r1',
                       external_epg=shadow_ext_epg,
                       owner=self._tenant(ext_nat=True, neutron_tenant='t1'),
                       provided=False)
@@ -2539,8 +2537,6 @@ tt':
 
         # Delete second GW port
         mgr.unset_contract_for_external_epg.reset_mock()
-        mgr.get_router_contract.return_value = mocked.FakeDbContract(
-            mocked.APIC_CONTRACT + 'r2')
         self.driver.delete_port_postcommit(gw_ports[0])
 
         if self.driver.per_tenant_context:
@@ -2555,11 +2551,11 @@ tt':
 
             exp_calls = [
                 mock.call(shadow_l3out,
-                          mgr.get_router_contract.return_value,
+                          'contract-r2',
                           external_epg=shadow_ext_epg,
                           owner=self._tenant(ext_nat=True), provided=True),
                 mock.call(shadow_l3out,
-                          mgr.get_router_contract.return_value,
+                          'contract-r2',
                           external_epg=shadow_ext_epg,
                           owner=self._tenant(ext_nat=True), provided=False)
             ]
