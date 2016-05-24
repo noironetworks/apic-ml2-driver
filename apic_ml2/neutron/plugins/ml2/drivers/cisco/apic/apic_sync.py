@@ -77,8 +77,10 @@ class ApicBaseSynchronizer(SynchronizerBase):
         for subnet in subnets:
             if constants.HOST_SNAT_POOL in subnet['name']:
                 continue
+            network = self.core_plugin.get_network(
+                ctx, subnet['network_id'])
             mech_context = driver_context.SubnetContext(self.core_plugin, ctx,
-                                                        subnet)
+                                                        subnet, network)
             try:
                 self.driver.create_subnet_postcommit(mech_context)
             except Exception as e:

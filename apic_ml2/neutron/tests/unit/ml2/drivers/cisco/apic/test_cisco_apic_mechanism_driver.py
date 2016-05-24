@@ -415,14 +415,12 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
 
     def test_sync_on_demand(self):
         self.synchronizer.reset_mock()
-        self.create_network(name=acst.APIC_SYNC_NETWORK, is_admin_context=True,
-                            expected_res_status=500)
+        self.create_network(name=acst.APIC_SYNC_NETWORK, is_admin_context=True)
         self.assertTrue(self.synchronizer._sync_base.called)
 
     def test_sync_on_demand_no_admin(self):
         self.synchronizer.reset_mock()
-        self.create_network(name=acst.APIC_SYNC_NETWORK,
-                            expected_res_status=500)
+        self.create_network(name=acst.APIC_SYNC_NETWORK)
         self.assertFalse(self.synchronizer._sync_base.called)
 
     def test_sync_on_demand_not(self):
@@ -830,6 +828,12 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                 side_effect=Exception)
             request = self._request_endpoint_details(p1['id'], 'h1')
             self.assertIsNone(request)
+
+    def test_create_reserved_name(self):
+        net = self.create_network(
+            tenant_id='onetenant', name=acst.APIC_SYNC_NETWORK,
+            expected_res_status=201)
+        self.assertEqual({}, net['network'])
 
 
 class TestCiscoApicML2SubnetScope(ApicML2IntegratedTestCase):

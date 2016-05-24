@@ -63,9 +63,11 @@ class TestCiscoApicSync(base.BaseTestCase):
             {'id': 'net2', 'name': acst.APIC_SYNC_NETWORK},
             {'id': 'net3', 'name': acst.HOST_SNAT_NETWORK_PREFIX + 'asasa'}]
         sync.core_plugin.get_subnets.return_value = [
-            {'id': 'sub', 'name': 'some'}]
+            {'id': 'sub', 'name': 'some', 'network_id': 'net1'}]
         sync.core_plugin.get_ports.return_value = [
             {'id': 'port', 'network_id': 'net', 'name': 'some'}]
+        sync.core_plugin.get_network.return_value = {'id': 'net1',
+                                                     'name': 'some'}
         sync._sync_base()
         self.assertEqual(1, self.driver.create_network_postcommit.call_count)
         self.assertEqual(1, self.driver.create_subnet_postcommit.call_count)
