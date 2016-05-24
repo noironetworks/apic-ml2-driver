@@ -60,6 +60,7 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import constants as acst
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import exceptions as aexc
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import nova_client
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import patch  # noqa
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import rpc as t_rpc
 
 DVS_AGENT_KLASS = 'vmware_dvs.api.dvs_agent_rpc_api.DVSClientAPI'
