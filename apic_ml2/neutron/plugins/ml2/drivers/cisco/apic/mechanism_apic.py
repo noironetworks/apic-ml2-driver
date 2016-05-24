@@ -41,6 +41,7 @@ from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2 import driver_context
 from neutron.plugins.ml2.drivers import type_vlan  # noqa
 from neutron.plugins.ml2 import models
+from neutron.plugins.ml2 import rpc as neu_rpc
 from opflexagent import constants as ofcst
 from opflexagent import rpc as o_rpc
 from oslo_concurrency import lockutils
@@ -394,9 +395,9 @@ class APICMechanismDriver(api.MechanismDriver,
     def initialize(self):
         # initialize apic
         APICMechanismDriver.get_apic_manager()
+        self._setup_rpc()
         self._setup_topology_rpc_listeners()
         self._setup_opflex_rpc_listeners()
-        self._setup_rpc()
         self.name_mapper = NameMapper(self.apic_manager.apic_mapper)
         self.synchronizer = None
         self.apic_manager.ensure_infra_created_on_apic()
@@ -423,7 +424,8 @@ class APICMechanismDriver(api.MechanismDriver,
         self.advertise_mtu = cfg.CONF.advertise_mtu
 
     def _setup_opflex_rpc_listeners(self):
-        self.opflex_endpoints = [o_rpc.GBPServerRpcCallback(self)]
+        self.opflex_endpoints = [o_rpc.GBPServerRpcCallback(
+            self, self.notifier)]
         self.opflex_topic = o_rpc.TOPIC_OPFLEX
         self.opflex_conn = n_rpc.create_connection(new=True)
         self.opflex_conn.create_consumer(
@@ -446,6 +448,10 @@ class APICMechanismDriver(api.MechanismDriver,
 
     def _setup_rpc(self):
         self.notifier = o_rpc.AgentNotifierApi(topics.AGENT)
+
+    # RPC Method
+    def request_vrf_details(self, context, **kwargs):
+        return self.get_vrf_details(context, **kwargs)
 
     # RPC Method
     def get_vrf_details(self, context, **kwargs):
@@ -486,8 +492,7 @@ class APICMechanismDriver(api.MechanismDriver,
             or '%s-%s' % (details['vrf_tenant'], details['vrf_name']))
         return details
 
-    # RPC Method
-    def get_gbp_details(self, context, **kwargs):
+    def _get_gbp_details(self, context, **kwargs):
         core_plugin = manager.NeutronManager.get_plugin()
         port_id = core_plugin._device_to_port_id(
             context, kwargs['device'])
@@ -498,7 +503,7 @@ class APICMechanismDriver(api.MechanismDriver,
                           "%(agent_id)s not found in database"),
                         {'device': port_id,
                          'agent_id': kwargs.get('agent_id')})
-            return
+            return {'device': kwargs['device']}
         port = port_context.current
 
         context._plugin = core_plugin
@@ -558,6 +563,38 @@ class APICMechanismDriver(api.MechanismDriver,
             details['interface_mtu'] = network['mtu']
 
         return details
+
+    # RPC Method
+    def get_gbp_details(self, context, **kwargs):
+        try:
+            return self._get_gbp_details(context, **kwargs)
+        except Exception as e:
+            LOG.error(_(
+                "An exception has occurred while retrieving device "
+                "gbp details for %s"), kwargs.get('device'))
+            LOG.exception(e)
+            details = {'device': kwargs.get('device')}
+        return details
+
+    # RPC Method
+    def request_endpoint_details(self, context, **kwargs):
+        try:
+            LOG.debug("Request GBP details: %s", kwargs)
+            kwargs.update(kwargs['request'])
+            result = {'device': kwargs['device'],
+                      'timestamp': kwargs['timestamp'],
+                      'request_id': kwargs['request_id'],
+                      'gbp_details': None,
+                      'neutron_details': None}
+            result['gbp_details'] = self._get_gbp_details(context, **kwargs)
+            result['neutron_details'] = neu_rpc.RpcCallbacks(
+                None, None).get_device_details(context, **kwargs)
+            return result
+        except Exception as e:
+            LOG.error(_("An exception has occurred while requesting device "
+                        "gbp details for %s"), kwargs.get('device'))
+            LOG.exception(e)
+            return None
 
     def _add_port_binding(self, session, port_id, host):
         with session.begin(subtransactions=True):
@@ -1585,10 +1622,7 @@ class APICMechanismDriver(api.MechanismDriver,
 
         if remove_contracts_only:
             external_epg = apic_manager.EXT_EPG
-            arouter_id = self.name_mapper.router(
-                context, router['id'], openstack_owner=router['tenant_id'])
-            contract = self.apic_manager.get_router_contract(
-                arouter_id, owner=self._get_router_aci_tenant(router))
+            contract = 'contract-%s' % router['id']
             if self._is_pre_existing(ext_info) and 'external_epg' in ext_info:
                 external_epg = self.name_mapper.pre_existing(
                     context, ext_info['external_epg'])
