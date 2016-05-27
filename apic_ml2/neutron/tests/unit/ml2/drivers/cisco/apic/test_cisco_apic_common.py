@@ -96,7 +96,7 @@ SERVICE_PEER_PORT_LOCAL = 'Eth%s/%s' % (APIC_EXT_MODULE, APIC_EXT_PORT)
 SERVICE_PEER_PORT_DESC = ('topology/pod-1/paths-%s/pathep-[%s]' %
                           (APIC_EXT_SWITCH, SERVICE_PEER_PORT_LOCAL.lower()))
 
-HOST_POOL_CIDR = "192.168.0.1/24"
+HOST_POOL_CIDR = "192.168.0.1/30"
 
 
 class ControllerMixin(object):

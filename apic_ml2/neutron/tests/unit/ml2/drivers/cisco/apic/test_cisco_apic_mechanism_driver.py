@@ -25,6 +25,7 @@ from apicapi import apic_mapper
 import mock
 import netaddr
 from neutron.api import extensions
+from neutron.api.v2 import attributes
 from neutron.common import constants as n_constants
 from neutron import context
 from neutron.db import api as db_api
@@ -2539,10 +2540,10 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
             self.assertEqual(1, len(host_snat_ips))
             self.assertEqual(db_net['name'],
                              host_snat_ips[0]['external_segment_name'])
-            self.assertEqual('192.168.0.2',
-                             host_snat_ips[0]['host_snat_ip'])
             self.assertEqual('192.168.0.1',
                              host_snat_ips[0]['gateway_ip'])
+            self.assertEqual('192.168.0.2',
+                             host_snat_ips[0]['host_snat_ip'])
             self.assertEqual(
                 netaddr.IPNetwork(mocked.HOST_POOL_CIDR).prefixlen,
                 host_snat_ips[0]['prefixlen'])
@@ -2564,10 +2565,10 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                 self.assertEqual(1, len(host_snat_ips))
                 self.assertEqual(db_net['name'],
                                  host_snat_ips[0]['external_segment_name'])
-                self.assertEqual('192.168.0.2',
-                                 host_snat_ips[0]['host_snat_ip'])
                 self.assertEqual('192.168.0.1',
                                  host_snat_ips[0]['gateway_ip'])
+                self.assertEqual('192.168.0.2',
+                                 host_snat_ips[0]['host_snat_ip'])
                 self.assertEqual(
                     netaddr.IPNetwork(mocked.HOST_POOL_CIDR).prefixlen,
                     host_snat_ips[0]['prefixlen'])
@@ -2576,6 +2577,24 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                                   'network_id': [snat_network_id],
                                   'device_id': ['h1']})
                 self.assertEqual(1, len(snat_ports))
+            # The IPs on the automatically created subnet corresponding
+            # to the host_pool_cidr have now been exhausted. We create
+            # a new subnet on the SNAT network, and test whether the
+            # IPs for a new SNAT port will be allocated from this new
+            # subnet.
+            attrs = {'subnet': {'name': 'something',
+                                'cidr': '192.168.1.1/30',
+                                'network_id': snat_network_id,
+                                'ip_version': 4,
+                                'enable_dhcp': False,
+                                'gateway_ip': attributes.ATTR_NOT_SPECIFIED,
+                                'allocation_pools':
+                                attributes.ATTR_NOT_SPECIFIED,
+                                'dns_nameservers':
+                                attributes.ATTR_NOT_SPECIFIED,
+                                'host_routes':
+                                attributes.ATTR_NOT_SPECIFIED}}
+            self.actual_core_plugin.create_subnet(ctx, attrs)
             # Now simulate event of a second host
             host_arg = {'binding:host_id': 'h2'}
             with self.port(subnet=sub, tenant_id='anothertenant',
@@ -2589,9 +2608,9 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                 self.assertEqual(1, len(host_snat_ips))
                 self.assertEqual(db_net['name'],
                                  host_snat_ips[0]['external_segment_name'])
-                self.assertEqual('192.168.0.3',
+                self.assertEqual('192.168.1.2',
                                  host_snat_ips[0]['host_snat_ip'])
-                self.assertEqual('192.168.0.1',
+                self.assertEqual('192.168.1.1',
                                  host_snat_ips[0]['gateway_ip'])
                 self.assertEqual(
                     netaddr.IPNetwork(mocked.HOST_POOL_CIDR).prefixlen,
