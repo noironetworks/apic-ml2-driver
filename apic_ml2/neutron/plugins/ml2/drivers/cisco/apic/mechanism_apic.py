@@ -603,16 +603,19 @@ class APICMechanismDriver(api.MechanismDriver,
             session.add(record)
             return record
 
-    def _allocate_snat_ip_for_host_and_ext_net(self, context, host, network):
-        """Allocate SNAT IP for a host for an external network."""
+    def get_snat_ip_for_vrf(self, context, vrf_id, network):
+        return self._allocate_snat_ip(context, vrf_id, network)
+
+    def _allocate_snat_ip(self, context, host_or_vrf, network):
+        """Allocate SNAT IP for a host or vrf for an external network."""
         snat_net_name = self._get_snat_db_network_name(network)
         snat_networks = self.db_plugin.get_networks(
             context, filters={'name': [snat_net_name]})
         if not snat_networks or len(snat_networks) > 1:
             LOG.info(_("Unique SNAT network not found for external network "
-                       "%(net_id)s. SNAT will not function on host %(host)s "
-                       "for this external network"),
-                     {'net_id': network['id'], 'host': host})
+                       "%(net_id)s. SNAT will not function with host or vrf "
+                       "%(host_or_vrf)s for this external network"),
+                     {'net_id': network['id'], 'host_or_vrf': host_or_vrf})
             return {}
 
         snat_network_id = snat_networks[0]['id']
@@ -621,7 +624,7 @@ class APICMechanismDriver(api.MechanismDriver,
             context, filters={'name': [acst.HOST_SNAT_POOL],
                               'network_id': [snat_network_id]})
         if not snat_subnets:
-            LOG.info(_("Subnet for host-SNAT-pool could not be found "
+            LOG.info(_("Subnet for SNAT-pool could not be found "
                        "for SNAT network %(net_id)s. SNAT will not "
                        "function for external network %(ext_id)s"),
                      {'net_id': snat_network_id, 'ext_id': network['id']})
@@ -630,14 +633,14 @@ class APICMechanismDriver(api.MechanismDriver,
         snat_ports = self.db_plugin.get_ports(
             context, filters={'name': [acst.HOST_SNAT_POOL_PORT],
                               'network_id': [snat_network_id],
-                              'device_id': [host]})
+                              'device_id': [host_or_vrf]})
         snat_ip = None
         if not snat_ports:
             # Note that the following port is created for only getting
             # an IP assignment in the subnet used for SNAT IPs.
-            # The host for which this SNAT IP is allocated is used
+            # The host or VRF for which this SNAT IP is allocated is
             # coded in the device_id.
-            attrs = {'port': {'device_id': host,
+            attrs = {'port': {'device_id': host_or_vrf,
                               'device_owner': acst.DEVICE_OWNER_SNAT_PORT,
                               'tenant_id': snat_network_tenant_id,
                               'name': acst.HOST_SNAT_POOL_PORT,
@@ -650,15 +653,18 @@ class APICMechanismDriver(api.MechanismDriver,
             if port and port['fixed_ips'][0]:
                 # The auto deletion of port logic looks for the port binding
                 # hence we populate the port binding info here
-                self._add_port_binding(context.session, port['id'], host)
+                self._add_port_binding(context.session,
+                                       port['id'], host_or_vrf)
                 snat_ip = port['fixed_ips'][0]['ip_address']
             else:
                 LOG.warning(_("SNAT-port creation failed for subnet "
                               "%(subnet_id)s on SNAT network "
                               "%(net_id)s. SNAT will not function on"
-                              "host %(host)s for external network %(ext_id)s"),
+                              "host or vrf %(host_or_vrf)s for external "
+                              "network %(ext_id)s"),
                             {'subnet_id': snat_subnets[0]['id'],
-                             'net_id': snat_network_id, 'host': host,
+                             'net_id': snat_network_id,
+                             'host_or_vrf': host_or_vrf,
                              'ext_id': network['id']})
                 return {}
         else:
@@ -736,7 +742,7 @@ class APICMechanismDriver(api.MechanismDriver,
                          'nat_epg_app_profile': str(
                              self._get_network_app_profile(network))})
             host_snat_ip_allocation = (
-                self._allocate_snat_ip_for_host_and_ext_net(
+                self._allocate_snat_ip(
                     context, host, network))
             if host_snat_ip_allocation:
                 host_snat_ips.append(host_snat_ip_allocation)
