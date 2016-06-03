@@ -822,6 +822,55 @@ class APICMechanismDriver(api.MechanismDriver,
                 app_profile_name=self._get_network_app_profile(
                     context.network.current), transaction=trs)
 
+    def _perform_interface_port_operations(self, context, port,
+                                           is_delete=False):
+        router_id = port.get('device_id')
+        if router_id == '':
+            return
+        router = self.l3_plugin.get_router(context._plugin_context, router_id)
+
+        # Other L3 plugins (e.g. ASR) create db-only routers, which
+        # are indicated by an empty string tenant. Don't do anything
+        # for these devices
+        if router['tenant_id'] == '':
+            return
+
+        if not router['external_gateway_info']:
+            return
+
+        ext_net_id = router['external_gateway_info'].get('network_id')
+        ext_net = context._plugin.get_network(context._plugin_context,
+                                              ext_net_id)
+        net_info = self.apic_manager.ext_net_dict.get(ext_net['name'])
+        if not net_info:
+            return
+
+        if (self._is_nat_enabled_on_ext_net(ext_net) and
+                self._is_edge_nat(net_info)):
+            if self.per_tenant_context:
+                shadow_l3out = self.name_mapper.l3_out(
+                    context, ext_net_id,
+                    openstack_owner=router['tenant_id'])
+                router_tenant = self._get_tenant(router)
+            else:
+                # There is exactly one shadow L3Out for all tenants since there
+                # is exactly one VRF for all tenants
+                shadow_l3out = self.name_mapper.l3_out(context, ext_net_id)
+                vrf_info = self._get_tenant_vrf(router['tenant_id'])
+                router_tenant = vrf_info['aci_tenant']
+
+            shadow_l3out = self._get_shadow_name_for_nat(
+                shadow_l3out, is_edge_nat=True)
+            bd_name = self.name_mapper.bridge_domain(
+                context, port['network_id'], openstack_owner=router_tenant)
+
+            if is_delete:
+                self.apic_manager.unset_l3out_for_bd(
+                    router_tenant, bd_name, shadow_l3out)
+            else:
+                self.apic_manager.set_l3out_for_bd(
+                    router_tenant, bd_name, shadow_l3out)
+
     def _perform_gw_port_operations(self, context, port):
         router_id = port.get('device_id')
         network = context.network.current
@@ -973,6 +1022,8 @@ class APICMechanismDriver(api.MechanismDriver,
         port = context.current
         if port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
             self._perform_gw_port_operations(context, port)
+        elif port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_INTF:
+            self._perform_interface_port_operations(context, port)
         elif self._is_port_bound(port) and not self._is_apic_network_type(
                 context):
             self._perform_path_port_operations(context, port)
@@ -1152,6 +1203,10 @@ class APICMechanismDriver(api.MechanismDriver,
                 self._delete_shadow_ext_net_for_nat(context, port, network)
             else:
                 self._delete_gw_port_nat_disabled(context)
+        elif port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_INTF:
+            self._perform_interface_port_operations(context, port,
+                                                    is_delete=True)
+
         self._notify_ports_due_to_router_update(port)
         if (port.get('binding:vif_details') and
                 port['binding:vif_details'].get('dvs_port_group_name')) and (
@@ -1526,6 +1581,21 @@ class APICMechanismDriver(api.MechanismDriver,
                                           str(vrf_info['aci_name']), network,
                                           shadow_l3out, encap)
 
+                    # queries all the BDs connected to this router
+                    core_plugin = manager.NeutronManager.get_plugin()
+                    router_intf_ports = core_plugin.get_ports(
+                        nctx.get_admin_context(),
+                        filters={'device_owner':
+                                 [n_constants.DEVICE_OWNER_ROUTER_INTF],
+                                 'device_id': [router['id']]})
+                    for router_intf_port in router_intf_ports:
+                        bd_name = self.name_mapper.bridge_domain(
+                            context, router_intf_port['network_id'],
+                            openstack_owner=router_tenant)
+                        self.apic_manager.set_l3out_for_bd(
+                            router_tenant, bd_name, shadow_l3out,
+                            transaction=trs)
+
                 self.apic_manager.ensure_external_epg_created(
                     shadow_l3out, external_epg=shadow_ext_epg,
                     owner=router_tenant, transaction=trs)
@@ -1607,7 +1677,21 @@ class APICMechanismDriver(api.MechanismDriver,
             if is_edge_nat:
                 self.l3out_vlan_alloc.release_vlan(
                     network['name'], vrf_info['aci_name'],
-                    vrf_info['aci_tenant'])
+                    router_tenant)
+
+                # queries all the BDs connected to this router
+                core_plugin = manager.NeutronManager.get_plugin()
+                router_intf_ports = core_plugin.get_ports(
+                    nctx.get_admin_context(),
+                    filters={'device_owner':
+                             [n_constants.DEVICE_OWNER_ROUTER_INTF],
+                             'device_id': [router['id']]})
+                for router_intf_port in router_intf_ports:
+                    bd_name = self.name_mapper.bridge_domain(
+                        context, router_intf_port['network_id'],
+                        openstack_owner=router_tenant)
+                    self.apic_manager.unset_l3out_for_bd(
+                        router_tenant, bd_name, shadow_l3out)
 
     def _get_router_interface_subnets(self, context, router_ids):
         core_plugin = manager.NeutronManager.get_plugin()
