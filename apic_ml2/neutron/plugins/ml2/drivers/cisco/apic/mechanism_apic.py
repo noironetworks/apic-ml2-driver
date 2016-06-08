@@ -1557,7 +1557,7 @@ class APICMechanismDriver(api.MechanismDriver,
                 # out this shadow L3 out in APIC
                 if is_edge_nat:
                     vlan_id = self.l3out_vlan_alloc.reserve_vlan(
-                        network['name'], str(vrf_info['aci_name']),
+                        network['name'], vrf_info['aci_name'],
                         vrf_info['aci_tenant'])
                     encap = 'vlan-' + str(vlan_id)
                     if not self._is_pre_existing(net_info):
@@ -1579,9 +1579,11 @@ class APICMechanismDriver(api.MechanismDriver,
                             owner=vrf_info['aci_tenant'],
                             transaction=trs)
                     else:
-                        self._clone_l3out(context, str(nat_epg_tenant),
-                                          str(vrf_info['aci_tenant']),
-                                          str(vrf_info['aci_name']), network,
+                        vrf = self.apic_manager.apic.fvCtx.name(
+                            vrf_info['aci_name'])
+                        self._clone_l3out(context, nat_epg_tenant,
+                                          vrf_info['aci_tenant'],
+                                          vrf, network,
                                           shadow_l3out, encap)
 
                     # queries all the BDs connected to this router
