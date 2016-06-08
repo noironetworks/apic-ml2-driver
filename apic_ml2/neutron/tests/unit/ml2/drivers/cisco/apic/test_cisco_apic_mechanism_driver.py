@@ -1506,10 +1506,11 @@ tt':
 /rsectx',
                           u'tDn': u'', u'tnFvCtxName': u'default'}}}])}
 
-        def echo1(string):
-            return string
+        def echo1(obj):
+            return str(obj)
         self.driver.apic_manager.apic.fvTenant.rn = echo1
         self.driver.apic_manager.apic.l3extOut.rn = echo1
+        self.driver.apic_manager.apic.fvCtx.name = echo1
         self.driver.l3out_vlan_alloc.reserve_vlan.return_value = 999
 
         manager.NeutronManager = mock.MagicMock()
