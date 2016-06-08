@@ -1580,9 +1580,11 @@ class APICMechanismDriver(api.MechanismDriver,
                             owner=vrf_info['aci_tenant'],
                             transaction=trs)
                     else:
+                        vrf = self.apic_manager.apic.fvCtx.name(
+                            str(vrf_info['aci_name']))
                         self._clone_l3out(context, str(nat_epg_tenant),
                                           str(vrf_info['aci_tenant']),
-                                          str(vrf_info['aci_name']), network,
+                                          vrf, network,
                                           shadow_l3out, encap)
 
                     # queries all the BDs connected to this router
