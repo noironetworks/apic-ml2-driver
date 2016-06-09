@@ -126,9 +126,8 @@ class EdgeNatBadVlanRange(n_exc.BadRequest):
 
 
 class EdgeNatWrongL3OutIFType(n_exc.BadRequest):
-    message = _("L3Out %(l3out)s can only support routed "
-                "sub-interfaces in the interface profiles when edge_nat"
-                "is enabled.")
+    message = _("L3Out %(l3out)s can only support routed sub-interfaces and "
+                "SVI in the interface profiles when edge_nat is enabled.")
 
 
 class EdgeNatWrongL3OutAuthTypeForBGP(n_exc.BadRequest):
@@ -989,7 +988,8 @@ class APICMechanismDriver(api.MechanismDriver,
                 l3out_str = str(l3out_info['l3out'])
                 for match in re.finditer("u'ifInstT': u'([^']+)'",
                                          l3out_str):
-                    if match.group(1) != 'sub-interface':
+                    if (match.group(1) != 'sub-interface' and
+                            match.group(1) != 'ext-svi'):
                         raise EdgeNatWrongL3OutIFType(l3out=network['name'])
                 for match in re.finditer("u'authType': u'([^']+)'",
                                          l3out_str):
