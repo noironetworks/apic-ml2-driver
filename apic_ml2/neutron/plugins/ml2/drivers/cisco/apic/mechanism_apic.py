@@ -331,9 +331,12 @@ class APICMechanismDriver(api.MechanismDriver,
             # Use default security groups from MD
             vif_details = {portbindings.CAP_PORT_FILTER: self.sg_enabled}
             tenant = self._get_network_aci_tenant(net)
+            aci_tenant = self.apic_manager.apic.fvTenant.name(tenant)
             app_profile = self._get_network_app_profile(net)
             vif_details['dvs_port_group_name'] = ('%s|%s|%s' %
-                                                  (tenant, app_profile, epg))
+                                                  (aci_tenant,
+                                                   app_profile,
+                                                   epg))
             context.current['portgroup_name'] = (
                 vif_details['dvs_port_group_name'])
             booked_port_key = None
