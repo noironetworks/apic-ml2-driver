@@ -2486,7 +2486,7 @@ tt':
                         u'children': [{u'l3extLIfP':
                                        {u'children': [{u'l3extRsPathL3OutAtt':
                                                        {u'attributes':
-                                                        {u'ifInstT': u'ext-svi'
+                                                        {u'ifInstT': u'l3-port'
                                                          }}}]}}]}}]}
         self.assertRaises(md.EdgeNatWrongL3OutIFType,
                           self.driver.update_port_precommit,
