@@ -92,6 +92,12 @@ AGENT_TYPE_DVS = acst.AGENT_TYPE_DVS
 AGENT_CONF_DVS = {'alive': True, 'binary': 'anotherbinary',
                   'topic': 'anothertopic', 'agent_type': AGENT_TYPE_DVS,
                   'configurations': {'opflex_networks': None}}
+AGENT_CONF_OPFLEX = {'alive': True, 'binary': 'somebinary',
+                     'topic': 'sometopic',
+                     'agent_type': ofcst.AGENT_TYPE_OPFLEX_OVS,
+                     'configurations': {
+                         'opflex_networks': None,
+                         'bridge_mappings': {'physnet1': 'br-eth1'}}}
 
 
 def echo(context, id, prefix=''):
@@ -144,6 +150,7 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
         md.APICMechanismDriver.get_base_synchronizer = mock.Mock(
             return_value=self.synchronizer)
         self.driver.name_mapper.aci_mapper.tenant = echo
+        self.driver.apic_manager.apic = mock.Mock()
         self.driver.apic_manager.apic.transaction = self.fake_transaction
         self.rpc = self.driver.topology_endpoints[0]
         self.db = self.driver.apic_manager.db
@@ -1033,7 +1040,6 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.synchronizer = mock.Mock()
         md.APICMechanismDriver.get_base_synchronizer = mock.Mock(
             return_value=self.synchronizer)
-        md.APICMechanismDriver.get_apic_manager = mock.Mock()
         apic_mapper.ApicName.__eq__ = equal
         self.driver.apic_manager = mock.Mock(
             name_mapper=mock.Mock(), ext_net_dict=self.external_network_dict)
@@ -2880,7 +2886,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             self.assertIsNotNone(port_key)
             self.assertEqual(port_key, BOOKED_PORT_VALUE)
             self._verify_dvs_notifier('update_postcommit_port_call', p1, 'h1')
-            net_ctx = FakeNetworkContext(net, [mock.Mock()])
+            net_ctx = FakeNetworkContext(net, [{'network_type': 'opflex'}])
             port_ctx = FakePortContext(newp1['port'], net_ctx)
             self.driver.delete_port_postcommit(port_ctx)
             self._verify_dvs_notifier('delete_port_call', p1, 'h1')
@@ -2911,7 +2917,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             self.assertIsNotNone(port_key)
             self.assertEqual(port_key, BOOKED_PORT_VALUE)
             self._verify_dvs_notifier('update_postcommit_port_call', p1, 'h2')
-            net_ctx = FakeNetworkContext(net, [mock.Mock()])
+            net_ctx = FakeNetworkContext(net, [{'network_type': 'opflex'}])
             port_ctx = FakePortContext(newp1['port'], net_ctx)
             self.driver.delete_port_postcommit(port_ctx)
             self._verify_dvs_notifier('delete_port_call', p1, 'h2')
@@ -2939,7 +2945,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             self.assertIsNone(port_key)
             dvs_mock = self.driver.dvs_notifier.update_postcommit_port_call
             dvs_mock.assert_not_called()
-            net_ctx = FakeNetworkContext(net, [mock.Mock()])
+            net_ctx = FakeNetworkContext(net, [{'network_type': 'opflex'}])
             port_ctx = FakePortContext(newp1['port'], net_ctx)
             self.driver.delete_port_postcommit(port_ctx)
             dvs_mock = self.driver.dvs_notifier.delete_port_call
@@ -2957,7 +2963,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             port_key = newp2['port']['binding:vif_details'].get('dvs_port_key')
             self.assertIsNone(port_key)
             dvs_mock.assert_not_called()
-            net_ctx = FakeNetworkContext(net, [mock.Mock()])
+            net_ctx = FakeNetworkContext(net, [{'network_type': 'opflex'}])
             port_ctx = FakePortContext(newp2['port'], net_ctx)
             self.driver.delete_port_postcommit(port_ctx)
             dvs_mock = self.driver.dvs_notifier.delete_port_call
@@ -2988,7 +2994,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             self.assertIsNotNone(port_key)
             self.assertEqual(port_key, BOOKED_PORT_VALUE)
             self._verify_dvs_notifier('update_postcommit_port_call', p1, 'h1')
-            net_ctx = FakeNetworkContext(net, [mock.Mock()])
+            net_ctx = FakeNetworkContext(net, [{'network_type': 'opflex'}])
             port_ctx = FakePortContext(newp1['port'], net_ctx)
             self.driver.delete_port_postcommit(port_ctx)
             self._verify_dvs_notifier('delete_port_call', p1, 'h1')
@@ -3006,7 +3012,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             self.assertIsNone(port_key)
             dvs_mock = self.driver.dvs_notifier.update_postcommit_port_call
             dvs_mock.assert_not_called()
-            net_ctx = FakeNetworkContext(net, [mock.Mock()])
+            net_ctx = FakeNetworkContext(net, [{'network_type': 'opflex'}])
             port_ctx = FakePortContext(newp2['port'], net_ctx)
             self.driver.delete_port_postcommit(port_ctx)
             dvs_mock = self.driver.dvs_notifier.delete_port_call
@@ -3035,7 +3041,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
             self.assertIsNotNone(port_key)
             self.assertEqual(port_key, BOOKED_PORT_VALUE)
             self._verify_dvs_notifier('update_postcommit_port_call', p1, 'h1')
-            net_ctx = FakeNetworkContext(net, [mock.Mock()])
+            net_ctx = FakeNetworkContext(net, [{'network_type': 'opflex'}])
             port_ctx = FakePortContext(newp1['port'], net_ctx)
             self.driver.delete_port_postcommit(port_ctx)
             self._verify_dvs_notifier('delete_port_call', p1, 'h1')
@@ -3106,6 +3112,160 @@ class ApicML2IntegratedTestCaseSingleTenantSingleContext(
                            'ml2_cisco_apic')
         super(ApicML2IntegratedTestCaseSingleTenantSingleContext,
               self).setUp(service_plugins)
+
+
+class TestApicML2IntegratedPhysicalNode(ApicML2IntegratedTestBase):
+
+    def setUp(self, mech_drivers=None, service_plugins=None):
+        ml2_opts = {
+            'mechanism_drivers': mech_drivers or ['cisco_apic_ml2'],
+            'tenant_network_types': ['opflex'],
+            'type_drivers': ['opflex', 'vlan'],
+        }
+        super(TestApicML2IntegratedPhysicalNode, self).setUp(
+            service_plugins=service_plugins, ml2_opts=ml2_opts)
+        self.driver.agent_type = ofcst.AGENT_TYPE_OPFLEX_OVS
+        self.driver.apic_manager.phy_net_dict = {
+            'physnet1': {'hosts': set(['fw-app-01', 'lb-app-01'])}}
+        self.mgr.ensure_path_created_for_port = mock.Mock()
+        self.mgr.ensure_path_deleted_for_port = mock.Mock()
+        self._register_agent('fw-app-01')
+        self._register_agent('lb-app-01')
+        self.expected_bound_driver = 'cisco_apic_ml2'
+
+    def _get_bound_seg(self, port_id):
+        port_context = self.plugin.get_bound_port_context(
+            context.get_admin_context(), port_id)
+        if port_context:
+            driver = (port_context.binding_levels[-1]['bound_driver']
+                      if port_context.binding_levels else None)
+            return port_context.bottom_bound_segment, driver
+
+    def _query_dynamic_seg(self, network_id):
+        return ml2_db.get_network_segments(
+            context.get_admin_context().session, network_id,
+            filter_dynamic=True)
+
+    def test_physical_bind(self):
+        tenant1 = self._tenant(neutron_tenant='onetenant')
+        app_prof1 = self._app_profile(neutron_tenant='onetenant')
+
+        self._register_agent('h1', agent_cfg=AGENT_CONF_OPFLEX)
+
+        net1 = self.create_network(tenant_id='onetenant',
+                                   expected_res_status=201)['network']
+        sub1 = self.create_subnet(
+            network_id=net1['id'], cidr='192.168.0.0/24',
+            is_admin_context=True, ip_version=4)
+        with self.port(subnet=sub1, tenant_id='onetenant') as p:
+            p1 = p['port']
+
+        # bind to VM-host
+        self._bind_port_to_host(p1['id'], 'h1')
+        bseg_p1, bdriver = self._get_bound_seg(p1['id'])
+        self.assertEqual(bseg_p1['network_type'], 'opflex')
+        self.assertEqual('cisco_apic_ml2', bdriver)
+        self.mgr.ensure_path_created_for_port.assert_not_called()
+
+        # bind to one physical node
+        self._bind_port_to_host(p1['id'], 'fw-app-01')
+        bseg_p1, bdriver = self._get_bound_seg(p1['id'])
+        self.assertEqual(bseg_p1['network_type'], 'vlan')
+        self.assertEqual(self.expected_bound_driver, bdriver)
+        self.assertEqual(1, len(self._query_dynamic_seg(net1['id'])))
+        self.mgr.ensure_path_created_for_port.assert_called_once_with(
+            tenant1, net1['id'], 'fw-app-01', bseg_p1['segmentation_id'],
+            app_profile_name=app_prof1, transaction=mock.ANY)
+        self.mgr.ensure_path_created_for_port.reset_mock()
+
+        # bind another physical node to same network, then delete that port
+        with self.port(subnet=sub1, tenant_id='onetenant') as p1_1:
+            p1_1 = p1_1['port']
+            self._bind_port_to_host(p1_1['id'], 'lb-app-01')
+            self.assertEqual(bseg_p1, self._get_bound_seg(p1_1['id'])[0])
+            self.assertEqual(1, len(self._query_dynamic_seg(net1['id'])))
+            self.mgr.ensure_path_created_for_port.assert_called_once_with(
+                tenant1, net1['id'], 'lb-app-01', bseg_p1['segmentation_id'],
+                app_profile_name=app_prof1, transaction=mock.ANY)
+
+            self.delete_port(p1_1['id'], tenant_id=p1_1['tenant_id'])
+            self.assertEqual(1, len(self._query_dynamic_seg(net1['id'])))
+            self.mgr.ensure_path_deleted_for_port.assert_called_once_with(
+                tenant1, net1['id'], 'lb-app-01', app_profile_name=app_prof1)
+        self.mgr.ensure_path_created_for_port.reset_mock()
+        self.mgr.ensure_path_deleted_for_port.reset_mock()
+
+        # bind p1 back to VM-host
+        self._bind_port_to_host(p1['id'], 'h1')
+        bseg_p1, bdriver = self._get_bound_seg(p1['id'])
+        self.assertEqual('cisco_apic_ml2', bdriver)
+        self.assertEqual(bseg_p1['network_type'], 'opflex')
+        self.assertEqual(0, len(self._query_dynamic_seg(net1['id'])))
+        self.mgr.ensure_path_deleted_for_port.assert_called_once_with(
+            tenant1, net1['id'], 'fw-app-01', app_profile_name=app_prof1)
+        self.mgr.ensure_path_deleted_for_port.reset_mock()
+
+    def test_physical_bind_multiple_network(self):
+        tenant1 = self._tenant(neutron_tenant='onetenant')
+        app_prof1 = self._app_profile(neutron_tenant='onetenant')
+
+        net1 = self.create_network(tenant_id='onetenant',
+                                   expected_res_status=201)['network']
+        sub1 = self.create_subnet(
+            network_id=net1['id'], cidr='192.168.0.0/24',
+            is_admin_context=True, ip_version=4)
+        net2 = self.create_network(tenant_id='onetenant',
+                                   expected_res_status=201)['network']
+        sub2 = self.create_subnet(
+            network_id=net2['id'], cidr='192.168.0.0/24',
+            is_admin_context=True, ip_version=4)
+        with self.port(subnet=sub1, tenant_id='onetenant') as p:
+            p1 = p['port']
+        with self.port(subnet=sub2, tenant_id='onetenant') as p:
+            p2 = p['port']
+
+        self._bind_port_to_host(p1['id'], 'fw-app-01')
+        bseg_p1, bdriver = self._get_bound_seg(p1['id'])
+        self.assertEqual(self.expected_bound_driver, bdriver)
+        self.mgr.ensure_path_created_for_port.assert_called_once_with(
+            tenant1, net1['id'], 'fw-app-01', bseg_p1['segmentation_id'],
+            app_profile_name=app_prof1, transaction=mock.ANY)
+        self.mgr.ensure_path_created_for_port.reset_mock()
+
+        # bind port from another network to first physical node
+        self._bind_port_to_host(p2['id'], 'fw-app-01')
+        bseg_p2, bdriver = self._get_bound_seg(p2['id'])
+        self.assertEqual(self.expected_bound_driver, bdriver)
+        self.assertEqual(bseg_p2['network_type'], 'vlan')
+        self.assertNotEqual(bseg_p1['segmentation_id'],
+                            bseg_p2['segmentation_id'])
+        self.assertEqual(1, len(self._query_dynamic_seg(net2['id'])))
+        self.mgr.ensure_path_created_for_port.assert_called_once_with(
+            tenant1, net2['id'], 'fw-app-01', bseg_p2['segmentation_id'],
+            app_profile_name=app_prof1, transaction=mock.ANY)
+
+        # delete the ports
+        self.delete_port(p1['id'], tenant_id=p1['tenant_id'])
+        self.assertEqual(0, len(self._query_dynamic_seg(net1['id'])))
+        self.mgr.ensure_path_deleted_for_port.assert_called_once_with(
+            tenant1, net1['id'], 'fw-app-01', app_profile_name=app_prof1)
+        self.mgr.ensure_path_deleted_for_port.reset_mock()
+
+        self.delete_port(p2['id'], tenant_id=p2['tenant_id'])
+        self.assertEqual(0, len(self._query_dynamic_seg(net2['id'])))
+        self.mgr.ensure_path_deleted_for_port.assert_called_once_with(
+            tenant1, net2['id'], 'fw-app-01', app_profile_name=app_prof1)
+        self.mgr.ensure_path_deleted_for_port.reset_mock()
+
+
+class TestApicML2IntegratedPhysicalNodeMultiDriver(
+    TestApicML2IntegratedPhysicalNode):
+
+    def setUp(self, service_plugins=None):
+        super(TestApicML2IntegratedPhysicalNodeMultiDriver, self).setUp(
+            mech_drivers=['openvswitch', 'cisco_apic_ml2'],
+            service_plugins=service_plugins)
+        self.expected_bound_driver = 'openvswitch'
 
 
 class TestCiscoApicMechDriverSingleVRF(TestCiscoApicMechDriver):
@@ -3399,8 +3559,11 @@ class FakePortContext(object):
         self.original = self._port
         self.network = self._network
         self.top_bound_segment = self._bound_segment
+        self.bottom_bound_segment = self._bound_segment
         self.host = self._port.get(portbindings.HOST_ID)
         self.original_host = None
+        self.original_top_bound_segment = None
+        self.original_bottom_bound_segment = None
         self._binding = mock.Mock()
         self._binding.segment = self._bound_segment
 
