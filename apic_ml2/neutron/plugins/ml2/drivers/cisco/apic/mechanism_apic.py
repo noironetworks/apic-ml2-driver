@@ -337,12 +337,13 @@ class APICMechanismDriver(api.MechanismDriver,
                                                   (aci_tenant,
                                                    app_profile,
                                                    epg))
-            context.current['portgroup_name'] = (
+            currentcopy = copy.copy(context.current)
+            currentcopy['portgroup_name'] = (
                 vif_details['dvs_port_group_name'])
             booked_port_key = None
             if self.dvs_notifier:
                 booked_port_key = self.dvs_notifier.bind_port_call(
-                    context.current,
+                    currentcopy,
                     context.network.network_segments,
                     context.network.current,
                     context.host
