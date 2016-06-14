@@ -1540,98 +1540,94 @@ class APICMechanismDriver(api.MechanismDriver,
         shadow_l3out = self._get_shadow_name_for_nat(
             shadow_l3out, is_edge_nat)
         nat_epg_tenant = self._get_network_aci_tenant(network)
-        try:
-            with self.apic_manager.apic.transaction(None) as trs:
-                # create shadow L3-out and shadow external-epg
-                # This goes on the no-nat VRF (original L3 context)
-                # Note: Only NAT l3Out may exist in a different tenant
-                # (eg. COMMON). NO NAT L3Outs always exists in the original
-                # network tenant
 
-                # don't need to explicitly create the shadow l3out in this case
-                # because we are going to query APIC then use the pre-existing
-                # l3out as a template then clone it accordingly
-                if is_edge_nat and self._is_pre_existing(net_info):
-                    pass
-                else:
-                    self.apic_manager.ensure_external_routed_network_created(
-                        shadow_l3out, owner=vrf_info['aci_tenant'],
-                        context=vrf_info['aci_name'], transaction=trs)
+        with self.apic_manager.apic.transaction(None) as trs:
+            # create shadow L3-out and shadow external-epg
+            # This goes on the no-nat VRF (original L3 context)
+            # Note: Only NAT l3Out may exist in a different tenant
+            # (eg. COMMON). NO NAT L3Outs always exists in the original
+            # network tenant
 
-                # if its edge nat then we have to flesh
-                # out this shadow L3 out in APIC
-                if is_edge_nat:
-                    vlan_id = self.l3out_vlan_alloc.reserve_vlan(
-                        network['name'], vrf_info['aci_name'],
-                        vrf_info['aci_tenant'])
-                    encap = 'vlan-' + str(vlan_id)
-                    if not self._is_pre_existing(net_info):
-                        address = net_info['cidr_exposed']
-                        next_hop = net_info['gateway_ip']
-                        switch = net_info['switch']
-                        module, sport = net_info['port'].split('/')
+            # don't need to explicitly create the shadow l3out in this case
+            # because we are going to query APIC then use the pre-existing
+            # l3out as a template then clone it accordingly
+            if is_edge_nat and self._is_pre_existing(net_info):
+                pass
+            else:
+                self.apic_manager.ensure_external_routed_network_created(
+                    shadow_l3out, owner=vrf_info['aci_tenant'],
+                    context=vrf_info['aci_name'], transaction=trs)
 
-                        (self.apic_manager.
-                            set_domain_for_external_routed_network(
-                                shadow_l3out, owner=vrf_info['aci_tenant'],
-                                transaction=trs))
-                        self.apic_manager.ensure_logical_node_profile_created(
-                            shadow_l3out, switch, module, sport,
-                            encap, address, transaction=trs,
-                            owner=vrf_info['aci_tenant'])
-                        self.apic_manager.ensure_static_route_created(
-                            shadow_l3out, switch, next_hop,
-                            owner=vrf_info['aci_tenant'],
-                            transaction=trs)
-                    else:
-                        vrf = self.apic_manager.apic.fvCtx.name(
-                            vrf_info['aci_name'])
-                        self._clone_l3out(context, nat_epg_tenant,
-                                          vrf_info['aci_tenant'],
-                                          vrf, network,
-                                          shadow_l3out, encap)
+            # if its edge nat then we have to flesh
+            # out this shadow L3 out in APIC
+            if is_edge_nat:
+                vlan_id = self.l3out_vlan_alloc.reserve_vlan(
+                    network['name'], vrf_info['aci_name'],
+                    vrf_info['aci_tenant'])
+                encap = 'vlan-' + str(vlan_id)
+                if not self._is_pre_existing(net_info):
+                    address = net_info['cidr_exposed']
+                    next_hop = net_info['gateway_ip']
+                    switch = net_info['switch']
+                    module, sport = net_info['port'].split('/')
 
-                    # queries all the BDs connected to this router
-                    core_plugin = manager.NeutronManager.get_plugin()
-                    router_intf_ports = core_plugin.get_ports(
-                        nctx.get_admin_context(),
-                        filters={'device_owner':
-                                 [n_constants.DEVICE_OWNER_ROUTER_INTF],
-                                 'device_id': [router['id']]})
-                    for router_intf_port in router_intf_ports:
-                        bd_name = self.name_mapper.bridge_domain(
-                            context, router_intf_port['network_id'],
-                            openstack_owner=vrf_info['aci_tenant'])
-                        self.apic_manager.set_l3out_for_bd(
-                            vrf_info['aci_tenant'], bd_name, shadow_l3out,
-                            transaction=trs)
-
-                self.apic_manager.ensure_external_epg_created(
-                    shadow_l3out, external_epg=shadow_ext_epg,
-                    owner=vrf_info['aci_tenant'], transaction=trs)
-
-                # make them use router-contract
-                self.apic_manager.ensure_external_epg_consumed_contract(
-                    shadow_l3out, router_contract,
-                    external_epg=shadow_ext_epg,
-                    owner=vrf_info['aci_tenant'], transaction=trs)
-                self.apic_manager.ensure_external_epg_provided_contract(
-                    shadow_l3out, router_contract,
-                    external_epg=shadow_ext_epg,
-                    owner=vrf_info['aci_tenant'], transaction=trs)
-
-                # link up shadow external-EPG to NAT EPG
-                if not is_edge_nat:
-                    self.apic_manager.associate_external_epg_to_nat_epg(
-                        vrf_info['aci_tenant'], shadow_l3out, shadow_ext_epg,
-                        nat_epg_name, target_owner=nat_epg_tenant,
-                        app_profile_name=self. _get_network_app_profile(
-                            network),
+                    (self.apic_manager.
+                        set_domain_for_external_routed_network(
+                            shadow_l3out, owner=vrf_info['aci_tenant'],
+                            transaction=trs))
+                    self.apic_manager.ensure_logical_node_profile_created(
+                        shadow_l3out, switch, module, sport,
+                        encap, address, transaction=trs,
+                        owner=vrf_info['aci_tenant'])
+                    self.apic_manager.ensure_static_route_created(
+                        shadow_l3out, switch, next_hop,
+                        owner=vrf_info['aci_tenant'],
                         transaction=trs)
-            return True
-        except Exception as e:
-            LOG.info(_("Unable to create Shadow EPG: %s"), e)
-            return False
+                else:
+                    vrf = self.apic_manager.apic.fvCtx.name(
+                        vrf_info['aci_name'])
+                    self._clone_l3out(context, nat_epg_tenant,
+                                      vrf_info['aci_tenant'],
+                                      vrf, network,
+                                      shadow_l3out, encap)
+
+                # queries all the BDs connected to this router
+                core_plugin = manager.NeutronManager.get_plugin()
+                router_intf_ports = core_plugin.get_ports(
+                    nctx.get_admin_context(),
+                    filters={'device_owner':
+                             [n_constants.DEVICE_OWNER_ROUTER_INTF],
+                             'device_id': [router['id']]})
+                for router_intf_port in router_intf_ports:
+                    bd_name = self.name_mapper.bridge_domain(
+                        context, router_intf_port['network_id'],
+                        openstack_owner=vrf_info['aci_tenant'])
+                    self.apic_manager.set_l3out_for_bd(
+                        vrf_info['aci_tenant'], bd_name, shadow_l3out,
+                        transaction=trs)
+
+            self.apic_manager.ensure_external_epg_created(
+                shadow_l3out, external_epg=shadow_ext_epg,
+                owner=vrf_info['aci_tenant'], transaction=trs)
+
+            # make them use router-contract
+            self.apic_manager.ensure_external_epg_consumed_contract(
+                shadow_l3out, router_contract,
+                external_epg=shadow_ext_epg,
+                owner=vrf_info['aci_tenant'], transaction=trs)
+            self.apic_manager.ensure_external_epg_provided_contract(
+                shadow_l3out, router_contract,
+                external_epg=shadow_ext_epg,
+                owner=vrf_info['aci_tenant'], transaction=trs)
+
+            # link up shadow external-EPG to NAT EPG
+            if not is_edge_nat:
+                self.apic_manager.associate_external_epg_to_nat_epg(
+                    vrf_info['aci_tenant'], shadow_l3out, shadow_ext_epg,
+                    nat_epg_name, target_owner=nat_epg_tenant,
+                    app_profile_name=self. _get_network_app_profile(
+                        network),
+                    transaction=trs)
 
     def _delete_shadow_ext_net_for_nat(self, context, port, network):
         ext_info = self.apic_manager.ext_net_dict.get(network['name'])
