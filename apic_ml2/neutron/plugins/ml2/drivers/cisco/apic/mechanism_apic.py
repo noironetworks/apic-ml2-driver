@@ -314,7 +314,11 @@ class APICMechanismDriver(api.MechanismDriver,
         # environment supporting KVM and ESX compute). Go try for
         # OpFlex agents.
         agent_list = context.host_agents(ofcst.AGENT_TYPE_OPFLEX_OVS)
-        self._agent_bind_port(context, agent_list, self._bind_opflex_port)
+        if self._agent_bind_port(context, agent_list, self._bind_opflex_port):
+            return
+
+        # Try hierarchical binding for physical nodes
+        self._bind_physical_node(context)
 
     def _bind_dvs_port(self, context, segment, agent):
         """Populate VIF type and details for DVS VIFs.
@@ -364,12 +368,7 @@ class APICMechanismDriver(api.MechanismDriver,
            set when this mechanism driver was instantiated.
         """
         if self._check_segment_for_agent(segment, agent):
-            context.set_binding(segment[api.ID],
-                                portbindings.VIF_TYPE_OVS,
-                                {portbindings.CAP_PORT_FILTER:
-                                 self.sg_enabled,
-                                 portbindings.OVS_HYBRID_PLUG:
-                                 self.sg_enabled})
+            self._complete_binding(context, segment)
             return True
         else:
             return False
@@ -394,6 +393,40 @@ class APICMechanismDriver(api.MechanismDriver,
             return True
         else:
             return False
+
+    def _get_physical_network_for_host(self, host):
+        for k, v in self.apic_manager.phy_net_dict.iteritems():
+            if host in v.get('hosts', []):
+                return k
+
+    def _bind_physical_node(self, context):
+        phy_seg_name = self._get_physical_network_for_host(context.host)
+        if phy_seg_name:
+            phy_seg = self.apic_manager.phy_net_dict[phy_seg_name]
+            for segment in context.segments_to_bind:
+                net_type = segment[api.NETWORK_TYPE]
+                if net_type == ofcst.TYPE_OPFLEX:
+                    dyn_seg = context.allocate_dynamic_segment(
+                        {api.PHYSICAL_NETWORK: phy_seg_name,
+                         api.NETWORK_TYPE:
+                            phy_seg.get('segment_type', constants.TYPE_VLAN)})
+                    LOG.info("Allocated dynamic-segment %(s)s for port %(p)s",
+                             {'s': dyn_seg, 'p': context.current['id']})
+                    dyn_seg['apic_ml2_created'] = True
+                    context.continue_binding(segment['id'], [dyn_seg])
+                    return True
+                elif segment.get('apic_ml2_created'):
+                    # complete binding if another driver did not bind the
+                    # dynamic segment that we created
+                    self._complete_binding(context, segment)
+                    return True
+        return False
+
+    def _complete_binding(self, context, segment):
+        context.set_binding(segment[api.ID],
+                            portbindings.VIF_TYPE_OVS,
+                            {portbindings.CAP_PORT_FILTER: self.sg_enabled,
+                             portbindings.OVS_HYBRID_PLUG: self.sg_enabled})
 
     def initialize(self):
         # initialize apic
@@ -513,7 +546,7 @@ class APICMechanismDriver(api.MechanismDriver,
         def is_port_promiscuous(port):
             return port['device_owner'] == n_constants.DEVICE_OWNER_DHCP
 
-        segment = port_context.top_bound_segment or {}
+        segment = port_context.bottom_bound_segment or {}
         details = {'device': kwargs.get('device'),
                    'port_id': port_id,
                    'mac_address': port['mac_address'],
@@ -809,13 +842,13 @@ class APICMechanismDriver(api.MechanismDriver,
                 context, network['id'], openstack_owner=network['tenant_id'])
             epg_name = self._get_ext_epg_for_ext_net(l3out_name)
         # Get segmentation id
-        if not context.top_bound_segment:
+        if not context.bottom_bound_segment:
             LOG.debug("Port %s is not bound to a segment", port)
             return
         seg = None
-        if (context.top_bound_segment.get(api.NETWORK_TYPE)
+        if (context.bottom_bound_segment.get(api.NETWORK_TYPE)
                 in [constants.TYPE_VLAN]):
-            seg = context.top_bound_segment.get(api.SEGMENTATION_ID)
+            seg = context.bottom_bound_segment.get(api.SEGMENTATION_ID)
         # hosts on which this vlan is provisioned
         host = context.host
         # Create a static path attachment for the host/epg/switchport combo
@@ -1028,8 +1061,8 @@ class APICMechanismDriver(api.MechanismDriver,
             self._perform_gw_port_operations(context, port)
         elif port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_INTF:
             self._perform_interface_port_operations(context, port)
-        elif self._is_port_bound(port) and not self._is_apic_network_type(
-                context):
+        elif (self._is_port_bound(port) and
+              self._port_needs_static_path_binding(context)):
             self._perform_path_port_operations(context, port)
         self._notify_ports_due_to_router_update(port)
 
@@ -1091,28 +1124,30 @@ class APICMechanismDriver(api.MechanismDriver,
                     network_tenant, l3out_name_pre or l3out_name, None,
                     transaction=trs)
 
-    def _get_active_path_count(self, context, host=None):
+    def _get_active_path_count(self, context, host, segment):
         return context._plugin_context.session.query(
             models.PortBindingLevel).filter_by(
-                host=host or context.host,
-                segment_id=context.top_bound_segment['id']).count()
+                host=host, segment_id=segment['id']).count()
 
     @lockutils.synchronized('apic-portlock')
     def _delete_port_path(self, context, atenant_id, anetwork_id,
-                          app_profile_name, host=None):
-        if not self._get_active_path_count(context):
+                          app_profile_name, host, segment):
+        if not self._get_active_path_count(context, host, segment):
             self.apic_manager.ensure_path_deleted_for_port(
-                atenant_id, anetwork_id,
-                host or context.host, app_profile_name=app_profile_name)
+                atenant_id, anetwork_id, host,
+                app_profile_name=app_profile_name)
 
-    def _delete_path_if_last(self, context, host=None):
-        if not self._get_active_path_count(context):
+    def _delete_path_if_last(self, context, host=None, segment=None):
+        host = host or context.host
+        segment = segment or context.bottom_bound_segment
+        if not self._get_active_path_count(context, host, segment):
             atenant_id = self._get_network_aci_tenant(context.network.current)
             network_id = context.network.current['id']
             epg_name = self.name_mapper.endpoint_group(context, network_id)
-            self._delete_port_path(context, atenant_id, epg_name,
-                                   self._get_network_app_profile(
-                                       context.network.current), host=host)
+            self._delete_port_path(
+                context, atenant_id, epg_name,
+                self._get_network_app_profile(context.network.current),
+                host, segment)
 
     def _get_subnet_info(self, context, subnet):
         if subnet['gateway_ip']:
@@ -1168,11 +1203,14 @@ class APICMechanismDriver(api.MechanismDriver,
         self._check_gw_port_operation(context, context.current)
 
     def update_port_postcommit(self, context):
-        if (not self._is_apic_network_type(context) and
-                context.original_host and (context.original_host !=
+        if (self._port_needs_static_path_binding(context, use_original=True)
+            and context.original_host and (context.original_host !=
                                            context.host)):
             # The VM was migrated
-            self._delete_path_if_last(context, host=context.original_host)
+            self._delete_path_if_last(
+                context, host=context.original_host,
+                segment=context.original_bottom_bound_segment)
+            self._release_dynamic_segment(context, use_original=True)
         self._perform_port_operations(context)
         port = context.current
         if (port.get('binding:vif_details') and
@@ -1198,10 +1236,10 @@ class APICMechanismDriver(api.MechanismDriver,
     def delete_port_postcommit(self, context):
         port = context.current
         network = context.network.current
-        # Check if a compute port
-        if (not self._is_apic_network_type(context) and
-                self._is_port_bound(port) and context.top_bound_segment):
+        if (self._port_needs_static_path_binding(context) and
+                self._is_port_bound(port) and context.bottom_bound_segment):
             self._delete_path_if_last(context)
+            self._release_dynamic_segment(context)
         if port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
             if self._is_nat_enabled_on_ext_net(network):
                 self._delete_shadow_ext_net_for_nat(context, port, network)
@@ -1353,11 +1391,14 @@ class APICMechanismDriver(api.MechanismDriver,
             portbindings.VIF_TYPE_UNBOUND,
             portbindings.VIF_TYPE_BINDING_FAILED]
 
-    def _is_apic_network_type(self, port_context):
-        return self._is_apic_network(port_context.network.current)
+    def _is_opflex_type(self, net_type):
+        return net_type == ofcst.TYPE_OPFLEX
+
+    def _is_supported_non_opflex_type(self, net_type):
+        return net_type in [constants.TYPE_VLAN]
 
     def _is_apic_network(self, network):
-        return network['provider:network_type'] == ofcst.TYPE_OPFLEX
+        return self._is_opflex_type(network['provider:network_type'])
 
     def notify_port_update(self, port_id, context=None):
         context = context or nctx.get_admin_context()
@@ -2154,3 +2195,30 @@ class APICMechanismDriver(api.MechanismDriver,
         router_gw_ports = context._plugin.get_ports(
             context._plugin_context.elevated(), filters=gw_port_filter)
         return (not [p for p in router_gw_ports if p['id'] != gw_port['id']])
+
+    def _port_needs_static_path_binding(self, port_context,
+                                        use_original=False):
+        bound_seg = (port_context.original_bottom_bound_segment if use_original
+                     else port_context.bottom_bound_segment)
+        return (not self._is_apic_network(port_context.network.current) or
+                (bound_seg and self._is_supported_non_opflex_type(
+                    bound_seg[api.NETWORK_TYPE])))
+
+    def _release_dynamic_segment(self, port_context, use_original=False):
+        top = (port_context.original_top_bound_segment if use_original
+               else port_context.top_bound_segment)
+        btm = (port_context.original_bottom_bound_segment if use_original
+               else port_context.bottom_bound_segment)
+        if (top and btm and
+                self._is_opflex_type(top[api.NETWORK_TYPE]) and
+                self._is_supported_non_opflex_type(btm[api.NETWORK_TYPE])):
+            # if there are no other ports bound to segment, release it
+            num_binds = port_context._plugin_context.session.query(
+                models.PortBindingLevel).filter_by(
+                    segment_id=btm[api.ID]).filter(
+                        models.PortBindingLevel.port_id !=
+                        port_context.current['id']).count()
+            if not num_binds:
+                LOG.info("Releasing dynamic-segment %(s)s for port %(p)s",
+                         {'s': btm, 'p': port_context.current['id']})
+                port_context.release_dynamic_segment(btm[api.ID])
