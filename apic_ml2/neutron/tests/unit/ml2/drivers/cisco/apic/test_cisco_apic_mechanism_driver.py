@@ -1339,9 +1339,10 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
         self.driver.l3out_vlan_alloc.reserve_vlan = mock.Mock()
 
         manager.NeutronManager = mock.MagicMock()
-        manager.NeutronManager.get_plugin().get_ports.return_value = [
-            {'device_owner': u'network:router_interface',
-             'network_id': u'net_id'}]
+        manager.NeutronManager.get_plugin().get_networks.return_value = [
+            {'tenant_id': mocked.APIC_TENANT,
+             'name': mocked.APIC_NETWORK,
+             'id': u'net_id'}]
         self.driver.update_port_postcommit(port_ctx)
         mgr.get_router_contract.assert_called_once_with(
             self._scoped_name(port_ctx.current['device_id']),
@@ -1373,11 +1374,9 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
         self.assertTrue(mgr.ensure_logical_node_profile_created.called)
         self.assertTrue(mgr.ensure_static_route_created.called)
 
-        bd_name = self._scoped_name('net_id',
-                                    tenant=self._tenant(ext_nat=True))
+        bd_name = self._scoped_name('net_id')
         mgr.set_l3out_for_bd.assert_called_once_with(
-            self._tenant(ext_nat=True), bd_name, l3out_name,
-            transaction=mock.ANY)
+            self._tenant(), bd_name, l3out_name, transaction=mock.ANY)
 
         expected_calls = [
             mock.call(
@@ -1405,12 +1404,25 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
     def test_update_cross_tenant_edge_nat_gw_port_postcommit(self):
         self._test_update_edge_nat_gw_port_postcommit('admin_tenant')
 
-    def _test_update_edge_nat_interface_port_postcommit(
-        self, net_tenant=mocked.APIC_TENANT):
+    def _test_update_interface_port_postcommit(self, no_nat=False, pre=False,
+                                               net_tenant=None):
+        net_tenant = net_tenant or mocked.APIC_TENANT
+        if no_nat:
+            ext_net = mocked.APIC_NETWORK_NO_NAT
+            if pre:
+                self.external_network_dict[ext_net + '-name'][
+                    'preexisting'] = 'True'
+                self.driver._query_l3out_info = mock.Mock()
+                self.driver._query_l3out_info.return_value = {
+                    'l3out_tenant': self._tenant(),
+                    'vrf_name': self._network_vrf_name(),
+                    'vrf_tenant': self._tenant(vrf=True)}
+        else:
+            ext_net = mocked.APIC_NETWORK_EDGE_NAT
         net_ctx = self._get_network_context(net_tenant,
                                             'net_id',
                                             TEST_SEGMENT1)
-        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+        port_ctx = self._get_port_context(net_tenant,
                                           'net_id',
                                           'vm1', net_ctx, HOST_ID1,
                                           interface=True)
@@ -1418,28 +1430,43 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
             return_value={'id': mocked.APIC_ROUTER,
                           'tenant_id': mocked.APIC_TENANT,
                           'external_gateway_info':
-                              {'network_id': mocked.APIC_NETWORK_EDGE_NAT,
+                              {'network_id': ext_net,
                                'external_fixed_ips': []}})
         port_ctx._plugin.get_network = mock.Mock(
-            return_value={'name': mocked.APIC_NETWORK_EDGE_NAT + '-name',
+            return_value={'name': ext_net + '-name',
                           'router:external': True})
 
         self.driver.update_port_postcommit(port_ctx)
 
         l3out_name = (self.driver.per_tenant_context and
-                      self._scoped_name(mocked.APIC_NETWORK_EDGE_NAT) or
-                      mocked.APIC_NETWORK_EDGE_NAT)
-        l3out_name = "Auto-%s" % l3out_name
-        bd_name = self._scoped_name('net_id',
-                                    tenant=self._tenant(ext_nat=True))
+                      self._scoped_name(ext_net) or ext_net)
+        if not no_nat:
+            l3out_name = "Auto-%s" % l3out_name
+        elif pre:
+            l3out_name = self._scoped_name(ext_net + '-name', preexisting=True)
+        bd_name = self._scoped_name('net_id', tenant=net_tenant)
         self.driver.apic_manager.set_l3out_for_bd.assert_called_once_with(
-            self._tenant(ext_nat=True), bd_name, l3out_name)
+            self._tenant(neutron_tenant=net_tenant), bd_name, l3out_name)
 
     def test_update_edge_nat_interface_port_postcommit(self):
-        self._test_update_edge_nat_interface_port_postcommit()
+        self._test_update_interface_port_postcommit()
 
     def test_update_cross_tenant_edge_nat_interface_port_postcommit(self):
-        self._test_update_edge_nat_interface_port_postcommit('admin_tenant')
+        self._test_update_interface_port_postcommit('another')
+
+    def test_update_no_nat_interface_port_postcommit(self):
+        self._test_update_interface_port_postcommit(no_nat=True)
+
+    def test_update_cross_tenant_no_nat_interface_port_postcommit(self):
+        self._test_update_interface_port_postcommit(no_nat=True,
+                                                    net_tenant='another')
+
+    def test_update_pre_no_nat_interface_port_postcommit(self):
+        self._test_update_interface_port_postcommit(no_nat=True, pre=True)
+
+    def test_update_cross_tenant_pre_no_nat_interface_port_postcommit(self):
+        self._test_update_interface_port_postcommit(
+            no_nat=True, pre=True, net_tenant='another')
 
     def _test_update_pre_edge_nat_gw_port_postcommit(
         self, net_tenant=mocked.APIC_TENANT):
@@ -1520,9 +1547,10 @@ tt':
         self.driver.l3out_vlan_alloc.reserve_vlan.return_value = 999
 
         manager.NeutronManager = mock.MagicMock()
-        manager.NeutronManager.get_plugin().get_ports.return_value = [
-            {'device_owner': u'network:router_interface',
-             'network_id': u'net_id'}]
+        manager.NeutronManager.get_plugin().get_networks.return_value = [
+            {'tenant_id': mocked.APIC_TENANT,
+             'name': mocked.APIC_NETWORK,
+             'id': u'net_id'}]
 
         self.driver.update_port_postcommit(port_ctx)
         mgr.get_router_contract.assert_called_once_with(
@@ -1558,10 +1586,8 @@ tt':
                                                        preexisting=True),
             owner=self._tenant(ext_nat=True), transaction=mock.ANY)
 
-        bd_name = self._scoped_name('net_id',
-                                    tenant=self._tenant(ext_nat=True))
         mgr.set_l3out_for_bd.assert_called_once_with(
-            self._tenant(ext_nat=True), bd_name, l3out_name,
+            self._tenant(), self._scoped_name('net_id'), l3out_name,
             transaction=mock.ANY)
 
         expected_calls = [
@@ -1681,6 +1707,16 @@ tt':
             'l3out_tenant': l3out_tenant,
             'vrf_name': ctx_name,
             'vrf_tenant': self._tenant(vrf=True)}
+        nets = [
+            {'tenant_id': mocked.APIC_TENANT + '1',
+             'name': mocked.APIC_NETWORK,
+             'id': 'net_id1'},
+            {'tenant_id': mocked.APIC_TENANT + '2',
+             'name': mocked.APIC_NETWORK,
+             'id': 'net_id2'}]
+        manager.NeutronManager = mock.MagicMock()
+        manager.NeutronManager.get_plugin().get_networks.return_value = nets
+
         self.driver.update_port_postcommit(port_ctx)
         mgr.get_router_contract.assert_called_once_with(
             self._scoped_name(port_ctx.current['device_id']),
@@ -1689,15 +1725,15 @@ tt':
         self.assertFalse(mgr.ensure_external_routed_network_created.called)
         self.assertFalse(mgr.ensure_external_epg_created.called)
 
+        l3out_name = self._scoped_name(net_ctx.current['name'],
+                                       preexisting=True)
         mgr.set_context_for_external_routed_network.assert_called_once_with(
-            l3out_tenant,
-            self._scoped_name(net_ctx.current['name'], preexisting=True),
-            self._network_vrf_name(),
+            l3out_tenant, l3out_name, self._network_vrf_name(),
             transaction=mock.ANY)
 
         expected_calls = [
             mock.call(
-                self._scoped_name(net_ctx.current['name'], preexisting=True),
+                l3out_name,
                 mgr.get_router_contract.return_value,
                 external_epg=self._scoped_name(mocked.APIC_EXT_EPG,
                                                preexisting=True),
@@ -1708,8 +1744,7 @@ tt':
 
         expected_calls = [
             mock.call(
-                self._scoped_name(net_ctx.current['name'], preexisting=True),
-                mgr.get_router_contract.return_value,
+                l3out_name, mgr.get_router_contract.return_value,
                 external_epg=self._scoped_name(mocked.APIC_EXT_EPG,
                                                preexisting=True),
                 owner=l3out_tenant, transaction=mock.ANY)]
@@ -1717,6 +1752,15 @@ tt':
             expected_calls,
             mgr.ensure_external_epg_provided_contract.call_args_list)
         self.assertFalse(mgr.set_contract_for_epg.called)
+
+        expected_l3out_bd_calls = [
+            mock.call(self._tenant(neutron_tenant=n['tenant_id']),
+                      self._scoped_name(n['id'], tenant=n['tenant_id']),
+                      l3out_name,
+                      transaction=mock.ANY)
+            for n in nets]
+        self._check_call_list(expected_l3out_bd_calls,
+                              mgr.set_l3out_for_bd.call_args_list)
 
     def test_update_pre_no_nat_gw_port_postcommit_tenant(self):
         self._test_update_pre_no_nat_gw_port_postcommit(self._tenant())
@@ -1766,9 +1810,10 @@ tt':
         self.driver._delete_path_if_last = mock.Mock()
         self.driver.l3out_vlan_alloc.release_vlan = mock.Mock()
         manager.NeutronManager = mock.MagicMock()
-        manager.NeutronManager.get_plugin().get_ports.return_value = [
-            {'device_owner': u'network:router_interface',
-             'network_id': u'net_id'}]
+        manager.NeutronManager.get_plugin().get_networks.return_value = [
+            {'tenant_id': mocked.APIC_TENANT,
+             'name': mocked.APIC_NETWORK,
+             'id': 'net_id'}]
         self.driver.delete_port_postcommit(port_ctx)
         mgr = self.driver.apic_manager
         mgr.delete_external_routed_network.assert_called_once_with(
@@ -1784,10 +1829,9 @@ tt':
                       self._scoped_name(mocked.APIC_NETWORK_EDGE_NAT) or
                       mocked.APIC_NETWORK_EDGE_NAT)
         l3out_name = "Auto-%s" % l3out_name
-        bd_name = self._scoped_name('net_id',
-                                    tenant=self._tenant(ext_nat=True))
+        bd_name = self._scoped_name('net_id')
         mgr.unset_l3out_for_bd.assert_called_once_with(
-            self._tenant(ext_nat=True), bd_name, l3out_name)
+            self._tenant(), bd_name, l3out_name, transaction=mock.ANY)
 
     def test_delete_pre_edge_nat_gw_port_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
@@ -1799,9 +1843,10 @@ tt':
         self.driver._delete_path_if_last = mock.Mock()
         self.driver.l3out_vlan_alloc.release_vlan = mock.Mock()
         manager.NeutronManager = mock.MagicMock()
-        manager.NeutronManager.get_plugin().get_ports.return_value = [
-            {'device_owner': u'network:router_interface',
-             'network_id': u'net_id'}]
+        manager.NeutronManager.get_plugin().get_networks.return_value = [
+            {'tenant_id': mocked.APIC_TENANT,
+             'name': mocked.APIC_NETWORK,
+             'id': 'net_id'}]
         self.driver.delete_port_postcommit(port_ctx)
         mgr = self.driver.apic_manager
         mgr.delete_external_routed_network.assert_called_once_with(
@@ -1817,10 +1862,9 @@ tt':
                       self._scoped_name(mocked.APIC_NETWORK_PRE_EDGE_NAT) or
                       mocked.APIC_NETWORK_PRE_EDGE_NAT)
         l3out_name = "Auto-%s" % l3out_name
-        bd_name = self._scoped_name('net_id',
-                                    tenant=self._tenant(ext_nat=True))
+        bd_name = self._scoped_name('net_id')
         mgr.unset_l3out_for_bd.assert_called_once_with(
-            self._tenant(ext_nat=True), bd_name, l3out_name)
+            self._tenant(), bd_name, l3out_name, transaction=mock.ANY)
 
     def test_delete_edge_nat_interface_port_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
@@ -1846,10 +1890,9 @@ tt':
                       self._scoped_name(mocked.APIC_NETWORK_EDGE_NAT) or
                       mocked.APIC_NETWORK_EDGE_NAT)
         l3out_name = "Auto-%s" % l3out_name
-        bd_name = self._scoped_name('net_id',
-                                    tenant=self._tenant(ext_nat=True))
+        bd_name = self._scoped_name('net_id')
         self.driver.apic_manager.unset_l3out_for_bd.assert_called_once_with(
-            self._tenant(ext_nat=True), bd_name, l3out_name)
+            self._tenant(), bd_name, l3out_name)
 
     def test_update_no_nat_gw_port_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
@@ -1861,30 +1904,48 @@ tt':
         mgr = self.driver.apic_manager
         mgr.get_router_contract.return_value = mocked.FakeDbContract(
             mocked.APIC_CONTRACT)
+        nets = [
+            {'tenant_id': mocked.APIC_TENANT + '1',
+             'name': mocked.APIC_NETWORK,
+             'id': 'net_id1'},
+            {'tenant_id': mocked.APIC_TENANT + '2',
+             'name': mocked.APIC_NETWORK,
+             'id': 'net_id2'}]
+        manager.NeutronManager = mock.MagicMock()
+        manager.NeutronManager.get_plugin().get_networks.return_value = nets
 
         self.driver.update_port_postcommit(port_ctx)
+        l3out_name = self._scoped_name(mocked.APIC_NETWORK_NO_NAT)
         mgr.get_router_contract.assert_called_once_with(
             self._scoped_name(port_ctx.current['device_id']),
             owner=self._router_tenant())
 
         mgr.set_context_for_external_routed_network.assert_called_once_with(
-            self._tenant(), self._scoped_name(mocked.APIC_NETWORK_NO_NAT),
+            self._tenant(), l3out_name,
             self._network_vrf_name(),
             transaction=mock.ANY)
 
         mgr.ensure_external_epg_consumed_contract.assert_called_once_with(
-            self._scoped_name(mocked.APIC_NETWORK_NO_NAT),
+            l3out_name,
             mgr.get_router_contract.return_value,
             external_epg=mocked.APIC_EXT_EPG, transaction=mock.ANY,
             owner=self._tenant())
 
         mgr.ensure_external_epg_provided_contract.assert_called_once_with(
-            self._scoped_name(mocked.APIC_NETWORK_NO_NAT),
+            l3out_name,
             mgr.get_router_contract.return_value,
             external_epg=mocked.APIC_EXT_EPG, transaction=mock.ANY,
             owner=self._tenant())
 
         self.assertFalse(mgr.set_contract_for_epg.called)
+        expected_l3out_bd_calls = [
+            mock.call(self._tenant(neutron_tenant=n['tenant_id']),
+                      self._scoped_name(n['id'], tenant=n['tenant_id']),
+                      l3out_name,
+                      transaction=mock.ANY)
+            for n in nets]
+        self._check_call_list(expected_l3out_bd_calls,
+                              mgr.set_l3out_for_bd.call_args_list)
 
     def test_delete_unrelated_gw_port_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
@@ -1937,6 +1998,15 @@ tt':
                 'l3out_tenant': self._tenant(),
                 'vrf_name': self._network_vrf_name(),
                 'vrf_tenant': self._tenant(vrf=True)}
+        nets = [
+            {'tenant_id': mocked.APIC_TENANT + '1',
+             'name': mocked.APIC_NETWORK,
+             'id': 'net_id1'},
+            {'tenant_id': mocked.APIC_TENANT + '2',
+             'name': mocked.APIC_NETWORK,
+             'id': 'net_id2'}]
+        manager.NeutronManager = mock.MagicMock()
+        manager.NeutronManager.get_plugin().get_networks.return_value = nets
 
         self.driver.delete_port_postcommit(port_ctx)
 
@@ -1970,6 +2040,14 @@ tt':
                 transaction=mock.ANY)
 
         self.assertFalse(mgr.delete_external_routed_network.called)
+        expected_l3out_bd_calls = [
+            mock.call(self._tenant(neutron_tenant=n['tenant_id']),
+                      self._scoped_name(n['id'], tenant=n['tenant_id']),
+                      l3out_name,
+                      transaction=mock.ANY)
+            for n in nets]
+        self._check_call_list(expected_l3out_bd_calls,
+                              mgr.unset_l3out_for_bd.call_args_list)
 
     def test_delete_no_nat_gw_port_postcommit(self):
         self._test_delete_no_nat_gw_port_postcommit(False)
