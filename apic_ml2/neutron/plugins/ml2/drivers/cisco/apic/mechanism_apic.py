@@ -843,10 +843,10 @@ class APICMechanismDriver(api.MechanismDriver,
                 app_profile_name=self._get_network_app_profile(
                     context.network.current), transaction=trs)
 
-    def _perform_interface_port_operations(self, context, port,
+    def _perform_interface_port_operations(self, context, port, network,
                                            is_delete=False):
         router_id = port.get('device_id')
-        if router_id == '':
+        if not router_id:
             return
         router = self.l3_plugin.get_router(context._plugin_context, router_id)
 
@@ -866,31 +866,32 @@ class APICMechanismDriver(api.MechanismDriver,
         if not net_info:
             return
 
-        if (self._is_nat_enabled_on_ext_net(ext_net) and
-                self._is_edge_nat(net_info)):
+        nat_enabled = self._is_nat_enabled_on_ext_net(ext_net)
+        is_edge_nat = nat_enabled and self._is_edge_nat(net_info)
+        if not nat_enabled or is_edge_nat:
             if self.per_tenant_context:
-                shadow_l3out = self.name_mapper.l3_out(
+                l3out = self.name_mapper.l3_out(
                     context, ext_net_id,
                     openstack_owner=router['tenant_id'])
-                router_tenant = self._get_tenant(router)
             else:
                 # There is exactly one shadow L3Out for all tenants since there
                 # is exactly one VRF for all tenants
-                shadow_l3out = self.name_mapper.l3_out(context, ext_net_id)
-                vrf_info = self._get_tenant_vrf(router['tenant_id'])
-                router_tenant = vrf_info['aci_tenant']
+                l3out = self.name_mapper.l3_out(context, ext_net_id)
 
-            shadow_l3out = self._get_shadow_name_for_nat(
-                shadow_l3out, is_edge_nat=True)
+            if is_edge_nat:
+                l3out = self._get_shadow_name_for_nat(l3out, is_edge_nat=True)
+            elif self._is_pre_existing(net_info):
+                l3out = self.name_mapper.pre_existing(context, ext_net['name'])
+
             bd_name = self.name_mapper.bridge_domain(
-                context, port['network_id'], openstack_owner=router_tenant)
+                context, network['id'],
+                openstack_owner=network['tenant_id'])
+            bd_tenant = self._get_network_aci_tenant(network)
 
             if is_delete:
-                self.apic_manager.unset_l3out_for_bd(
-                    router_tenant, bd_name, shadow_l3out)
+                self.apic_manager.unset_l3out_for_bd(bd_tenant, bd_name, l3out)
             else:
-                self.apic_manager.set_l3out_for_bd(
-                    router_tenant, bd_name, shadow_l3out)
+                self.apic_manager.set_l3out_for_bd(bd_tenant, bd_name, l3out)
 
     def _perform_gw_port_operations(self, context, port):
         router_id = port.get('device_id')
@@ -950,6 +951,8 @@ class APICMechanismDriver(api.MechanismDriver,
                         l3out_name_pre or l3out_name, cid,
                         external_epg=external_epg,
                         owner=l3out_tenant, transaction=trs)
+                self._manage_bd_to_l3out_link(
+                    context, router, l3out_name_pre or l3out_name)
 
     def _check_gw_port_operation(self, context, port):
         if port.get('device_owner') != n_constants.DEVICE_OWNER_ROUTER_GW:
@@ -1045,7 +1048,8 @@ class APICMechanismDriver(api.MechanismDriver,
         if port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
             self._perform_gw_port_operations(context, port)
         elif port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_INTF:
-            self._perform_interface_port_operations(context, port)
+            self._perform_interface_port_operations(context, port,
+                                                    context.network.current)
         elif (self._is_port_bound(port) and
               self._port_needs_static_path_binding(context)):
             self._perform_path_port_operations(context, port)
@@ -1062,6 +1066,9 @@ class APICMechanismDriver(api.MechanismDriver,
         l3out_name = self.name_mapper.l3_out(
             context, network['id'],
             openstack_owner=network['tenant_id'])
+        l3out_name_pre = (
+            self.name_mapper.pre_existing(context, network['name'])
+            if self._is_pre_existing(router_info) else None)
         router = self.l3_plugin.get_router(
             context._plugin_context, port.get('device_id'))
 
@@ -1074,6 +1081,9 @@ class APICMechanismDriver(api.MechanismDriver,
             context, port.get('device_id'),
             openstack_owner=router['tenant_id'])
 
+        self._manage_bd_to_l3out_link(
+            context, router, l3out_name_pre or l3out_name, unlink=True)
+
         # check if there are other routers
         is_last_gw_port = self._is_last_gw_port(context, port, router)
 
@@ -1081,10 +1091,7 @@ class APICMechanismDriver(api.MechanismDriver,
             if not self._is_pre_existing(router_info):
                 self.apic_manager.delete_external_epg_contract(
                     arouter_id, l3out_name, transaction=trs)
-                l3out_name_pre = None
             else:
-                l3out_name_pre = self.name_mapper.pre_existing(
-                    context, network['name'])
                 external_epg = self.name_mapper.pre_existing(
                     context,
                     router_info.get('external_epg', apic_manager.EXT_EPG))
@@ -1231,7 +1238,7 @@ class APICMechanismDriver(api.MechanismDriver,
             else:
                 self._delete_gw_port_nat_disabled(context)
         elif port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_INTF:
-            self._perform_interface_port_operations(context, port,
+            self._perform_interface_port_operations(context, port, network,
                                                     is_delete=True)
 
         self._notify_ports_due_to_router_update(port)
@@ -1617,20 +1624,8 @@ class APICMechanismDriver(api.MechanismDriver,
                                       vrf, network,
                                       shadow_l3out, encap)
 
-                # queries all the BDs connected to this router
-                core_plugin = manager.NeutronManager.get_plugin()
-                router_intf_ports = core_plugin.get_ports(
-                    nctx.get_admin_context(),
-                    filters={'device_owner':
-                             [n_constants.DEVICE_OWNER_ROUTER_INTF],
-                             'device_id': [router['id']]})
-                for router_intf_port in router_intf_ports:
-                    bd_name = self.name_mapper.bridge_domain(
-                        context, router_intf_port['network_id'],
-                        openstack_owner=vrf_info['aci_tenant'])
-                    self.apic_manager.set_l3out_for_bd(
-                        vrf_info['aci_tenant'], bd_name, shadow_l3out,
-                        transaction=trs)
+                self._manage_bd_to_l3out_link(
+                    context, router, shadow_l3out, transaction=trs)
 
             self.apic_manager.ensure_external_epg_created(
                 shadow_l3out, external_epg=shadow_ext_epg,
@@ -1709,19 +1704,8 @@ class APICMechanismDriver(api.MechanismDriver,
                     network['name'], vrf_info['aci_name'],
                     vrf_info['aci_tenant'])
 
-                # queries all the BDs connected to this router
-                core_plugin = manager.NeutronManager.get_plugin()
-                router_intf_ports = core_plugin.get_ports(
-                    nctx.get_admin_context(),
-                    filters={'device_owner':
-                             [n_constants.DEVICE_OWNER_ROUTER_INTF],
-                             'device_id': [router['id']]})
-                for router_intf_port in router_intf_ports:
-                    bd_name = self.name_mapper.bridge_domain(
-                        context, router_intf_port['network_id'],
-                        openstack_owner=vrf_info['aci_tenant'])
-                    self.apic_manager.unset_l3out_for_bd(
-                        vrf_info['aci_tenant'], bd_name, shadow_l3out)
+                self._manage_bd_to_l3out_link(
+                    context, router, shadow_l3out, unlink=True)
 
     def _get_router_interface_subnets(self, context, router_ids):
         core_plugin = manager.NeutronManager.get_plugin()
@@ -2205,3 +2189,24 @@ class APICMechanismDriver(api.MechanismDriver,
                 LOG.info("Releasing dynamic-segment %(s)s for port %(p)s",
                          {'s': btm, 'p': port_context.current['id']})
                 port_context.release_dynamic_segment(btm[api.ID])
+
+    def _manage_bd_to_l3out_link(self, context, router, l3out, unlink=False,
+                                 transaction=None):
+        # Find networks connected to this router, set/unset the link from
+        # corresponding BDs to specified L3Out
+        core_plugin = manager.NeutronManager.get_plugin()
+        admin_ctx = nctx.get_admin_context()
+        router_intf_ports = core_plugin.get_ports(
+            admin_ctx,
+            filters={'device_owner': [n_constants.DEVICE_OWNER_ROUTER_INTF],
+                     'device_id': [router['id']]})
+        networks = core_plugin.get_networks(
+            admin_ctx,
+            filters={'id': [p['network_id'] for p in router_intf_ports]})
+        func = (self.apic_manager.unset_l3out_for_bd if unlink else
+                self.apic_manager.set_l3out_for_bd)
+        for net in networks:
+            bd_tenant_name = self._get_network_aci_tenant(net)
+            bd_name = self.name_mapper.bridge_domain(
+                context, net['id'], openstack_owner=net['tenant_id'])
+            func(bd_tenant_name, bd_name, l3out, transaction=transaction)
