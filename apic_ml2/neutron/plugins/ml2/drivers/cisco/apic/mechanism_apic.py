@@ -551,14 +551,8 @@ class APICMechanismDriver(api.MechanismDriver,
             vm = nova_client.NovaClient().get_server(port['device_id'])
             details['vm-name'] = vm.name if vm else port['device_id']
         owned_addr = self.ha_ip_handler.get_ha_ipaddresses_for_port(port['id'])
-
-        ext_info = self.apic_manager.ext_net_dict.get(network['name'])
-        if ext_info and self._is_edge_nat(ext_info):
-            pass
-        else:
-            self._add_ip_mapping_details(context, port, kwargs['host'],
-                                         owned_addr, details)
-
+        self._add_ip_mapping_details(context, port, kwargs['host'],
+                                     owned_addr, details)
         self._add_network_details(context, port, owned_addr, details)
         if self._is_nat_enabled_on_ext_net(network):
             # PTG name is different
@@ -685,7 +679,9 @@ class APICMechanismDriver(api.MechanismDriver,
             context,
             filters={'name': self.apic_manager.ext_net_dict.keys()})
         ext_nets = {n['id']: n for n in ext_nets
-                    if self._is_nat_enabled_on_ext_net(n)}
+                    if self._is_nat_enabled_on_ext_net(n) and
+                    not self._is_edge_nat(
+                        self.apic_manager.ext_net_dict[n['name']])}
         fip_ext_nets = set()
 
         for f in fips:
