@@ -1062,7 +1062,7 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
             'bridge_mappings': {'physnet1': 'br-eth1'}}}
         mock.patch('neutron.manager.NeutronManager').start()
         self.driver._l3_plugin = mock.Mock()
-        self.driver._allocate_snat_ip_for_host_and_ext_net = echo
+        self.driver._allocate_snat_ip = echo
         self.driver._create_snat_ip_allocation_subnet = echo
         self.driver._delete_snat_ip_allocation_network = echo
 
@@ -3314,13 +3314,18 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
             'opflex_networks': None,
             'bridge_mappings': {'physnet1': 'br-eth1'}}}
         self.actual_core_plugin = manager.NeutronManager.get_plugin()
-        mock.patch('neutron.manager.NeutronManager').start()
+        self.mgr_patch = mock.patch('neutron.manager.NeutronManager')
+        self.mgr_patch.start()
         self.driver._l3_plugin = mock.Mock()
 
         def get_resource(context, resource_id):
             return {'id': resource_id, 'tenant_id': mocked.APIC_TENANT}
 
         self.driver._l3_plugin.get_router = get_resource
+
+    def tearDown(self):
+        self.mgr_patch.stop()
+        super(TestCiscoApicMechDriverHostSNAT, self).tearDown()
 
     def _get_network_context(self, plugin, tenant_id, net_id, seg_id=None,
                              seg_type='vlan', external=False, shared=False):
@@ -3453,6 +3458,268 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                     ctx, filters={'name': [acst.HOST_SNAT_POOL_PORT],
                                   'network_id': [snat_network_id],
                                   'device_id': ['h2']})
+                self.assertEqual(1, len(snat_ports))
+        snat_ports = self.driver.db_plugin.get_ports(
+            ctx, filters={'name': [acst.HOST_SNAT_POOL_PORT],
+                          'network_id': [snat_network_id]})
+        self.assertEqual(2, len(snat_ports))
+        self.driver.delete_network_postcommit(net_ctx)
+        snat_ports = self.driver.db_plugin.get_ports(
+            ctx, filters={'name': [acst.HOST_SNAT_POOL_PORT],
+                          'network_id': [snat_network_id]})
+        self.assertEqual(0, len(snat_ports))
+        snat_networks = self.driver.db_plugin.get_networks(
+            ctx, filters={'name': [self.driver._get_snat_db_network_name(
+                db_net)]})
+        self.assertEqual(0, len(snat_networks))
+        subnets = self.driver.db_plugin.get_subnets(
+            ctx, filters={'name': [acst.HOST_SNAT_POOL]})
+        self.assertEqual(0, len(subnets))
+
+    def _create_snat_network(self, ctx, tenant_id):
+        args = {'network': {'name': mocked.APIC_NETWORK_HOST_SNAT + '-name',
+                            'admin_state_up': True, 'shared': True,
+                            'status': n_constants.NET_STATUS_ACTIVE,
+                            'tenant_id': tenant_id,
+                            'router:external': True}}
+        db_net = self.driver.db_plugin.create_network(ctx, args)
+        net_ctx = self._get_network_context(self.actual_core_plugin,
+                                            ctx.tenant_id,
+                                            db_net['id'],
+                                            TEST_SEGMENT1, external=True)
+        self.driver.create_network_postcommit(net_ctx)
+        return db_net, net_ctx
+
+    def _snat_mock_setup(self, tenant_id):
+        self.driver._is_edge_nat = mock.Mock(return_value=True)
+        self.driver._is_pre_existing = mock.Mock(return_value=False)
+        self.driver.apic_manager.apic.fvTenant.name = mock.Mock(
+            return_value=tenant_id)
+        # We need the db_plugin to get invoked from the code being
+        # tested. However, this was earlier mocked out in the setup,
+        # hence we reset it here.
+        manager.NeutronManager.get_plugin.return_value = (
+            self.driver.db_plugin)
+        self.driver.db_plugin._device_to_port_id = (
+            self.actual_core_plugin._device_to_port_id)
+        self.driver.db_plugin.get_bound_port_context = (
+            self.actual_core_plugin.get_bound_port_context)
+        self.driver.db_plugin.get_agents = (
+            self.actual_core_plugin.get_agents)
+        self.driver.db_plugin.create_or_update_agent = (
+            self.actual_core_plugin.create_or_update_agent)
+        self.driver.db_plugin._create_or_update_agent = (
+            self.actual_core_plugin._create_or_update_agent)
+        self.driver._is_nat_enabled_on_ext_net = mock.Mock()
+        self.driver._is_connected_to_ext_net = mock.Mock()
+        self.driver.agent_type = 'Open vSwitch agent'
+
+    def test_1_snat_ip_created_for_vrf_edge_nat(self):
+        # This test case is more of a functional test and should be revisited.
+        TEST_TENANT_ID1 = 'onetenant'
+        TEST_TENANT_ID2 = 'anothertenant'
+        self._snat_mock_setup(TEST_TENANT_ID1)
+        ctx = context.get_admin_context()
+        agent = {'host': 'h1'}
+        agent.update(AGENT_CONF)
+        self.actual_core_plugin.create_or_update_agent(ctx, agent)
+        db_net, net_ctx = self._create_snat_network(ctx, TEST_TENANT_ID1)
+        snat_networks = self.driver.db_plugin.get_networks(
+            ctx, filters={'name': [self.driver._get_snat_db_network_name(
+                db_net)]})
+        snat_network_id = snat_networks[0]['id']
+        net = self.create_network(
+            tenant_id=TEST_TENANT_ID1, expected_res_status=201, shared=True,
+            is_admin_context=True)['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='10.0.0.0/24',
+            ip_version=4, is_admin_context=True)
+        host_arg = {'binding:host_id': 'h2'}
+        # Create port with a different tenant
+        with self.port(subnet=sub, tenant_id=TEST_TENANT_ID2,
+                       device_owner='compute:', device_id='someid',
+                       arg_list=(portbindings.HOST_ID,), **host_arg) as p1:
+            port1 = p1['port']
+            self.assertEqual(net['id'], port1['network_id'])
+            details = self.driver.get_snat_ip_for_vrf(ctx,
+                                                      TEST_TENANT_ID1, db_net)
+            # Verify that the port has an SNAT IP, which is
+            # allocated in the SNAT network tenant ID
+            self.assertEqual(db_net['name'],
+                             details['external_segment_name'])
+            self.assertEqual('192.168.0.2', details['host_snat_ip'])
+            self.assertEqual('192.168.0.1', details['gateway_ip'])
+            self.assertEqual(
+                netaddr.IPNetwork(mocked.HOST_POOL_CIDR).prefixlen,
+                details['prefixlen'])
+            snat_ports = self.driver.db_plugin.get_ports(
+                ctx, filters={'name': [acst.HOST_SNAT_POOL_PORT],
+                              'network_id': [snat_network_id],
+                              'device_id': [TEST_TENANT_ID1]})
+            self.assertEqual(1, len(snat_ports))
+            # Simulate a second event on the same host with the same VRF for
+            # the same external network to check if the earlier allocated SNAT
+            # IP is returned
+            with self.port(subnet=sub, tenant_id=TEST_TENANT_ID2,
+                           device_owner='compute:', device_id='someid',
+                           arg_list=(portbindings.HOST_ID,), **host_arg) as p2:
+                port2 = p2['port']
+                self.assertEqual(net['id'], port2['network_id'])
+                details = self.driver.get_snat_ip_for_vrf(ctx,
+                                                          TEST_TENANT_ID1,
+                                                          db_net)
+                self.assertEqual(db_net['name'],
+                                 details['external_segment_name'])
+                self.assertEqual('192.168.0.2', details['host_snat_ip'])
+                self.assertEqual('192.168.0.1', details['gateway_ip'])
+                self.assertEqual(
+                    netaddr.IPNetwork(mocked.HOST_POOL_CIDR).prefixlen,
+                    details['prefixlen'])
+                snat_ports = self.driver.db_plugin.get_ports(
+                    ctx, filters={'name': [acst.HOST_SNAT_POOL_PORT],
+                                  'network_id': [snat_network_id],
+                                  'device_id': [TEST_TENANT_ID1]})
+                self.assertEqual(1, len(snat_ports))
+            # Now simulate event of a second host with same VRF
+            host_arg = {'binding:host_id': 'h2'}
+            with self.port(subnet=sub, tenant_id=TEST_TENANT_ID2,
+                           device_owner='compute:', device_id='someid',
+                           arg_list=(portbindings.HOST_ID,), **host_arg) as p3:
+                port3 = p3['port']
+                self.assertEqual(net['id'], port3['network_id'])
+                details = self.driver.get_snat_ip_for_vrf(ctx,
+                                                          TEST_TENANT_ID1,
+                                                          db_net)
+                self.assertEqual(db_net['name'],
+                                 details['external_segment_name'])
+                self.assertEqual('192.168.0.2',
+                                 details['host_snat_ip'])
+                self.assertEqual('192.168.0.1',
+                                 details['gateway_ip'])
+                self.assertEqual(
+                    netaddr.IPNetwork(mocked.HOST_POOL_CIDR).prefixlen,
+                    details['prefixlen'])
+                snat_ports = self.driver.db_plugin.get_ports(
+                    ctx, filters={'name': [acst.HOST_SNAT_POOL_PORT],
+                                  'network_id': [snat_network_id],
+                                  'device_id': [TEST_TENANT_ID1]})
+                self.assertEqual(1, len(snat_ports))
+        snat_ports = self.driver.db_plugin.get_ports(
+            ctx, filters={'name': [acst.HOST_SNAT_POOL_PORT],
+                          'network_id': [snat_network_id]})
+        self.assertEqual(1, len(snat_ports))
+        self.driver.delete_network_postcommit(net_ctx)
+        snat_ports = self.driver.db_plugin.get_ports(
+            ctx, filters={'name': [acst.HOST_SNAT_POOL_PORT],
+                          'network_id': [snat_network_id]})
+        self.assertEqual(0, len(snat_ports))
+        snat_networks = self.driver.db_plugin.get_networks(
+            ctx, filters={'name': [self.driver._get_snat_db_network_name(
+                db_net)]})
+        self.assertEqual(0, len(snat_networks))
+        subnets = self.driver.db_plugin.get_subnets(
+            ctx, filters={'name': [acst.HOST_SNAT_POOL]})
+        self.assertEqual(0, len(subnets))
+
+    def test_2_snat_ips_created_for_2_vrfs_edge_nat(self):
+        # This test case is more of a functional test and should be revisited.
+        TEST_TENANT_ID1 = 'onetenant'
+        TEST_TENANT_ID2 = 'anothertenant'
+        self._snat_mock_setup(TEST_TENANT_ID1)
+        ctx = context.get_admin_context()
+        agent = {'host': 'h1'}
+        agent.update(AGENT_CONF)
+        self.actual_core_plugin.create_or_update_agent(ctx, agent)
+        db_net, net_ctx = self._create_snat_network(ctx, TEST_TENANT_ID1)
+        snat_networks = self.driver.db_plugin.get_networks(
+            ctx, filters={'name': [self.driver._get_snat_db_network_name(
+                db_net)]})
+        snat_network_id = snat_networks[0]['id']
+        net = self.create_network(
+            tenant_id=TEST_TENANT_ID1, expected_res_status=201, shared=True,
+            is_admin_context=True)['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='10.0.0.0/24',
+            ip_version=4, is_admin_context=True)
+        host_arg = {'binding:host_id': 'h2'}
+        # Create port with a different tenant
+        with self.port(subnet=sub, tenant_id=TEST_TENANT_ID2,
+                       device_owner='compute:', device_id='someid',
+                       arg_list=(portbindings.HOST_ID,), **host_arg) as p1:
+            port1 = p1['port']
+            self.assertEqual(net['id'], port1['network_id'])
+            self.driver.apic_manager.apic.fvTenant.name = mock.Mock(
+                return_value=TEST_TENANT_ID2)
+            details = self.driver.get_snat_ip_for_vrf(ctx,
+                                                      TEST_TENANT_ID2, db_net)
+            # Verify that the port has an SNAT IP, which is
+            # allocated in the SNAT network tenant ID
+            self.assertEqual(db_net['name'],
+                             details['external_segment_name'])
+            self.assertEqual('192.168.0.2',
+                             details['host_snat_ip'])
+            self.assertEqual('192.168.0.1',
+                             details['gateway_ip'])
+            self.assertEqual(
+                netaddr.IPNetwork(mocked.HOST_POOL_CIDR).prefixlen,
+                details['prefixlen'])
+            snat_ports = self.driver.db_plugin.get_ports(
+                ctx, filters={'name': [acst.HOST_SNAT_POOL_PORT],
+                              'network_id': [snat_network_id],
+                              'device_id': [TEST_TENANT_ID2]})
+            self.assertEqual(1, len(snat_ports))
+            # Simulate a second event on the same host with the a different VRF
+            # for the same external network to check if the earlier allocated
+            # SNAT IP is returned
+            with self.port(subnet=sub, tenant_id=TEST_TENANT_ID1,
+                           device_owner='compute:', device_id='someid',
+                           arg_list=(portbindings.HOST_ID,), **host_arg) as p2:
+                port2 = p2['port']
+                self.assertEqual(net['id'], port2['network_id'])
+                self.driver.apic_manager.apic.fvTenant.name = mock.Mock(
+                    return_value=TEST_TENANT_ID1)
+                details = self.driver.get_snat_ip_for_vrf(ctx,
+                                                          TEST_TENANT_ID1,
+                                                          db_net)
+                self.assertEqual(db_net['name'],
+                                 details['external_segment_name'])
+                self.assertEqual('192.168.0.3',
+                                 details['host_snat_ip'])
+                self.assertEqual('192.168.0.1',
+                                 details['gateway_ip'])
+                self.assertEqual(
+                    netaddr.IPNetwork(mocked.HOST_POOL_CIDR).prefixlen,
+                    details['prefixlen'])
+                snat_ports = self.driver.db_plugin.get_ports(
+                    ctx, filters={'name': [acst.HOST_SNAT_POOL_PORT],
+                                  'network_id': [snat_network_id],
+                                  'device_id': [TEST_TENANT_ID1]})
+                self.assertEqual(1, len(snat_ports))
+            # Now simulate event of a second host with same VRF
+            host_arg = {'binding:host_id': 'h2'}
+            with self.port(subnet=sub, tenant_id=TEST_TENANT_ID2,
+                           device_owner='compute:', device_id='someid',
+                           arg_list=(portbindings.HOST_ID,), **host_arg) as p3:
+                port3 = p3['port']
+                self.assertEqual(net['id'], port3['network_id'])
+                self.driver.apic_manager.apic.fvTenant.name = mock.Mock(
+                    return_value=TEST_TENANT_ID2)
+                details = self.driver.get_snat_ip_for_vrf(ctx,
+                                                          TEST_TENANT_ID2,
+                                                          db_net)
+                self.assertEqual(db_net['name'],
+                                 details['external_segment_name'])
+                self.assertEqual('192.168.0.2',
+                                 details['host_snat_ip'])
+                self.assertEqual('192.168.0.1',
+                                 details['gateway_ip'])
+                self.assertEqual(
+                    netaddr.IPNetwork(mocked.HOST_POOL_CIDR).prefixlen,
+                    details['prefixlen'])
+                snat_ports = self.driver.db_plugin.get_ports(
+                    ctx, filters={'name': [acst.HOST_SNAT_POOL_PORT],
+                                  'network_id': [snat_network_id],
+                                  'device_id': [TEST_TENANT_ID2]})
                 self.assertEqual(1, len(snat_ports))
         snat_ports = self.driver.db_plugin.get_ports(
             ctx, filters={'name': [acst.HOST_SNAT_POOL_PORT],
