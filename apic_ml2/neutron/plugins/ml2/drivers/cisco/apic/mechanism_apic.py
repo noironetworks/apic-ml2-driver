@@ -1679,7 +1679,7 @@ class APICMechanismDriver(api.MechanismDriver,
                                       shadow_l3out, encap)
 
                 self._manage_bd_to_l3out_link(
-                    context, router, shadow_l3out, transaction=trs)
+                    context, router, shadow_l3out)
 
             self.apic_manager.ensure_external_epg_created(
                 shadow_l3out, external_epg=shadow_ext_epg,
