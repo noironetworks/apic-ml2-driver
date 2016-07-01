@@ -118,6 +118,11 @@ class VMsDisallowedOnExtNetworkIfNatDisabled(n_exc.BadRequest):
                 "because NAT is disabled")
 
 
+class VMsDisallowedOnExtNetworkIfEdgeNat(n_exc.BadRequest):
+    message = _("Compute ports cannot be created on external network %(net)s "
+                "because edge_nat is enabled")
+
+
 class EdgeNatVlanRangeNotFound(n_exc.BadRequest):
     message = _("No vlan range is specified for L3Out %(l3out)s "
                 "when edge_nat is enabled.")
@@ -1195,9 +1200,13 @@ class APICMechanismDriver(api.MechanismDriver,
         port = context.current
         network = context.network.current
         if (network.get('router:external') and
-                not self._is_nat_enabled_on_ext_net(network) and
                 port.get('device_owner').startswith('compute:')):
-            raise VMsDisallowedOnExtNetworkIfNatDisabled(net=network['name'])
+            if not self._is_nat_enabled_on_ext_net(network):
+                raise VMsDisallowedOnExtNetworkIfNatDisabled(
+                    net=network['name'])
+            elif self._is_edge_nat(
+                self.apic_manager.ext_net_dict.get(network['name'])):
+                raise VMsDisallowedOnExtNetworkIfEdgeNat(net=network['name'])
 
     def create_port_postcommit(self, context):
         self._perform_port_operations(context)

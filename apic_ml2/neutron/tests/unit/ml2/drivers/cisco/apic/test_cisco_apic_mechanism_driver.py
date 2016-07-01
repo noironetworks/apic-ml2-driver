@@ -2839,6 +2839,17 @@ tt':
                           self.driver.create_port_precommit,
                           port_ctx)
 
+    def test_edge_nat_compute_port_precommit_exception(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK_EDGE_NAT,
+                                            TEST_SEGMENT1, external=True)
+        port_ctx = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK_EDGE_NAT,
+                                          'vm1', net_ctx, HOST_ID1)
+        self.assertRaises(md.VMsDisallowedOnExtNetworkIfEdgeNat,
+                          self.driver.create_port_precommit,
+                          port_ctx)
+
     def _get_network_context(self, tenant_id, net_id, seg_id=None,
                              seg_type='vlan', external=False, shared=False):
         network = {'id': net_id,
