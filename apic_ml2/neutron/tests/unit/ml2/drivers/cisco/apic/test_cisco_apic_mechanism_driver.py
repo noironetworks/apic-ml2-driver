@@ -2195,6 +2195,31 @@ tt':
             expected_calls,
             mgr.set_contract_for_external_epg.call_args_list)
 
+    def test_create_pre_edge_nat_external_network_postcommit(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK_PRE_EDGE_NAT,
+                                            TEST_SEGMENT1, external=True)
+        mgr = self.driver.apic_manager
+        self.driver._query_l3out_info = mock.Mock()
+        self.driver._query_l3out_info.return_value = {
+            'l3out_tenant': 'bar_tenant',
+            'vrf_name': 'bar_ctx',
+            'vrf_tenant': 'bar_tenant'}
+        self.driver.create_network_postcommit(net_ctx)
+
+        self.assertFalse(mgr.ensure_context_enforced.called)
+        self.assertFalse(mgr.ensure_external_routed_network_created.called)
+        self.assertFalse(mgr.set_domain_for_external_routed_network.called)
+        self.assertFalse(mgr.ensure_logical_node_profile_created.called)
+        self.assertFalse(mgr.ensure_static_route_created.called)
+        self.assertFalse(mgr.ensure_external_epg_created.called)
+
+        self.assertFalse(mgr.ensure_epg_created.called)
+        self.assertFalse(mgr.ensure_bd_created_on_apic.called)
+        self.assertFalse(mgr.set_l3out_for_bd.called)
+        self.assertFalse(mgr.set_contract_for_epg.called)
+        self.assertFalse(mgr.ensure_subnet_created_on_apic.called)
+
     def test_create_unknown_pre_external_network_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
                                             mocked.APIC_NETWORK_PRE,
@@ -2290,6 +2315,40 @@ tt':
         mgr.delete_contract.assert_called_once_with(
             contract_name, owner='bar_tenant', transaction=mock.ANY)
 
+    def test_delete_pre_edge_nat_external_network_postcommit(self):
+        ctx = self._get_network_context(mocked.APIC_TENANT,
+                                        mocked.APIC_NETWORK_PRE_EDGE_NAT,
+                                        TEST_SEGMENT1, external=True)
+        mgr = self.driver.apic_manager
+        self.driver._query_l3out_info = mock.Mock()
+        self.driver._query_l3out_info.return_value = {
+            'l3out_tenant': 'bar_tenant',
+            'vrf_name': 'bar_ctx',
+            'vrf_tenant': 'bar_tenant'}
+        self.driver.delete_network_postcommit(ctx)
+
+        self.assertFalse(mgr.delete_bd_on_apic.called)
+        self.assertFalse(mgr.delete_epg_for_network.called)
+        self.assertFalse(mgr.delete_external_routed_network.called)
+
+        contract_name = "EXT-%s-allow-all" % mocked.APIC_NETWORK_PRE_EDGE_NAT
+        l3out = self._scoped_name(ctx.current['name'], preexisting=True)
+        expected_calls = [
+            mock.call(l3out, contract_name,
+                      external_epg=mocked.APIC_EXT_EPG, provided=True,
+                      owner='bar_tenant', transaction=mock.ANY),
+            mock.call(l3out, contract_name,
+                      external_epg=mocked.APIC_EXT_EPG, provided=False,
+                      owner='bar_tenant', transaction=mock.ANY)]
+        self._check_call_list(
+            expected_calls,
+            mgr.unset_contract_for_external_epg.call_args_list)
+
+        mgr.delete_tenant_filter.assert_called_once_with(
+            contract_name, owner='bar_tenant', transaction=mock.ANY)
+        mgr.delete_contract.assert_called_once_with(
+            contract_name, owner='bar_tenant', transaction=mock.ANY)
+
     def test_delete_external_no_nat_network_postcommit(self):
         ctx = self._get_network_context(mocked.APIC_TENANT,
                                         mocked.APIC_NETWORK_NO_NAT,
@@ -2340,6 +2399,17 @@ tt':
             '%s/%s' % (SUBNET_GATEWAY, SUBNET_NETMASK),
             scope=None)
 
+    def test_create_edge_nat_external_subnet_postcommit(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK_PRE_EDGE_NAT,
+                                            external=True)
+        subnet_ctx = self._get_subnet_context(SUBNET_GATEWAY,
+                                              SUBNET_CIDR,
+                                              net_ctx)
+        mgr = self.driver.apic_manager
+        self.driver.create_subnet_postcommit(subnet_ctx)
+        self.assertFalse(mgr.ensure_subnet_created_on_apic.called)
+
     def test_delete_external_subnet_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
                                             mocked.APIC_NETWORK,
@@ -2353,6 +2423,17 @@ tt':
             self._tenant(),
             "EXT-bd-%s" % self._scoped_name(mocked.APIC_NETWORK),
             '%s/%s' % (SUBNET_GATEWAY, SUBNET_NETMASK))
+
+    def test_delete_edge_nat_external_subnet_postcommit(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK_PRE_EDGE_NAT,
+                                            external=True)
+        subnet_ctx = self._get_subnet_context(SUBNET_GATEWAY,
+                                              SUBNET_CIDR,
+                                              net_ctx)
+        mgr = self.driver.apic_manager
+        self.driver.delete_subnet_postcommit(subnet_ctx)
+        self.assertFalse(mgr.ensure_subnet_deleted_on_apic.called)
 
     def test_update_external_subnet_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
@@ -2377,6 +2458,22 @@ tt':
             "EXT-bd-%s" % self._scoped_name(mocked.APIC_NETWORK),
             '%s/%s' % ('10.3.1.1', SUBNET_NETMASK),
             transaction=mock.ANY)
+
+    def test_update_edge_nat_external_subnet_postcommit(self):
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK_PRE_EDGE_NAT,
+                                            external=True)
+        subnet_ctx1 = self._get_subnet_context(SUBNET_GATEWAY,
+                                               SUBNET_CIDR,
+                                               net_ctx)
+        subnet_ctx2 = self._get_subnet_context('10.3.1.1',
+                                               SUBNET_CIDR,
+                                               net_ctx)
+        subnet_ctx2.original = subnet_ctx1.current
+        mgr = self.driver.apic_manager
+        self.driver.update_subnet_postcommit(subnet_ctx2)
+        self.assertFalse(mgr.ensure_subnet_deleted_on_apic.called)
+        self.assertFalse(mgr.ensure_subnet_created_on_apic.called)
 
     def test_create_external_subnet_overlap(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
