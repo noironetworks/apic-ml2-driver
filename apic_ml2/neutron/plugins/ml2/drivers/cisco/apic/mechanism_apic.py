@@ -1214,7 +1214,9 @@ class APICMechanismDriver(api.MechanismDriver,
                 bd_id = self.name_mapper.bridge_domain(
                     context, network_id, openstack_owner=network['tenant_id'])
                 return tenant_id, bd_id, gateway_ip
-            elif self._is_nat_enabled_on_ext_net(network):
+            elif (self._is_nat_enabled_on_ext_net(network) and
+                    not self._is_edge_nat(
+                        self.apic_manager.ext_net_dict[network['name']])):
                 l3out_name = self.name_mapper.l3_out(
                     context, network['id'],
                     openstack_owner=network['tenant_id'])
@@ -2044,36 +2046,40 @@ class APICMechanismDriver(api.MechanismDriver,
             with self.apic_manager.apic.transaction() as trs:
                 # create EPG, BD for external network and
                 # connect to external VRF
-                ext_bd_name = self._get_ext_bd_for_ext_net(l3out_name)
-                ext_epg_name = self._get_ext_epg_for_ext_net(l3out_name)
-                app_profile_name = self._get_network_app_profile(network)
-                self.apic_manager.ensure_bd_created_on_apic(
-                    tenant_id, ext_bd_name, ctx_owner=external_vrf_tenant,
-                    ctx_name=external_vrf, transaction=trs)
-                self.apic_manager.set_l3out_for_bd(
-                    tenant_id, ext_bd_name, l3out_name_pre or l3out_name,
-                    transaction=trs)
-                self.apic_manager.ensure_epg_created(
-                    tenant_id, ext_epg_name, bd_name=ext_bd_name,
-                    app_profile_name=app_profile_name, transaction=trs)
+                if not self._is_edge_nat(net_info):
+                    ext_bd_name = self._get_ext_bd_for_ext_net(l3out_name)
+                    ext_epg_name = self._get_ext_epg_for_ext_net(l3out_name)
+                    app_profile_name = self._get_network_app_profile(network)
+                    self.apic_manager.ensure_bd_created_on_apic(
+                        tenant_id, ext_bd_name, ctx_owner=external_vrf_tenant,
+                        ctx_name=external_vrf, transaction=trs)
+                    self.apic_manager.set_l3out_for_bd(
+                        tenant_id, ext_bd_name, l3out_name_pre or l3out_name,
+                        transaction=trs)
+                    self.apic_manager.ensure_epg_created(
+                        tenant_id, ext_epg_name, bd_name=ext_bd_name,
+                        app_profile_name=app_profile_name, transaction=trs)
 
                 # create any required subnets in BD
                 gw, plen = net_info.get('host_pool_cidr', '/').split('/', 1)
                 if gw and plen:
-                    self.apic_manager.ensure_subnet_created_on_apic(
-                        tenant_id, ext_bd_name, gw + '/' + plen,
-                        transaction=trs)
+                    if not self._is_edge_nat(net_info):
+                        self.apic_manager.ensure_subnet_created_on_apic(
+                            tenant_id, ext_bd_name, gw + '/' + plen,
+                            transaction=trs)
+                    # we still need this even in edge_nat mode
                     self._create_snat_ip_allocation_subnet(
                         context, network, net_info.get('host_pool_cidr'), gw)
 
                 # make EPG use allow-everything contract
-                self.apic_manager.set_contract_for_epg(
-                    tenant_id, ext_epg_name, contract_name,
-                    app_profile_name=app_profile_name, transaction=trs)
-                self.apic_manager.set_contract_for_epg(
-                    tenant_id, ext_epg_name, contract_name,
-                    app_profile_name=app_profile_name, provider=True,
-                    transaction=trs)
+                if not self._is_edge_nat(net_info):
+                    self.apic_manager.set_contract_for_epg(
+                        tenant_id, ext_epg_name, contract_name,
+                        app_profile_name=app_profile_name, transaction=trs)
+                    self.apic_manager.set_contract_for_epg(
+                        tenant_id, ext_epg_name, contract_name,
+                        app_profile_name=app_profile_name, provider=True,
+                        transaction=trs)
 
     def _delete_snat_ip_allocation_network(self, context, network):
         """This deletes all the SNAT pool resources we created in the DB """
@@ -2138,8 +2144,9 @@ class APICMechanismDriver(api.MechanismDriver,
             l3out_tenant = tenant_id
             l3out_external_epg = apic_manager.EXT_EPG
 
-        # If NAT ius enabled, delete EPG, BD for external network
-        if self._is_nat_enabled_on_ext_net(network):
+        # If NAT is enabled, delete EPG, BD for external network
+        if (self._is_nat_enabled_on_ext_net(network) and
+                not self._is_edge_nat(net_info)):
             with self.apic_manager.apic.transaction() as trs:
                 ext_bd_name = self._get_ext_bd_for_ext_net(l3out_name)
                 ext_epg_name = self._get_ext_epg_for_ext_net(l3out_name)
