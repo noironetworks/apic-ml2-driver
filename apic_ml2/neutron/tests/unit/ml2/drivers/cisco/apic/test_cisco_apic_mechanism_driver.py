@@ -221,6 +221,13 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
             context.get_admin_context(),
             device='tap%s' % port_id, host=host)
 
+    def _request_endpoint_details(self, port_id, host, timestamp=None,
+                                  request_id=None):
+        return self.driver.request_endpoint_details(
+            context.get_admin_context(),
+            request={'device': 'tap%s' % port_id, 'timestamp': 0,
+                     'request_id': 'request_id'}, host=host)
+
 
 class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
 
@@ -780,6 +787,49 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                         p2['port']['id'],
                         self.driver.notifier.port_update.call_args_list[
                             0][0][1]['id'])
+
+    def test_request_endpoint_details(self):
+        net = self.create_network(expected_res_status=201)['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4)
+        self._register_agent('h1')
+        with self.port(subnet=sub) as p1:
+            p1 = p1['port']
+            self.assertEqual(net['id'], p1['network_id'])
+            # Bind port to trigger path binding
+            self._bind_port_to_host(p1['id'], 'h1')
+            self.driver._add_ip_mapping_details = mock.Mock()
+            details = self._get_gbp_details(p1['id'], 'h1')
+            request = self._request_endpoint_details(p1['id'], 'h1')
+            details.pop('attestation', None)
+            request['gbp_details'].pop('attestation', None)
+            self.assertEqual(details, request['gbp_details'])
+            self.assertEqual(p1['id'], request['neutron_details']['port_id'])
+
+    def test_request_endpoint_details_not_found(self):
+        self.driver._add_ip_mapping_details = mock.Mock()
+        request = self._request_endpoint_details('randomid', 'h1')
+        # Port not found
+        self.assertEqual({'device': 'tap%s' % 'randomid'},
+                         request['gbp_details'])
+        self.assertTrue('port_id' not in request['neutron_details'])
+
+    def test_request_endpoint_details_exception(self):
+        net = self.create_network(expected_res_status=201)['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4)
+        self._register_agent('h1')
+        with self.port(subnet=sub) as p1:
+            p1 = p1['port']
+            self.assertEqual(net['id'], p1['network_id'])
+            # Bind port to trigger path binding
+            self._bind_port_to_host(p1['id'], 'h1')
+            self.driver._add_ip_mapping_details = mock.Mock(
+                side_effect=Exception)
+            request = self._request_endpoint_details(p1['id'], 'h1')
+            self.assertIsNone(request)
 
 
 class TestCiscoApicML2SubnetScope(ApicML2IntegratedTestCase):
