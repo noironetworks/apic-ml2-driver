@@ -1322,13 +1322,15 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
             self._scoped_name(port_ctx.current['device_id']),
             owner=self._router_tenant())
 
+        vrf_pfx = ('%s-' % mocked.APIC_ROUTER
+                   if self.driver.vrf_per_router_tenants else '')
         shd_l3out = (self.driver.per_tenant_context and
-                     self._scoped_name(mocked.APIC_NETWORK) or
+                     self._scoped_name(vrf_pfx + mocked.APIC_NETWORK) or
                      mocked.APIC_NETWORK)
         expected_calls = [
             mock.call("Shd-%s" % shd_l3out,
                       owner=self._tenant(ext_nat=True), transaction=mock.ANY,
-                      context=self._network_vrf_name())]
+                      context=self._routed_network_vrf_name())]
         self._check_call_list(
             expected_calls,
             mgr.ensure_external_routed_network_created.call_args_list)
@@ -1390,14 +1392,16 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
             self._scoped_name(port_ctx.current['device_id']),
             owner=self._router_tenant())
 
+        vrf_pfx = ('%s-' % mocked.APIC_ROUTER
+                   if self.driver.vrf_per_router_tenants else '')
         l3out_name = (self.driver.per_tenant_context and
-                      self._scoped_name(mocked.APIC_NETWORK_EDGE_NAT) or
-                      mocked.APIC_NETWORK_EDGE_NAT)
+                      self._scoped_name(vrf_pfx + mocked.APIC_NETWORK_EDGE_NAT)
+                      or mocked.APIC_NETWORK_EDGE_NAT)
         l3out_name = "Auto-%s" % l3out_name
         expected_calls = [
             mock.call(l3out_name,
                       owner=self._tenant(ext_nat=True), transaction=mock.ANY,
-                      context=self._network_vrf_name())]
+                      context=self._routed_network_vrf_name())]
         self._check_call_list(
             expected_calls,
             mgr.ensure_external_routed_network_created.call_args_list)
@@ -1410,7 +1414,8 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
             expected_calls, mgr.ensure_external_epg_created.call_args_list)
 
         self.driver.l3out_vlan_alloc.reserve_vlan.assert_called_once_with(
-            mocked.APIC_NETWORK_EDGE_NAT + '-name', self._network_vrf_name(),
+            mocked.APIC_NETWORK_EDGE_NAT + '-name',
+            self._routed_network_vrf_name(),
             self._tenant(ext_nat=True))
         self.assertTrue(mgr.set_domain_for_external_routed_network.called)
         self.assertTrue(mgr.ensure_logical_node_profile_created.called)
@@ -1449,6 +1454,8 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
     def _test_update_interface_port_postcommit(self, no_nat=False, pre=False,
                                                net_tenant=None):
         net_tenant = net_tenant or mocked.APIC_TENANT
+        if self.driver.vrf_per_router_tenants:
+            self.driver.vrf_per_router_tenants.append(net_tenant)
         if no_nat:
             ext_net = mocked.APIC_NETWORK_NO_NAT
             if pre:
@@ -1470,12 +1477,13 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
                                           interface=True)
         self.driver._l3_plugin.get_router = mock.Mock(
             return_value={'id': mocked.APIC_ROUTER,
-                          'tenant_id': mocked.APIC_TENANT,
+                          'tenant_id': net_tenant,
                           'external_gateway_info':
                               {'network_id': ext_net,
                                'external_fixed_ips': []}})
         port_ctx._plugin.get_network = mock.Mock(
             return_value={'name': ext_net + '-name',
+                          'tenant_id': mocked.APIC_TENANT,
                           'router:external': True})
 
         self.driver.update_port_postcommit(port_ctx)
@@ -1486,9 +1494,21 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
             l3out_name = "Auto-%s" % l3out_name
         elif pre:
             l3out_name = self._scoped_name(ext_net + '-name', preexisting=True)
+        bd_tenant = self._tenant(neutron_tenant=net_tenant)
         bd_name = self._scoped_name('net_id', tenant=net_tenant)
-        self.driver.apic_manager.set_l3out_for_bd.assert_called_once_with(
-            self._tenant(neutron_tenant=net_tenant), bd_name, l3out_name)
+        mgr = self.driver.apic_manager
+        if self.driver.vrf_per_router_tenants:
+            mgr.ensure_context_enforced.assert_called_once_with(
+                owner=bd_tenant,
+                ctx_id=self._routed_network_vrf_name(tenant=net_tenant),
+                transaction=mock.ANY)
+            mgr.set_context_for_bd.assert_called_once_with(
+                bd_tenant, bd_name,
+                self._routed_network_vrf_name(tenant=net_tenant),
+                transaction=mock.ANY)
+        mgr.set_l3out_for_bd.assert_called_once_with(
+            bd_tenant, bd_name, l3out_name,
+            transaction=mock.ANY)
 
     def test_update_edge_nat_interface_port_postcommit(self):
         self._test_update_interface_port_postcommit()
@@ -1601,14 +1621,17 @@ tt':
 
         self.driver.l3out_vlan_alloc.reserve_vlan.assert_called_once_with(
             mocked.APIC_NETWORK_PRE_EDGE_NAT + '-name',
-            self._network_vrf_name(), self._tenant(ext_nat=True))
+            self._routed_network_vrf_name(), self._tenant(ext_nat=True))
         self.assertFalse(mgr.mgr.ensure_external_routed_network_created.called)
         self.assertFalse(mgr.set_domain_for_external_routed_network.called)
         self.assertFalse(mgr.ensure_logical_node_profile_created.called)
         self.assertFalse(mgr.ensure_static_route_created.called)
 
+        vrf_pfx = ('%s-' % mocked.APIC_ROUTER
+                   if self.driver.vrf_per_router_tenants else '')
         l3out_name = (self.driver.per_tenant_context and
-                      self._scoped_name(mocked.APIC_NETWORK_PRE_EDGE_NAT) or
+                      self._scoped_name(vrf_pfx +
+                                        mocked.APIC_NETWORK_PRE_EDGE_NAT) or
                       mocked.APIC_NETWORK_PRE_EDGE_NAT)
         l3out_name = "Auto-%s" % l3out_name
 
@@ -1617,7 +1640,7 @@ tt':
         final_req = re.sub('tn-Sub',
                            "tn-%s" % self._tenant(ext_nat=True), final_req)
         final_req = re.sub('ctx-Sub',
-                           "%s" % self._network_vrf_name(), final_req)
+                           "%s" % self._routed_network_vrf_name(), final_req)
         mgr.apic.post_body.assert_called_once_with(
             mgr.apic.l3extOut.mo, final_req, self._tenant(ext_nat=True),
             l3out_name)
@@ -1681,13 +1704,15 @@ tt':
             self._scoped_name(port_ctx.current['device_id']),
             owner=self._router_tenant())
 
+        vrf_pfx = ('%s-' % mocked.APIC_ROUTER
+                   if self.driver.vrf_per_router_tenants else '')
         shd_l3out = (self.driver.per_tenant_context and
-                     self._scoped_name(mocked.APIC_NETWORK_PRE) or
+                     self._scoped_name(vrf_pfx + mocked.APIC_NETWORK_PRE) or
                      mocked.APIC_NETWORK_PRE)
         expected_calls = [
             mock.call("Shd-%s" % shd_l3out,
                       owner=self._tenant(ext_nat=True), transaction=mock.ANY,
-                      context=self._network_vrf_name())]
+                      context=self._routed_network_vrf_name())]
         self._check_call_list(
             expected_calls,
             mgr.ensure_external_routed_network_created.call_args_list)
@@ -1770,7 +1795,7 @@ tt':
         l3out_name = self._scoped_name(net_ctx.current['name'],
                                        preexisting=True)
         mgr.set_context_for_external_routed_network.assert_called_once_with(
-            l3out_tenant, l3out_name, self._network_vrf_name(),
+            l3out_tenant, l3out_name, self._routed_network_vrf_name(),
             transaction=mock.ANY)
 
         expected_calls = [
@@ -1820,9 +1845,11 @@ tt':
         self.driver._delete_path_if_last = mock.Mock()
         self.driver.delete_port_postcommit(port_ctx)
         mgr = self.driver.apic_manager
+        vrf_pfx = ('%s-' % mocked.APIC_ROUTER
+                   if self.driver.vrf_per_router_tenants else '')
         mgr.delete_external_routed_network.assert_called_once_with(
             "Shd-%s" % (self.driver.per_tenant_context and
-                        self._scoped_name(mocked.APIC_NETWORK) or
+                        self._scoped_name(vrf_pfx + mocked.APIC_NETWORK) or
                         mocked.APIC_NETWORK),
             owner=self._tenant(ext_nat=True))
 
@@ -1858,19 +1885,19 @@ tt':
              'id': 'net_id'}]
         self.driver.delete_port_postcommit(port_ctx)
         mgr = self.driver.apic_manager
+        vrf_pfx = ('%s-' % mocked.APIC_ROUTER
+                   if self.driver.vrf_per_router_tenants else '')
+        l3out_name = (self.driver.per_tenant_context and
+                      self._scoped_name(vrf_pfx + mocked.APIC_NETWORK_EDGE_NAT)
+                      or mocked.APIC_NETWORK_EDGE_NAT)
+        l3out_name = "Auto-%s" % l3out_name
         mgr.delete_external_routed_network.assert_called_once_with(
-            "Auto-%s" % (self.driver.per_tenant_context and
-                         self._scoped_name(mocked.APIC_NETWORK_EDGE_NAT) or
-                         mocked.APIC_NETWORK_EDGE_NAT),
-            owner=self._tenant(ext_nat=True))
+            l3out_name, owner=self._tenant(ext_nat=True))
         self.driver.l3out_vlan_alloc.release_vlan.assert_called_once_with(
-            mocked.APIC_NETWORK_EDGE_NAT + '-name', self._network_vrf_name(),
+            mocked.APIC_NETWORK_EDGE_NAT + '-name',
+            self._routed_network_vrf_name(),
             self._tenant(ext_nat=True))
 
-        l3out_name = (self.driver.per_tenant_context and
-                      self._scoped_name(mocked.APIC_NETWORK_EDGE_NAT) or
-                      mocked.APIC_NETWORK_EDGE_NAT)
-        l3out_name = "Auto-%s" % l3out_name
         bd_name = self._scoped_name('net_id')
         mgr.unset_l3out_for_bd.assert_called_once_with(
             self._tenant(), bd_name, l3out_name, transaction=mock.ANY)
@@ -1891,19 +1918,19 @@ tt':
              'id': 'net_id'}]
         self.driver.delete_port_postcommit(port_ctx)
         mgr = self.driver.apic_manager
-        mgr.delete_external_routed_network.assert_called_once_with(
-            "Auto-%s" % (self.driver.per_tenant_context and
-                         self._scoped_name(mocked.APIC_NETWORK_PRE_EDGE_NAT) or
-                         mocked.APIC_NETWORK_PRE_EDGE_NAT),
-            owner=self._tenant(ext_nat=True))
-        self.driver.l3out_vlan_alloc.release_vlan.assert_called_once_with(
-            mocked.APIC_NETWORK_PRE_EDGE_NAT + '-name',
-            self._network_vrf_name(), self._tenant(ext_nat=True))
-
+        vrf_pfx = ('%s-' % mocked.APIC_ROUTER
+                   if self.driver.vrf_per_router_tenants else '')
         l3out_name = (self.driver.per_tenant_context and
-                      self._scoped_name(mocked.APIC_NETWORK_PRE_EDGE_NAT) or
+                      self._scoped_name(vrf_pfx +
+                                        mocked.APIC_NETWORK_PRE_EDGE_NAT) or
                       mocked.APIC_NETWORK_PRE_EDGE_NAT)
         l3out_name = "Auto-%s" % l3out_name
+        mgr.delete_external_routed_network.assert_called_once_with(
+            l3out_name, owner=self._tenant(ext_nat=True))
+        self.driver.l3out_vlan_alloc.release_vlan.assert_called_once_with(
+            mocked.APIC_NETWORK_PRE_EDGE_NAT + '-name',
+            self._routed_network_vrf_name(), self._tenant(ext_nat=True))
+
         bd_name = self._scoped_name('net_id')
         mgr.unset_l3out_for_bd.assert_called_once_with(
             self._tenant(), bd_name, l3out_name, transaction=mock.ANY)
@@ -1933,8 +1960,16 @@ tt':
                       mocked.APIC_NETWORK_EDGE_NAT)
         l3out_name = "Auto-%s" % l3out_name
         bd_name = self._scoped_name('net_id')
-        self.driver.apic_manager.unset_l3out_for_bd.assert_called_once_with(
-            self._tenant(), bd_name, l3out_name)
+        mgr = self.driver.apic_manager
+        mgr.unset_l3out_for_bd.assert_called_once_with(
+            self._tenant(), bd_name, l3out_name, transaction=mock.ANY)
+        if self.driver.vrf_per_router_tenants:
+            mgr.ensure_context_deleted(
+                owner=self._tenant(), ctx_id=self._routed_network_vrf_name(),
+                transaction=mock.ANY)
+            mgr.set_context_for_bd.assert_called_once_with(
+                self._tenant(), bd_name, self._network_vrf_name(),
+                transaction=mock.ANY)
 
     def test_update_no_nat_gw_port_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
@@ -1964,7 +1999,7 @@ tt':
 
         mgr.set_context_for_external_routed_network.assert_called_once_with(
             self._tenant(), l3out_name,
-            self._network_vrf_name(),
+            self._routed_network_vrf_name(),
             transaction=mock.ANY)
 
         mgr.ensure_external_epg_consumed_contract.assert_called_once_with(
@@ -2014,9 +2049,11 @@ tt':
         self.driver._query_l3out_info.return_value = {
             'l3out_tenant': 'bar_tenant'}
         self.driver.delete_port_postcommit(port_ctx)
+        vrf_pfx = ('%s-' % mocked.APIC_ROUTER
+                   if self.driver.vrf_per_router_tenants else '')
         mgr.delete_external_routed_network.assert_called_once_with(
             "Shd-%s" % (self.driver.per_tenant_context and
-                        self._scoped_name(mocked.APIC_NETWORK_PRE) or
+                        self._scoped_name(vrf_pfx + mocked.APIC_NETWORK_PRE) or
                         mocked.APIC_NETWORK_PRE),
             owner=self._tenant(ext_nat=True))
 
@@ -2835,6 +2872,8 @@ tt':
             gw_ports[i].current['id'] += i
             gw_ports[i]._plugin.get_ports = get_ports
 
+        if self.driver.vrf_per_router_tenants:
+            self.driver.vrf_per_router_tenants.extend(['t1', 't2'])
         return gw_ports
 
     def _test_delete_gw_port_multiple_postcommit(self, pre):
@@ -2846,7 +2885,6 @@ tt':
             ext_net_name = mocked.APIC_NETWORK
             ext_epg = mocked.APIC_EXT_EPG
 
-        shadow_l3out = "Shd-%s" % ext_net_name
         shadow_ext_epg = "Shd-%s" % ext_epg
 
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
@@ -2859,34 +2897,53 @@ tt':
 
         # Delete first GW port
         self.driver.delete_port_postcommit(gw_ports[0])
-        self.assertFalse(mgr.delete_external_routed_network.called)
+        vrf_pfx = ('%s-' % gw_ports[0]._port['device_id']
+                   if self.driver.vrf_per_router_tenants else '')
         if self.driver.single_tenant_mode and self.driver.per_tenant_context:
             shadow_l3out = (
-                "Shd-%s" % self._scoped_name(ext_net_name, tenant='t1'))
-        exp_calls = [
-            mock.call(shadow_l3out,
-                      'contract-r1',
-                      external_epg=shadow_ext_epg,
-                      owner=self._tenant(ext_nat=True, neutron_tenant='t1'),
-                      provided=True),
-            mock.call(shadow_l3out,
-                      'contract-r1',
-                      external_epg=shadow_ext_epg,
-                      owner=self._tenant(ext_nat=True, neutron_tenant='t1'),
-                      provided=False)
-        ]
-        self._check_call_list(
-            exp_calls, mgr.unset_contract_for_external_epg.call_args_list)
+                "Shd-%s" % self._scoped_name(vrf_pfx + ext_net_name,
+                                             tenant='t1'))
+        else:
+            shadow_l3out = "Shd-%s" % (vrf_pfx + ext_net_name)
+
+        if self.driver.vrf_per_router_tenants:
+            mgr.delete_external_routed_network.assert_called_once_with(
+                shadow_l3out, owner=self._tenant(ext_nat=True,
+                                                 neutron_tenant='t1'))
+        else:
+            self.assertFalse(mgr.delete_external_routed_network.called)
+            exp_calls = [
+                mock.call(shadow_l3out,
+                          'contract-r1',
+                          external_epg=shadow_ext_epg,
+                          owner=self._tenant(ext_nat=True,
+                                             neutron_tenant='t1'),
+                          provided=True),
+                mock.call(shadow_l3out,
+                          'contract-r1',
+                          external_epg=shadow_ext_epg,
+                          owner=self._tenant(ext_nat=True,
+                                             neutron_tenant='t1'),
+                          provided=False)
+            ]
+            self._check_call_list(
+                exp_calls, mgr.unset_contract_for_external_epg.call_args_list)
         del gw_ports[0]
 
         # Delete second GW port
+        mgr.delete_external_routed_network.reset_mock()
         mgr.unset_contract_for_external_epg.reset_mock()
         self.driver.delete_port_postcommit(gw_ports[0])
+        vrf_pfx = ('%s-' % gw_ports[0]._port['device_id']
+                   if self.driver.vrf_per_router_tenants else '')
 
         if self.driver.per_tenant_context:
             if self.driver.single_tenant_mode:
                 shadow_l3out = (
-                    "Shd-%s" % self._scoped_name(ext_net_name, tenant='t1'))
+                    "Shd-%s" % self._scoped_name(vrf_pfx + ext_net_name,
+                                                 tenant='t1'))
+            else:
+                shadow_l3out = "Shd-%s" % (vrf_pfx + ext_net_name)
             mgr.delete_external_routed_network.assert_called_once_with(
                 shadow_l3out,
                 owner=self._tenant(ext_nat=True, neutron_tenant='t1'))
@@ -2913,9 +2970,14 @@ tt':
         mgr.get_router_contract.return_value = mocked.FakeDbContract(
             mocked.APIC_CONTRACT + 'r3')
         self.driver.delete_port_postcommit(gw_ports[0])
+        vrf_pfx = ('%s-' % gw_ports[0]._port['device_id']
+                   if self.driver.vrf_per_router_tenants else '')
         if self.driver.single_tenant_mode and self.driver.per_tenant_context:
             shadow_l3out = (
-                "Shd-%s" % self._scoped_name(ext_net_name, tenant='t2'))
+                "Shd-%s" % self._scoped_name(vrf_pfx + ext_net_name,
+                                             tenant='t2'))
+        else:
+            shadow_l3out = "Shd-%s" % (vrf_pfx + ext_net_name)
         mgr.delete_external_routed_network.assert_called_once_with(
             shadow_l3out, owner=self._tenant(ext_nat=True,
                                              neutron_tenant='t2'))
@@ -3519,6 +3581,91 @@ class TestCiscoApicMechDriverSingleTenantSingleVRF(
         self.override_conf('single_tenant_mode', True,
                            'ml2_cisco_apic')
         super(TestCiscoApicMechDriverSingleTenantSingleVRF, self).setUp()
+
+
+class VrfPerRouterBase(object):
+    def doSetup(self):
+        self.override_conf('vrf_per_router_tenants',
+                           [' coke ', '', ' ', mocked.APIC_TENANT],
+                           'ml2_cisco_apic')
+
+    def test_config_option(self):
+        self.assertEqual(['coke', mocked.APIC_TENANT],
+                         self.driver.vrf_per_router_tenants)
+
+    def test_delete_multiple_interface_ports(self):
+        intf_ports = []
+
+        def get_ports(ctx, filters):
+            return [p.current for p in intf_ports]
+
+        for x in range(0, 2):
+            net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                                'net-%s' % x, TEST_SEGMENT1)
+            port = self._get_port_context(mocked.APIC_TENANT,
+                                          'net-%s' % x,
+                                          'intf', net_ctx, HOST_ID1,
+                                          router_owner=mocked.APIC_ROUTER,
+                                          interface=True)
+            port.current['id'] += x
+            port._plugin.get_ports = get_ports
+            intf_ports.append(port)
+
+        mgr = self.driver.apic_manager
+
+        self.driver.delete_port_postcommit(intf_ports[0])
+        mgr.ensure_context_deleted.assert_not_called()
+
+        del intf_ports[0]
+        self.driver.delete_port_postcommit(intf_ports[0])
+        mgr.ensure_context_deleted.assert_called_once_with(
+            owner=self._tenant(), ctx_id=self._routed_network_vrf_name(),
+            transaction=mock.ANY)
+
+    def test_multiple_routers_precommit_exception(self):
+        intf_ports = []
+
+        def get_ports(ctx, filters):
+            return [p.current for p in intf_ports]
+
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK, TEST_SEGMENT1)
+        for x in range(0, 2):
+            rtr = '%s-%d' % (mocked.APIC_ROUTER, x)
+            port = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK,
+                                          'intf', net_ctx, HOST_ID1,
+                                          router_owner=rtr,
+                                          interface=True)
+            port.current['id'] += x
+            port._plugin.get_ports = get_ports
+            intf_ports.append(port)
+
+            if x < 1:
+                # no exception expected
+                self.driver.create_port_precommit(port)
+                self.driver.update_port_precommit(port)
+            else:
+                self.assertRaises(md.OnlyOneRouterPermittedIfVrfPerRouter,
+                                  self.driver.create_port_precommit, port)
+                self.assertRaises(md.OnlyOneRouterPermittedIfVrfPerRouter,
+                                  self.driver.update_port_precommit, port)
+
+
+class TestCiscoApicMechDriverVrfPerRouter(TestCiscoApicMechDriver,
+                                          VrfPerRouterBase):
+
+    def setUp(self):
+        self.doSetup()
+        super(TestCiscoApicMechDriverVrfPerRouter, self).setUp()
+
+
+class TestCiscoApicMechDriverVrfPerRouterSingleTenant(
+    TestCiscoApicMechDriverSingleTenant, VrfPerRouterBase):
+
+    def setUp(self):
+        self.doSetup()
+        super(TestCiscoApicMechDriverVrfPerRouterSingleTenant, self).setUp()
 
 
 class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
