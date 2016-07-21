@@ -92,6 +92,10 @@ apic_opts = [
     cfg.StrOpt('network_constraints_filename',
                default=None,
                help=_("Complete path of file containing network constraints")),
+    cfg.ListOpt('vrf_per_router_tenants',
+                default=[],
+                help=_('Projects in which each router maps to a '
+                       'separate VRF')),
 ]
 
 
