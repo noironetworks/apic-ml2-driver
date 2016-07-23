@@ -131,6 +131,14 @@ class ControllerMixin(object):
             return APIC_TENANT
         return ApicName('shared')
 
+    def _routed_network_vrf_name(self, net_name=None, router=None,
+                                 tenant=None):
+        if self.driver.vrf_per_router_tenants:
+            router = router or APIC_ROUTER
+            return ('%s-%s' % (tenant or APIC_TENANT, router)
+                    if self.driver.single_tenant_mode else router)
+        return self._network_vrf_name(net_name=net_name)
+
     def _router_tenant(self):
         if self.driver.single_tenant_mode:
             return APIC_SYSTEM_ID
