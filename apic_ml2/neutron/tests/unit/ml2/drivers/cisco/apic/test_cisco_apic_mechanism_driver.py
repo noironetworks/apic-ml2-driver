@@ -1506,10 +1506,6 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
         bd_name = self._scoped_name('net_id', tenant=net_tenant)
         mgr = self.driver.apic_manager
         if self.driver.vrf_per_router_tenants:
-            mgr.ensure_context_enforced.assert_called_once_with(
-                owner=bd_tenant,
-                ctx_id=self._routed_network_vrf_name(tenant=net_tenant),
-                transaction=mock.ANY)
             mgr.set_context_for_bd.assert_called_once_with(
                 bd_tenant, bd_name,
                 self._routed_network_vrf_name(tenant=net_tenant),
@@ -3601,34 +3597,32 @@ class VrfPerRouterBase(object):
         self.assertEqual(['coke', mocked.APIC_TENANT],
                          self.driver.vrf_per_router_tenants)
 
-    def test_delete_multiple_interface_ports(self):
-        intf_ports = []
+    def test_create_delete_router_vrf(self):
+        routers = [{'id': 'r1', 'tenant_id': mocked.APIC_TENANT},
+                   {'id': 'r2', 'tenant_id': 'another'}]
 
-        def get_ports(ctx, filters):
-            return [p.current for p in intf_ports]
+        for rtr in routers:
+            is_vrf_per_router = (rtr['tenant_id'] == mocked.APIC_TENANT)
+            mgr = self.driver.apic_manager
+            vrf_tenant = self._tenant(neutron_tenant=rtr['tenant_id'])
+            vrf_name = self._routed_network_vrf_name(router=rtr['id'],
+                                                     tenant=rtr['tenant_id'])
 
-        for x in range(0, 2):
-            net_ctx = self._get_network_context(mocked.APIC_TENANT,
-                                                'net-%s' % x, TEST_SEGMENT1)
-            port = self._get_port_context(mocked.APIC_TENANT,
-                                          'net-%s' % x,
-                                          'intf', net_ctx, HOST_ID1,
-                                          router_owner=mocked.APIC_ROUTER,
-                                          interface=True)
-            port.current['id'] += x
-            port._plugin.get_ports = get_ports
-            intf_ports.append(port)
+            mgr.ensure_context_enforced.reset_mock()
+            self.driver.create_vrf_per_router(rtr, 'txn')
+            if is_vrf_per_router:
+                mgr.ensure_context_enforced.assert_called_once_with(
+                    owner=vrf_tenant, ctx_id=vrf_name, transaction='txn')
+            else:
+                mgr.ensure_context_enforced.assert_not_called()
 
-        mgr = self.driver.apic_manager
-
-        self.driver.delete_port_postcommit(intf_ports[0])
-        mgr.ensure_context_deleted.assert_not_called()
-
-        del intf_ports[0]
-        self.driver.delete_port_postcommit(intf_ports[0])
-        mgr.ensure_context_deleted.assert_called_once_with(
-            owner=self._tenant(), ctx_id=self._routed_network_vrf_name(),
-            transaction=mock.ANY)
+            mgr.ensure_context_deleted.reset_mock()
+            self.driver.delete_vrf_per_router(rtr, 'txn')
+            if is_vrf_per_router:
+                mgr.ensure_context_deleted.assert_called_once_with(
+                    owner=vrf_tenant, ctx_id=vrf_name, transaction='txn')
+            else:
+                mgr.ensure_context_deleted.assert_not_called()
 
     def test_multiple_routers_precommit_exception(self):
         intf_ports = []
