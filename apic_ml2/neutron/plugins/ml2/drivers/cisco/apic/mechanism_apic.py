@@ -937,22 +937,7 @@ class APICMechanismDriver(api.MechanismDriver,
                         bd_tenant, bd_name,
                         self._get_network_vrf(context, network)['aci_name'],
                         transaction=trs)
-                    # delete VRF if last interface port
-                    intf_port_filter = {
-                        'device_owner': [n_constants.DEVICE_OWNER_ROUTER_INTF],
-                        'device_id': [router_id]}
-                    other_ports = context._plugin.get_ports(
-                        context._plugin_context, filters=intf_port_filter)
-                    other_ports = [p for p in other_ports
-                                   if p['id'] != port['id']]
-                    if not other_ports:
-                        self.apic_manager.ensure_context_deleted(
-                            owner=vrf_info['aci_tenant'],
-                            ctx_id=vrf_info['aci_name'], transaction=trs)
                 else:
-                    self.apic_manager.ensure_context_enforced(
-                        owner=vrf_info['aci_tenant'],
-                        ctx_id=vrf_info['aci_name'], transaction=trs)
                     self.apic_manager.set_context_for_bd(
                         bd_tenant, bd_name, vrf_info['aci_name'],
                         transaction=trs)
@@ -2355,3 +2340,17 @@ class APICMechanismDriver(api.MechanismDriver,
         vrf_name = ('%s-%s' % (tenant, router['id'])
                     if self.single_tenant_mode else router['id'])
         return {'aci_name': vrf_name, 'aci_tenant': self._get_tenant(router)}
+
+    def create_vrf_per_router(self, router, transaction=None):
+        if self._is_vrf_per_router(router):
+            vrf_info = self._get_router_vrf(router)
+            self.apic_manager.ensure_context_enforced(
+                owner=vrf_info['aci_tenant'], ctx_id=vrf_info['aci_name'],
+                transaction=transaction)
+
+    def delete_vrf_per_router(self, router, transaction=None):
+        if self._is_vrf_per_router(router):
+            vrf_info = self._get_router_vrf(router)
+            self.apic_manager.ensure_context_deleted(
+                owner=vrf_info['aci_tenant'], ctx_id=vrf_info['aci_name'],
+                transaction=transaction)

@@ -74,8 +74,9 @@ class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
                 LOG.exception(_("An exception occurred while creating "
                                 "the router: %s"), router)
                 self.delete_router(context, router_db.id)
-
-        return self._make_router_dict(router_db)
+        result = self._make_router_dict(router_db)
+        self._apic_driver.create_router_postcommit(context, result)
+        return result
 
     def update_router(self, context, id, router):
         result = super(ApicL3ServicePlugin, self).update_router(context,

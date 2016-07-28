@@ -23,6 +23,14 @@ class ApicL3DriverBase(object):
        API call.  This allows the driver to be used by other Layer 3 service
        plugins (e.g. the Cisco Router Service Plugin).
        """
+    def create_router_postcommit(self, context, router):
+        """Post-DB operation for create_router API
+
+        This should be called after the DB operation to the
+        router has been performed.
+        """
+        pass
+
     def update_router_postcommit(self, context, router):
         """Post-DB operation for update_router API
 
