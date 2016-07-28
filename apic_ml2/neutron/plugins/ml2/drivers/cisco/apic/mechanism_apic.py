@@ -147,7 +147,8 @@ class EdgeNatWrongL3OutAuthTypeForOSPF(n_exc.BadRequest):
 
 class OnlyOneRouterPermittedIfVrfPerRouter(n_exc.BadRequest):
     message = _("Configuration for tenant %(tenant)s ('VRF per router') "
-                "permits connecting network %(net)s to exactly one router.")
+                "permits connecting subnets in network %(net)s to exactly "
+                "one router.")
 
 
 class NameMapper(object):
@@ -1105,7 +1106,7 @@ class APICMechanismDriver(api.MechanismDriver,
                 filters={
                     'device_owner': [n_constants.DEVICE_OWNER_ROUTER_INTF],
                     'network_id': [network['id']]})
-            if [p for p in other_ports if p['id'] != port['id']]:
+            if [p for p in other_ports if p['device_id'] != router_id]:
                 raise OnlyOneRouterPermittedIfVrfPerRouter(
                     tenant=network['tenant_id'], net=network['name'])
 
