@@ -169,11 +169,21 @@ class TestCiscoApicL3Driver(testlib_api.SqlTestCase,
                                                    owner=self._tenant(),
                                                    transaction='transaction')
 
+    def test_create_router_postcommit(self):
+        rtr = {'id': ROUTER, 'tenant_id': TENANT, 'admin_state_up': True}
+        apic_driver = self.plugin._apic_driver
+        apic_driver.create_router_postcommit(self.context, rtr)
+        md = apic_driver._aci_mech_driver
+        md.create_vrf_per_router.assert_called_once_with(rtr)
+
     def test_delete_router_precommit(self):
         apic_driver = self.plugin._apic_driver
         mgr = apic_driver.manager
         apic_driver.delete_router_precommit(self.context, ROUTER)
         mgr.delete_router.assert_called_once_with(mocked.APIC_ROUTER)
+        md = apic_driver._aci_mech_driver
+        md.delete_vrf_per_router.assert_called_once_with(
+            {'id': ROUTER, 'tenant_id': TENANT, 'admin_state_up': True})
 
     def _test_add_router_interface_postcommit(self, interface_info):
         apic_driver = self.plugin._apic_driver

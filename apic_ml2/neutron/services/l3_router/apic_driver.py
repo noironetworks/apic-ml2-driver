@@ -154,6 +154,9 @@ class ApicL3Driver(apic_driver_api.ApicL3DriverBase):
         self._plugin._core_plugin.update_port_status(
             context, port_id, q_const.PORT_STATUS_DOWN)
 
+    def create_router_postcommit(self, context, router):
+        self.aci_mech_driver.create_vrf_per_router(router)
+
     # TODO(tbachman): move to postcommit?
     def delete_router_precommit(self, context, router_id):
         context._plugin = self._plugin
@@ -162,6 +165,7 @@ class ApicL3Driver(apic_driver_api.ApicL3DriverBase):
             arouter_id = router_id and self.name_mapper.router(
                 ctx, router['id'], openstack_owner=router['id'])
         self.manager.delete_router(arouter_id)
+        self.aci_mech_driver.delete_vrf_per_router(router)
 
     def update_router_postcommit(self, context, router):
         context._plugin = self._plugin
