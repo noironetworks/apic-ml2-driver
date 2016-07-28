@@ -3630,8 +3630,8 @@ class VrfPerRouterBase(object):
 
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
                                             mocked.APIC_NETWORK, TEST_SEGMENT1)
-        for x in range(0, 2):
-            rtr = '%s-%d' % (mocked.APIC_ROUTER, x)
+        for x in range(0, 3):
+            rtr = '%s-%d' % (mocked.APIC_ROUTER, x / 2)
             port = self._get_port_context(mocked.APIC_TENANT,
                                           mocked.APIC_NETWORK,
                                           'intf', net_ctx, HOST_ID1,
@@ -3641,7 +3641,7 @@ class VrfPerRouterBase(object):
             port._plugin.get_ports = get_ports
             intf_ports.append(port)
 
-            if x < 1:
+            if x < 2:
                 # no exception expected
                 self.driver.create_port_precommit(port)
                 self.driver.update_port_precommit(port)
