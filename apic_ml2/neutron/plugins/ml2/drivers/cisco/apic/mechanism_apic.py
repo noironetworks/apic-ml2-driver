@@ -602,7 +602,7 @@ class APICMechanismDriver(api.MechanismDriver,
                 details['app_profile_name'] + "|" +
                 details['endpoint_group_name'], details['ptg_tenant'])
         except AttributeError:
-            pass    # EP attestation not supported by APICAPI
+            pass  # EP attestation not supported by APICAPI
 
         if self.advertise_mtu and network.get('mtu'):
             details['interface_mtu'] = network['mtu']
@@ -934,10 +934,18 @@ class APICMechanismDriver(api.MechanismDriver,
                 vrf_info = self._get_router_vrf(router)
                 if is_delete:
                     # point BD back to the default VRF for this tenant
-                    self.apic_manager.set_context_for_bd(
-                        bd_tenant, bd_name,
-                        self._get_network_vrf(context, network)['aci_name'],
-                        transaction=trs)
+                    # if router is not connected to any subnet anymore
+                    intf_ports = context._plugin.get_ports(
+                        context._plugin_context,
+                        filters={'device_owner':
+                                 [n_constants.DEVICE_OWNER_ROUTER_INTF],
+                                 'device_id': [router['id']],
+                                 'network_id': [network['id']]})
+                    if not [p for p in intf_ports if p['id'] != port['id']]:
+                        vrf_default = self._get_network_vrf(context, network)
+                        self.apic_manager.set_context_for_bd(
+                            bd_tenant, bd_name, vrf_default['aci_name'],
+                            transaction=trs)
                 else:
                     self.apic_manager.set_context_for_bd(
                         bd_tenant, bd_name, vrf_info['aci_name'],
