@@ -3653,6 +3653,36 @@ class VrfPerRouterBase(object):
                 self.assertRaises(md.OnlyOneRouterPermittedIfVrfPerRouter,
                                   self.driver.update_port_precommit, port)
 
+    def test_multiple_intf_ports_delete(self):
+        intf_ports = []
+
+        def get_ports(ctx, filters):
+            return [p.current for p in intf_ports]
+
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK, TEST_SEGMENT1)
+        mgr = self.driver.apic_manager
+        for x in range(0, 3):
+            port = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK,
+                                          'intf', net_ctx, HOST_ID1,
+                                          router_owner=mocked.APIC_ROUTER,
+                                          interface=True)
+            port.current['id'] += x
+            port._plugin.get_ports = get_ports
+            intf_ports.append(port)
+
+        while intf_ports:
+            port = intf_ports[0]
+            del intf_ports[0]
+            self.driver.delete_port_postcommit(port)
+            if intf_ports:
+                mgr.set_context_for_bd.assert_not_called()
+            else:
+                mgr.set_context_for_bd.assert_called_once_with(
+                    self._tenant(), self._scoped_name(mocked.APIC_NETWORK),
+                    self._network_vrf_name(), transaction=mock.ANY)
+
 
 class TestCiscoApicMechDriverVrfPerRouter(TestCiscoApicMechDriver,
                                           VrfPerRouterBase):
