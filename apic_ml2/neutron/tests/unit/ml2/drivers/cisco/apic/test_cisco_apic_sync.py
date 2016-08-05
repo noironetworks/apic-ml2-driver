@@ -76,11 +76,14 @@ class TestCiscoApicSync(base.BaseTestCase):
 
     def test_sync_router(self):
         sync = apic_sync.ApicRouterSynchronizer(self.driver)
+        sync.driver.get_routers.return_value = [{'id': 'r1'}, {'id': 'r2'}]
         sync.core_plugin = mock.Mock()
         sync.core_plugin.get_ports.return_value = [{'id': 'port',
                                                     'network_id': 'net',
                                                     'device_id': 'dev',
                                                     'name': 'some'}]
         sync._sync_router()
+        self.assertEqual(
+            2, self.driver.create_router_postcommit.call_count)
         self.assertEqual(
             1, self.driver.add_router_interface_postcommit.call_count)
