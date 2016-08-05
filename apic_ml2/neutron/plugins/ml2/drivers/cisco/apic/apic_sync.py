@@ -112,6 +112,10 @@ class ApicRouterSynchronizer(SynchronizerBase):
 
     def _sync_router(self):
         ctx = context.get_admin_context()
+        # Sync routers
+        routers = self.driver.get_routers(ctx)
+        for rtr in routers:
+            self.driver.create_router_postcommit(ctx, rtr)
         # Sync Router Interfaces
         filters = {'device_owner': [n_constants.DEVICE_OWNER_ROUTER_INTF]}
         ports = [x for x in self.core_plugin.get_ports(ctx, filters=filters)]
