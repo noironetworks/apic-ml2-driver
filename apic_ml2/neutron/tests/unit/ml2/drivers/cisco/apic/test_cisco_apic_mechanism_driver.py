@@ -165,6 +165,7 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
 
         self.mgr = self.driver.apic_manager
         self.mgr.apic.fvTenant.name = name
+        self.mgr.apic.fvCtx.name = name
         self.l3_plugin = manager.NeutronManager.get_service_plugins()[
             'L3_ROUTER_NAT']
         self.driver.apic_manager.vmm_shared_secret = base64.b64encode(
@@ -341,6 +342,81 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
 
                 self.assertEqual([dhcp['fixed_ips'][0]['ip_address']],
                                  details['subnets'][0]['dhcp_server_ips'])
+
+    def _test_vrf_details(self, vrf_per_router=False):
+        self._register_agent('h1')
+        net = self.create_network(
+            tenant_id=mocked.APIC_TENANT, is_admin_context=True)['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4, is_admin_context=True)
+        self.create_subnet(
+            network_id=net['id'], cidr='192.168.2.0/24',
+            ip_version=4, is_admin_context=True)
+        net1 = self.create_network(
+            tenant_id=mocked.APIC_TENANT, is_admin_context=True)['network']
+        sub2 = self.create_subnet(
+            network_id=net1['id'], cidr='192.168.4.0/24',
+            ip_version=4, is_admin_context=True)
+        router = self.create_router(api=self.ext_api,
+                                    tenant_id=mocked.APIC_TENANT)['router']
+        self.l3_plugin.add_router_interface(
+            context.get_admin_context(), router['id'],
+            {'subnet_id': sub['subnet']['id']})
+        self.driver._add_ip_mapping_details = mock.Mock()
+        with self.port(subnet=sub, tenant_id=mocked.APIC_TENANT) as p1:
+            p1 = p1['port']
+            self._bind_port_to_host(p1['id'], 'h1')
+            details = self._get_gbp_details(p1['id'], 'h1')
+            if self.driver.per_tenant_context and vrf_per_router:
+                self.assertEqual('router:%s' % router['id'],
+                                 details['l3_policy_id'])
+                self.assertEqual(self._tenant(vrf=True),
+                                 details['vrf_tenant'])
+                self.assertEqual(
+                    self._routed_network_vrf_name(router=router['id']),
+                    details['vrf_name'])
+                self.assertEqual(['192.168.0.0/24', '192.168.2.0/24'],
+                                 details['vrf_subnets'])
+            else:
+                if self.driver.per_tenant_context:
+                    self.assertEqual(mocked.APIC_TENANT,
+                                     details['l3_policy_id'])
+                else:
+                    self.assertEqual('%s-shared' % self._tenant(vrf=True),
+                                     details['l3_policy_id'])
+                self.assertEqual(self._tenant(vrf=True),
+                                 details['vrf_tenant'])
+                self.assertEqual(self._network_vrf_name(),
+                                 details['vrf_name'])
+                self.assertEqual(['192.168.0.0/24', '192.168.2.0/24',
+                                  '192.168.4.0/24'],
+                                 details['vrf_subnets'])
+
+        with self.port(subnet=sub2, tenant_id=mocked.APIC_TENANT) as p2:
+            p2 = p2['port']
+            self._bind_port_to_host(p2['id'], 'h1')
+            details = self._get_gbp_details(p2['id'], 'h1')
+            if self.driver.per_tenant_context:
+                self.assertEqual(mocked.APIC_TENANT,
+                                 details['l3_policy_id'])
+            else:
+                self.assertEqual('%s-shared' % self._tenant(vrf=True),
+                                 details['l3_policy_id'])
+            self.assertEqual(self._tenant(vrf=True),
+                             details['vrf_tenant'])
+            self.assertEqual(self._network_vrf_name(),
+                             details['vrf_name'])
+            self.assertEqual(['192.168.0.0/24', '192.168.2.0/24',
+                              '192.168.4.0/24'],
+                             details['vrf_subnets'])
+
+    def test_vrf_details(self):
+        self._test_vrf_details()
+
+    def test_vrf_details_vrf_per_router(self):
+        self.driver.vrf_per_router_tenants.append(mocked.APIC_TENANT)
+        self._test_vrf_details(vrf_per_router=True)
 
     def test_add_router_interface_on_shared_net_by_port(self):
         net = self.create_network(

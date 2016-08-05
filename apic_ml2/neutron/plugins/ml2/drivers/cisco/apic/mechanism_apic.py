@@ -485,12 +485,29 @@ class APICMechanismDriver(api.MechanismDriver,
     # RPC Method
     def get_vrf_details(self, context, **kwargs):
         core_plugin = manager.NeutronManager.get_plugin()
-        vrf_id = kwargs['vrf_id']
-        # For the APIC ML2 driver, VRF ID is a tenant_id, need to return all
-        # the subnets for this tenant
         ctx = nctx.get_admin_context()
+        vrf_id = kwargs['vrf_id']
+        router = None
+        if vrf_id.startswith('router:'):
+            router_id = vrf_id[len('router:'):]
+            router = self.l3_plugin.get_router(ctx, router_id)
+
+        # For the APIC ML2 driver, VRF ID is a tenant_id, need to return all
+        # the subnets for this tenant. If vrf-per-router is enabled for the
+        # tenant, then vrf_id is ID of a router, so return subnets of
+        # all connected networks
         if self.per_tenant_context:
-            subnets = core_plugin.get_subnets(ctx, {'tenant_id': [vrf_id]})
+            if router:
+                intf_ports = core_plugin.get_ports(
+                    ctx, filters={'device_owner':
+                                  [n_constants.DEVICE_OWNER_ROUTER_INTF],
+                                  'device_id': [router['id']]})
+                nets = set([p['network_id'] for p in intf_ports])
+            else:
+                nets = core_plugin.get_networks(ctx, {'tenant_id': [vrf_id]})
+                nets = [n['id'] for n in nets]
+            subnets = core_plugin.get_subnets(ctx,
+                                              filters={'network_id': nets})
         else:
             # need to retrieve the whole world
             subnets = core_plugin.get_subnets(ctx)
@@ -509,7 +526,8 @@ class APICMechanismDriver(api.MechanismDriver,
             subnets.compact()
             subnets = [str(x) for x in subnets.iter_cidrs()]
 
-        vrf = self._get_tenant_vrf(vrf_id)
+        vrf = (self._get_router_vrf(router) if router
+               else self._get_tenant_vrf(vrf_id))
         details = {
             'vrf_tenant': self.apic_manager.apic.fvTenant.name(
                 vrf['aci_tenant']),
@@ -573,8 +591,19 @@ class APICMechanismDriver(api.MechanismDriver,
             # PTG name is different
             details['endpoint_group_name'] = self._get_ext_epg_for_ext_net(
                 details['endpoint_group_name'])
+        router_id = None
+        if self._is_vrf_per_router(network):
+            intf_ports = core_plugin.get_ports(
+                context,
+                filters={'device_owner':
+                         [n_constants.DEVICE_OWNER_ROUTER_INTF],
+                         'network_id': [network['id']]})
+            if intf_ports:
+                router_id = intf_ports[0]['device_id']
         details.update(
-            self.get_vrf_details(context, vrf_id=network['tenant_id']))
+            self.get_vrf_details(
+                context, vrf_id=('router:%s' % router_id if router_id
+                                 else network['tenant_id'])))
         try:
             details['attestation'] = self.attestator.get_endpoint_attestation(
                 port_id, details['host'],
