@@ -860,6 +860,11 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             tenant_id='onetenant', name=acst.APIC_SYNC_NETWORK,
             expected_res_status=201)
         self.assertEqual({}, net['network'])
+        # Net shouldn't exist
+        nets = self.driver.db_plugin.get_networks(
+            context.get_admin_context(),
+            filters={'name': [acst.APIC_SYNC_NETWORK]})
+        self.assertEqual(0, len(nets))
 
 
 class TestCiscoApicML2SubnetScope(ApicML2IntegratedTestCase):
