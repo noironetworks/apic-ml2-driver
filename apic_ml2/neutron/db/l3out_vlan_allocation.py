@@ -72,12 +72,15 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
         for l3out_network in ext_net_dict.keys():
             try:
                 ext_info = ext_net_dict.get(l3out_network)
-                vlan_range_str = ext_info.get('vlan_range')
-                if vlan_range_str:
-                    vlan_min, vlan_max = vlan_range_str.strip().split(':')
-                    vlan_range = (int(vlan_min), int(vlan_max))
-                    plugin_utils.verify_vlan_range(vlan_range)
-                    self.l3out_vlan_ranges[l3out_network] = vlan_range
+                vlan_ranges_str = ext_info.get('vlan_range')
+                if vlan_ranges_str:
+                    vlan_ranges = vlan_ranges_str.strip().split(',')
+                    for vlan_range_str in vlan_ranges:
+                        vlan_min, vlan_max = vlan_range_str.strip().split(':')
+                        vlan_range = (int(vlan_min), int(vlan_max))
+                        plugin_utils.verify_vlan_range(vlan_range)
+                        self.l3out_vlan_ranges.setdefault(
+                            l3out_network, []).append(vlan_range)
             except Exception:
                 LOG.exception(_LE("Failed to parse vlan_range for L3out %s"),
                               l3out_network)
@@ -98,12 +101,12 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
 
             # process vlan ranges for each configured l3out network
             for (l3out_network,
-                 vlan_range) in self.l3out_vlan_ranges.items():
+                 vlan_ranges) in self.l3out_vlan_ranges.items():
                 # determine current configured allocatable vlans for
                 # this l3out network
-                vlan_min, vlan_max = vlan_range
-                vlan_ids = set(moves.xrange(vlan_min, vlan_max + 1))
-
+                vlan_ids = set()
+                for vlan_min, vlan_max in vlan_ranges:
+                    vlan_ids |= set(moves.xrange(vlan_min, vlan_max + 1))
                 # remove from table unallocated vlans not currently
                 # allocatable
                 if l3out_network in allocations:
