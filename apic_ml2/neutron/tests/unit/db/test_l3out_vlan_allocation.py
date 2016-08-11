@@ -30,7 +30,7 @@ class L3outVlanAllocationTestCase(testlib_api.SqlTestCase):
                                      'switch': '401',
                                      'gateway_ip': '1.103.2.1',
                                      'router_type': 'asr',
-                                     'vlan_range': '1500:1501',
+                                     'vlan_range': '1500:1500, 1510:1510',
                                      'cidr_exposed': '1.103.2.254/24'},
                         'DC-Out': {'router_id': '1.0.0.1',
                                    'host_pool_cidr': '10.1.2.1/24',
@@ -46,9 +46,16 @@ class L3outVlanAllocationTestCase(testlib_api.SqlTestCase):
         self.l3out_vlan_alloc.sync_vlan_allocations(ext_net_dict)
 
     def test_reserve_vlan(self):
-        vlan_min, vlan_max = self.l3out_vlan_alloc.l3out_vlan_ranges[
+        vlan_ranges = self.l3out_vlan_alloc.l3out_vlan_ranges[
             'Mgmt-Out']
-        LOG.info(("vlan range: %d - %d"), vlan_min, vlan_max)
+        vlan_min = 4096
+        vlan_max = 0
+        for (min, max) in vlan_ranges:
+            LOG.info(("vlan range: %d - %d"), min, max)
+            if max > vlan_max:
+                vlan_max = max
+            if min < vlan_min:
+                vlan_min = min
 
         vlan_id1 = self.l3out_vlan_alloc.reserve_vlan('Mgmt-Out', 'admin',
                                                       'tenant1')
