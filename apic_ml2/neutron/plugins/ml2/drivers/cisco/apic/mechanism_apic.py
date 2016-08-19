@@ -1826,14 +1826,28 @@ class APICMechanismDriver(api.MechanismDriver,
                     for x in port.get('fixed_ips', [])])
 
     def _notify_ports_due_to_router_update(self, router_port):
+        core_plugin = manager.NeutronManager.get_plugin()
+        admin_ctx = nctx.get_admin_context()
+        dev_owner = router_port['device_owner']
+        skip = [n_constants.DEVICE_OWNER_ROUTER_INTF,
+                n_constants.DEVICE_OWNER_ROUTER_GW]
+
+        # With VRF-per-router, update all ports in the network when
+        # there is an update to the router interface port
+        if (dev_owner == n_constants.DEVICE_OWNER_ROUTER_INTF and
+                self._is_vrf_per_router(router_port)):
+            ports = core_plugin.get_ports(
+                admin_ctx,
+                filters={'network_id': [router_port['network_id']]})
+            for p in ports:
+                if p['device_owner'] not in skip and self._is_port_bound(p):
+                    self.notifier.port_update(admin_ctx, p)
+            return
+
         # Find ports whose DNAT/SNAT info may be affected due to change
         # in a router's connectivity to external/tenant network.
         if not self.nat_enabled:
             return
-        dev_owner = router_port['device_owner']
-        admin_ctx = nctx.get_admin_context()
-        skip = [n_constants.DEVICE_OWNER_ROUTER_INTF,
-                n_constants.DEVICE_OWNER_ROUTER_GW]
         if dev_owner == n_constants.DEVICE_OWNER_ROUTER_INTF:
             subnet_ids = self._get_port_subnets(router_port)
         elif dev_owner == n_constants.DEVICE_OWNER_ROUTER_GW:
@@ -1841,7 +1855,7 @@ class APICMechanismDriver(api.MechanismDriver,
                 admin_ctx, [router_port['device_id']])
         else:
             return
-        core_plugin = manager.NeutronManager.get_plugin()
+
         subnets = core_plugin.get_subnets(
             admin_ctx, filters={'id': list(subnet_ids)})
         nets = set([x['network_id'] for x in subnets])
