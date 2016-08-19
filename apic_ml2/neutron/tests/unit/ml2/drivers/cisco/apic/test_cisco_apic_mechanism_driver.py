@@ -3465,6 +3465,51 @@ class ApicML2IntegratedTestCaseSingleVRF(ApicML2IntegratedTestCase):
                 context.get_admin_context(), router['id'],
                 {'port_id': p1['port']['id']})
 
+    def test_vrf_per_router_intf_update(self):
+        self.driver.vrf_per_router_tenants.append(mocked.APIC_TENANT)
+        net = self.create_network(tenant_id=mocked.APIC_TENANT)['network']
+        sub1 = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            tenant_id=mocked.APIC_TENANT, ip_version=4)
+        sub2 = self.create_subnet(
+            network_id=net['id'], cidr='192.168.1.0/24',
+            tenant_id=mocked.APIC_TENANT, ip_version=4)
+        router = self.create_router(api=self.ext_api,
+                                    tenant_id=mocked.APIC_TENANT)['router']
+        with self.port(subnet=sub1,
+                       fixed_ips=[{'subnet_id': sub1['subnet']['id']}],
+                       tenant_id=mocked.APIC_TENANT) as p:
+            p1 = p['port']
+        with self.port(subnet=sub2,
+                       fixed_ips=[{'subnet_id': sub2['subnet']['id']}],
+                       tenant_id=mocked.APIC_TENANT) as p:
+            p2 = p['port']
+
+        self.mgr.add_router_interface = mock.Mock()
+        self.driver.notifier.port_update = mock.Mock()
+
+        self._register_agent('h1')
+        self._bind_port_to_host(p1['id'], 'h1')
+        self._bind_port_to_host(p2['id'], 'h1')
+
+        ctx = context.Context(user_id=None, tenant_id=mocked.APIC_TENANT)
+
+        self.driver.notifier.port_update.reset_mock()
+        self.l3_plugin.add_router_interface(
+            ctx, router['id'], {'subnet_id': sub1['subnet']['id']})
+        updates = sorted(set(
+            [pt[0][1]['id']
+             for pt in self.driver.notifier.port_update.call_args_list]))
+        self.assertEqual(sorted([p1['id'], p2['id']]), updates)
+
+        self.driver.notifier.port_update.reset_mock()
+        self.l3_plugin.remove_router_interface(
+            ctx, router['id'], {'subnet_id': sub1['subnet']['id']})
+        updates = sorted(set(
+            [pt[0][1]['id']
+             for pt in self.driver.notifier.port_update.call_args_list]))
+        self.assertEqual(sorted([p1['id'], p2['id']]), updates)
+
 
 class ApicML2IntegratedTestCaseSingleTenant(ApicML2IntegratedTestCase):
 
