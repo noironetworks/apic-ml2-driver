@@ -35,6 +35,10 @@ class NetworkConstraintsSource(object):
         """Returns (default-scope, scope-for-tenant, scope-for-network) """
         return (None, None, None)
 
+    def get_allow_vm_names(self, tenant, vrf):
+        """Returns [<regex1>, <regex2>, ...] """
+        return None
+
 
 class NetworkConstraints(object):
     def __init__(self, constraints_source):
@@ -64,6 +68,10 @@ class NetworkConstraints(object):
                         return constraints.get('default')
         return scope
 
+    def get_allow_vm_names(self, tenant, vrf):
+        if self.source:
+            return self.source.get_allow_vm_names(tenant, vrf)
+
 
 class ConfigFileSource(NetworkConstraintsSource):
     def __init__(self, config_file):
@@ -71,6 +79,7 @@ class ConfigFileSource(NetworkConstraintsSource):
         self.last_refresh_time = 0
         self.subnet_default_scope = None
         self.subnet_constraints = {}
+        self.allow_vm_names_list = {}
         self._refresh()
 
     def get_subnet_constraints(self, tenant, network):
@@ -78,6 +87,10 @@ class ConfigFileSource(NetworkConstraintsSource):
         return (self.subnet_default_scope,
                 self.subnet_constraints.get((tenant, None), {}),
                 self.subnet_constraints.get((tenant, network), {}))
+
+    def get_allow_vm_names(self, tenant, vrf):
+        self._refresh()
+        return self.allow_vm_names_list.get((tenant, vrf), [])
 
     def _refresh(self):
         try:
@@ -114,8 +127,17 @@ class ConfigFileSource(NetworkConstraintsSource):
                             {'cidr': cidrs, 'exc': e})
                 return None
 
+        def parse_allow_vm_names(vm_names):
+            try:
+                return [name.strip() for name in vm_names.split(',')]
+            except Exception as e:
+                LOG.warning('Failed to parse vm_names: %(vm_names)s: %(exc)s',
+                            {'vm_names': vm_names, 'exc': e})
+                return None
+
         def_scope = None
         constraints = {}
+        allow_vm_names = {}
         LOG.debug('Parsing network constraints file %s', self.config_file)
         for cfg_file in cfg_parser.parsed:
             for section_name in cfg_file.keys():
@@ -127,6 +149,7 @@ class ConfigFileSource(NetworkConstraintsSource):
                     net = tuple(section_name.split('/', 1))
                     if len(net) < 2:    # tenant case
                         net += tuple([None])
+                    allow_vm_names[net] = []
                     constraints[net] = {}
                     for k, v in cfg_file[section_name].iteritems():
                         k = k.lower()
@@ -134,7 +157,14 @@ class ConfigFileSource(NetworkConstraintsSource):
                             constraints[net][k] = parse_cidr_list(v[0])
                         elif k == 'default':
                             constraints[net][k] = sanitize_scope(v[0])
-                    LOG.debug('Constraints for network %(n)s - %(c)s',
-                              {'n': net, 'c': constraints[net]})
+                        elif k == 'allow_vm_names':
+                            allow_vm_names[net] = parse_allow_vm_names(v[0])
+                    if constraints[net]:
+                        LOG.debug('Constraints for network %(n)s - %(c)s',
+                                  {'n': net, 'c': constraints[net]})
+                    else:
+                        LOG.debug('Constraints for vrf %(n)s - %(c)s',
+                                  {'n': net, 'c': allow_vm_names[net]})
         self.subnet_default_scope = def_scope
         self.subnet_constraints = constraints
+        self.allow_vm_names_list = allow_vm_names

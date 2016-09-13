@@ -312,11 +312,39 @@ class APICMechanismDriver(api.MechanismDriver,
                       vnic_type)
             return
 
-        # Attempt to bind ports for DVS agents for nova-compute daemons
-        # first. This allows having network agents (dhcp, metadata)
-        # that typically run on a network node using an OpFlex agent to
-        # co-exist with nova-compute daemons for ESX, which host DVS agents.
         if context.current['device_owner'].startswith('compute:'):
+            # enforce the secure port binding rules if possible
+            if context.current['device_id']:
+                vm = nova_client.NovaClient().get_server(
+                    context.current['device_id'])
+                network_id = context.current.get('network_id')
+                net = self._get_plugin().get_network(context._plugin_context,
+                                                     network_id)
+                vrf = self._get_network_vrf(context, net)
+                aci_tenant = self.apic_manager.apic.fvTenant.name(
+                    vrf['aci_tenant'])
+                aci_vrf = self.apic_manager.apic.fvCtx.name(vrf['aci_name'])
+
+                ok_to_bind = True
+                secure_pb_list = self.net_cons.get_allow_vm_names(
+                    str(aci_tenant), str(aci_vrf))
+                if secure_pb_list:
+                    ok_to_bind = False
+                    for secure_pb in secure_pb_list:
+                        match = re.search(secure_pb, vm.name)
+                        if match:
+                            ok_to_bind = True
+                            break
+                if not ok_to_bind:
+                    LOG.warning("failed to bind the port due to secure port "
+                                "binding rule for VM: %s", vm.name)
+                    return
+
+            # Attempt to bind ports for DVS agents for nova-compute daemons
+            # first. This allows having network agents (dhcp, metadata)
+            # that typically run on a network node using an OpFlex agent to
+            # co-exist with nova-compute daemons for ESX, which host DVS
+            # agents.
             agent_list = context.host_agents(acst.AGENT_TYPE_DVS)
             if self._agent_bind_port(context, agent_list, self._bind_dvs_port):
                 return

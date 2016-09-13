@@ -56,6 +56,11 @@ class TestNetworkConstraints(base.BaseTestCase):
                 cons = {'public': s1, 'private': s2 | c, 'deny': s3 | c}
             return (def_scope, t_cons, cons)
 
+        def get_allow_vm_names(self, tenant, vrf):
+            if tenant == '_openstack1_coke' and vrf == '_openstack1_shared':
+                return ['secure_vm*', 'safe_vm*']
+            return None
+
     def setUp(self):
         super(TestNetworkConstraints, self).setUp()
         self.net_cons = anc.NetworkConstraints(self.MockSource())
@@ -68,6 +73,9 @@ class TestNetworkConstraints(base.BaseTestCase):
         self.assertEqual(
             None,
             net_cons.get_subnet_scope('t1', 'net1', '0.0.0.0/0'))
+        self.assertEqual(
+            None,
+            net_cons.get_allow_vm_names('t1', 'vrf1'))
 
     def test_subnet_scope(self):
         self.assertEqual(
@@ -153,6 +161,15 @@ class TestNetworkConstraints(base.BaseTestCase):
             anc.SCOPE_DENY,
             self.net_cons.get_subnet_scope('t2', 'net4', '5.5.10.128/25'))
 
+    def test_get_allow_vm_names(self):
+        self.assertEqual(
+            None,
+            self.net_cons.get_allow_vm_names('t1', 'vrf'))
+        self.assertEqual(
+            ['secure_vm*', 'safe_vm*'],
+            self.net_cons.get_allow_vm_names('_openstack1_coke',
+                                             '_openstack1_shared'))
+
 
 class TestConfigFileSource(base.BaseTestCase):
     def setUp(self):
@@ -181,6 +198,9 @@ default = private
 
 [t1:net_unk]
 default = deny
+
+[_openstack1_coke/_openstack1_shared]
+allow_vm_names = secure_vm*, safe_vm*
 """
         with tempfile.NamedTemporaryFile(delete=False) as fd:
             self.cons_file_name = fd.name
@@ -192,6 +212,7 @@ default = deny
     def test_non_existent(self):
         ncs = anc.ConfigFileSource("foo")
         self.assertEqual((None, {}, {}), ncs.get_subnet_constraints('t', 'n'))
+        self.assertEqual([], ncs.get_allow_vm_names('t', 'vrf'))
 
     def test_no_default_scope(self):
         self._write_constraints_file(self.file_data.replace('DEFAULT', 'a'))
@@ -230,6 +251,12 @@ default = deny
                           {}),
                          ncs.get_subnet_constraints('t1', 'net_unk'))
 
+        self.assertEqual([],
+                         ncs.get_allow_vm_names('t1', 'vrf'))
+        self.assertEqual(['secure_vm*', 'safe_vm*'],
+                         ncs.get_allow_vm_names('_openstack1_coke',
+                                                '_openstack1_shared'))
+
     def test_auto_refresh(self):
         self._write_constraints_file(self.file_data)
         ncs = anc.ConfigFileSource(self.cons_file_name)
@@ -243,6 +270,8 @@ default = deny
         data = self.file_data.replace('subnet_scope = public',
                                       'subnet_scope = deny')
         data = data.replace('t1/net3', 't2/net3')
+        data = data.replace('_openstack1_coke/_openstack1_shared',
+                            '_openstack1_pepsi/_openstack1_shared1')
         self._write_constraints_file(data)
 
         self.assertEqual((anc.SCOPE_DENY,
@@ -252,3 +281,10 @@ default = deny
                          ncs.get_subnet_constraints('t1', 'net3'))
         self.assertEqual((anc.SCOPE_DENY, {}, {'default': 'deny'}),
                          ncs.get_subnet_constraints('t2', 'net3'))
+
+        self.assertEqual([],
+                         ncs.get_allow_vm_names('_openstack1_coke',
+                                                '_openstack1_shared'))
+        self.assertEqual(['secure_vm*', 'safe_vm*'],
+                         ncs.get_allow_vm_names('_openstack1_pepsi',
+                                                '_openstack1_shared1'))
