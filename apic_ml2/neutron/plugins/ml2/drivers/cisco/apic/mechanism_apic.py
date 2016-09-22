@@ -657,7 +657,10 @@ class APICMechanismDriver(api.MechanismDriver,
                               'network_id': [snat_network_id],
                               'device_id': [host_or_vrf]})
         snat_ip = None
-        if not snat_ports:
+        if not snat_ports or not snat_ports[0]['fixed_ips']:
+            if snat_ports:
+                # Fixed IP disappeared
+                self.db_plugin.delete_port(context, snat_ports[0]['id'])
             # Note that the following port is created for only getting
             # an IP assignment in the subnet used for SNAT IPs.
             # The host or VRF for which this SNAT IP is allocated is
@@ -672,7 +675,7 @@ class APICMechanismDriver(api.MechanismDriver,
                                              snat_subnets[0]['id']}],
                               'admin_state_up': False}}
             port = self.db_plugin.create_port(context, attrs)
-            if port and port['fixed_ips'][0]:
+            if port and port['fixed_ips']:
                 # The auto deletion of port logic looks for the port binding
                 # hence we populate the port binding info here
                 self._add_port_binding(context.session,
@@ -689,7 +692,7 @@ class APICMechanismDriver(api.MechanismDriver,
                              'host_or_vrf': host_or_vrf,
                              'ext_id': network['id']})
                 return {}
-        else:
+        elif snat_ports[0]['fixed_ips']:
             snat_ip = snat_ports[0]['fixed_ips'][0]['ip_address']
 
         return {'external_segment_name': network['name'],
