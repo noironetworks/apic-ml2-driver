@@ -98,6 +98,7 @@ AGENT_CONF_OPFLEX = {'alive': True, 'binary': 'somebinary',
                      'configurations': {
                          'opflex_networks': None,
                          'bridge_mappings': {'physnet1': 'br-eth1'}}}
+APIC_EXTERNAL_RID = '1.0.0.1'
 
 
 def echo(context, id, prefix=''):
@@ -171,6 +172,31 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
         self.driver.apic_manager.vmm_shared_secret = base64.b64encode(
             'dirtylittlesecret')
         self.driver.notifier = mock.Mock()
+
+    def _mock_external_dict(self, data, is_edge_nat=False):
+        self.driver.apic_manager.ext_net_dict = {}
+        for x in data:
+            self.driver.apic_manager.ext_net_dict.update(
+                self._build_external_dict(x[0], x[1], is_edge_nat=is_edge_nat))
+
+    def _build_external_dict(self, name, cidr_exposed, nat_enabled=True,
+                             is_edge_nat=False):
+        ext_info = {
+            'enable_nat': 'True' if nat_enabled else 'False'
+        }
+        ext_info.update({
+            'switch': mocked.APIC_EXT_SWITCH,
+            'port': mocked.APIC_EXT_MODULE + '/' + mocked.APIC_EXT_PORT,
+            'encap': mocked.APIC_EXT_ENCAP,
+            'router_id': APIC_EXTERNAL_RID,
+            'gateway_ip': str(netaddr.IPNetwork(cidr_exposed)[1]),
+            'cidr_exposed': cidr_exposed})
+
+        if is_edge_nat:
+            ext_info['edge_nat'] = 'true'
+            ext_info['vlan_range'] = '2000:2010'
+
+        return {name: ext_info}
 
     def _register_agent(self, host, agent_cfg=AGENT_CONF):
         plugin = manager.NeutronManager.get_plugin()
@@ -915,6 +941,63 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             context.get_admin_context(),
             filters={'name': [acst.APIC_SYNC_NETWORK]})
         self.assertEqual(0, len(nets))
+
+    def test_snat_port_ip_loss(self):
+        self._register_agent('h1')
+        admin_ctx = context.get_admin_context()
+
+        self._mock_external_dict([('supported', '192.168.0.2/24')])
+        self.driver.apic_manager.ext_net_dict[
+            'supported']['host_pool_cidr'] = '192.168.200.1/24'
+        # Create external network
+        net_ext = self.create_network(
+            is_admin_context=True, tenant_id=mocked.APIC_TENANT,
+            name='supported',
+            **{'router:external': 'True'})['network']
+        self.create_subnet(
+            is_admin_context=True, tenant_id=mocked.APIC_TENANT,
+            network_id=net_ext['id'], cidr='8.8.8.0/24',
+            ip_version=4)
+        # Create internal network
+        net = self.create_network(
+            tenant_id=mocked.APIC_TENANT, expected_res_status=201)['network']
+        sub = self.create_subnet(
+            tenant_id=mocked.APIC_TENANT,
+            network_id=net['id'], cidr='10.0.0.0/24', ip_version=4)['subnet']
+        # Attach router to them
+        rtr = self.create_router(
+            api=self.ext_api, tenant_id=mocked.APIC_TENANT,
+            external_gateway_info={'network_id': net_ext['id']})['router']
+        self.l3_plugin.add_router_interface(
+            context.get_admin_context(), rtr['id'], {'subnet_id': sub['id']})
+        # Create port on internal subnet
+        p = self.create_port(
+            network_id=net['id'], tenant_id=mocked.APIC_TENANT,
+            device_owner='compute:', device_id='someid',
+            fixed_ips=[{'subnet_id': sub['id']}])['port']
+        self._bind_port_to_host(p['id'], 'h1')
+
+        # Request gbp details
+        mapping = self._get_gbp_details(p['id'], 'h1')
+        self.assertEqual(1, len(mapping['host_snat_ips']))
+
+        snat_ports = self.driver.db_plugin.get_ports(
+            admin_ctx, filters={'name': [acst.HOST_SNAT_POOL_PORT],
+                                'device_id': ['h1']})
+        # Delete Fixed IPs
+        self.driver.db_plugin.update_port(
+            admin_ctx, snat_ports[0]['id'], {'port': {'fixed_ips': []}})
+        # Re run
+        mapping = self._get_gbp_details(p['id'], 'h1')
+        self.assertEqual(1, len(mapping['host_snat_ips']))
+
+        snat_ports_2 = self.driver.db_plugin.get_ports(
+            admin_ctx, filters={'name': [acst.HOST_SNAT_POOL_PORT],
+                                'device_id': ['h1']})
+
+        self.assertEqual(1, len(snat_ports))
+        self.assertEqual(1, len(snat_ports_2))
+        self.assertNotEqual(snat_ports[0]['id'], snat_ports_2[0]['id'])
 
 
 class TestCiscoApicML2SubnetScope(ApicML2IntegratedTestCase):
