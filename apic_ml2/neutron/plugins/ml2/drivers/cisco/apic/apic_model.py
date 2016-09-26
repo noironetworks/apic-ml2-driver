@@ -48,8 +48,8 @@ class HostLink(model_base.BASEV2):
     ifname = sa.Column(sa.String(64), nullable=False, primary_key=True)
     ifmac = sa.Column(sa.String(32), nullable=True)
     swid = sa.Column(sa.String(32), nullable=False)
-    module = sa.Column(sa.String(32), nullable=False)
-    port = sa.Column(sa.String(32), nullable=False)
+    module = sa.Column(sa.String(64), nullable=False)
+    port = sa.Column(sa.String(64), nullable=False)
 
 
 class ApicName(model_base.BASEV2):
