@@ -52,15 +52,22 @@ def _create_network_db(context, network):
 
 
 def _call_on_drivers(method_name, context,
-                     continue_on_failure=False):
+                     continue_on_failure=False, raise_db_retriable=False):
     """Patch for _call_on_drivers
 
     Raise ReservedSynchronizationName when that occurs instead of swallowing
     it.
-    :param method_name:
-    :param context:
-    :param continue_on_failure:
-    :return:
+    :param method_name: name of the method to call
+    :param context: context parameter to pass to each method call
+    :param continue_on_failure: whether or not to continue to call
+    all mechanism drivers once one has raised an exception
+    :param raise_db_retriable: whether or not to treat retriable db
+    exception by mechanism drivers to propagate up to upper layer so
+    that upper layer can handle it or error in ML2 player
+    :raises: neutron.plugins.ml2.common.MechanismDriverError
+    if any mechanism driver call fails. or DB retriable error when
+    raise_db_retriable=False. See neutron.db.api.is_retriable for
+    what db exception is retriable
     """
     errors = []
     for driver in (apic_stashed_get_plugin().mechanism_manager.
@@ -68,9 +75,16 @@ def _call_on_drivers(method_name, context,
         try:
             getattr(driver.obj, method_name)(context)
         except Exception as e:
+            if raise_db_retriable and managers.db_api.is_retriable(e):
+                with managers.excutils.save_and_reraise_exception():
+                    managers.LOG.debug(
+                        "DB exception raised by Mechanism driver "
+                        "'%(name)s' in %(method)s",
+                        {'name': driver.name, 'method': method_name},
+                        exc_info=e)
             managers.LOG.exception(
-                managers._LE(
-                    "Mechanism driver '%(name)s' failed in %(method)s"),
+                managers._LE("Mechanism driver '%(name)s'"
+                             "failed in %(method)s"),
                 {'name': driver.name, 'method': method_name}
             )
             errors.append(e)
