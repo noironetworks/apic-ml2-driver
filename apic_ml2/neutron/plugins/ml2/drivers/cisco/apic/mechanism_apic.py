@@ -1758,7 +1758,7 @@ class APICMechanismDriver(api.MechanismDriver,
                     address = net_info['cidr_exposed']
                     next_hop = net_info['gateway_ip']
                     switch = net_info['switch']
-                    module, sport = net_info['port'].split('/')
+                    module, sport = net_info['port'].split('/', 1)
 
                     (self.apic_manager.
                         set_domain_for_external_routed_network(
@@ -2100,7 +2100,7 @@ class APICMechanismDriver(api.MechanismDriver,
                 next_hop = net_info['gateway_ip']
                 encap = net_info.get('encap')  # No encap if None
                 switch = net_info['switch']
-                module, sport = net_info['port'].split('/')
+                module, sport = net_info['port'].split('/', 1)
                 self.apic_manager.ensure_external_routed_network_created(
                     l3out_name, owner=l3out_tenant,
                     context=external_vrf, transaction=trs)
