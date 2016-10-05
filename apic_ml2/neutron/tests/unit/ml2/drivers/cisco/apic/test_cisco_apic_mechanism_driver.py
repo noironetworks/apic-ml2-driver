@@ -158,7 +158,7 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
 
         for switch in self.switch_dict:
             for module_port in self.switch_dict[switch]:
-                module, port = module_port.split('/')
+                module, port = module_port.split('/', 1)
                 hosts = self.switch_dict[switch][module_port]
                 for host in hosts:
                     self.driver.apic_manager.add_hostlink(
