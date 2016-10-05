@@ -42,10 +42,10 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import rpc as arpc
 
 ACI_CHASSIS_DESCR_FORMAT = 'topology/pod-1/node-(\d+)'
 ACI_PORT_DESCR_FORMATS = [
-    'topology/pod-1/node-(\d+)/sys/conng/path-\[eth(\d+)/(\d+)\]',
-    'topology/pod-1/paths-(\d+)/pathep-\[eth(\d+)/(\d+)\]',
+    'topology/pod-1/node-(\d+)/sys/conng/path-\[eth(\d+)/(\d+(\/\d+)*)\]',
+    'topology/pod-1/paths-(\d+)/pathep-\[eth(\d+)/(\d+(\/\d+)*)\]',
 ]
-ACI_PORT_LOCAL_FORMAT = 'Eth(\d+)/(\d+)'
+ACI_PORT_LOCAL_FORMAT = 'Eth(\d+)/(\d+(\/\d+)*)'
 ACI_VPCPORT_DESCR_FORMAT = ('topology/pod-1/protpaths-(\d+)-(\d+)/pathep-'
                             '\[(.*)\]')
 
