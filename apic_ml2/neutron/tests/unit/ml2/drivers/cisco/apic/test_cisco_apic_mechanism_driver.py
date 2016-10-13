@@ -1656,8 +1656,10 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
 
         self.driver.update_port_postcommit(port_ctx)
 
+        prefix = ('%s-' % mocked.APIC_ROUTER
+                  if self.driver.vrf_per_router_tenants and not no_nat else '')
         l3out_name = (self.driver.per_tenant_context and
-                      self._scoped_name(ext_net) or ext_net)
+                      self._scoped_name(prefix + ext_net) or ext_net)
         if not no_nat:
             l3out_name = "Auto-%s" % l3out_name
         elif pre:
@@ -2119,9 +2121,11 @@ tt':
 
         self.driver.delete_port_postcommit(port_ctx)
 
+        prefix = ('%s-' % mocked.APIC_ROUTER
+                  if self.driver.vrf_per_router_tenants else '')
         l3out_name = (self.driver.per_tenant_context and
-                      self._scoped_name(mocked.APIC_NETWORK_EDGE_NAT) or
-                      mocked.APIC_NETWORK_EDGE_NAT)
+                      self._scoped_name(prefix + mocked.APIC_NETWORK_EDGE_NAT)
+                      or mocked.APIC_NETWORK_EDGE_NAT)
         l3out_name = "Auto-%s" % l3out_name
         bd_name = self._scoped_name('net_id')
         mgr = self.driver.apic_manager
