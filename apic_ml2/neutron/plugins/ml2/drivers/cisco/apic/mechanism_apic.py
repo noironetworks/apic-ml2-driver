@@ -57,7 +57,7 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_model
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_sync
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import attestation
-from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config  # noqa
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import constants as acst
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import exceptions as aexc
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import nova_client
@@ -203,10 +203,6 @@ class APICMechanismDriver(api.MechanismDriver,
         apic_config = cfg.CONF.ml2_cisco_apic
         network_config = {
             'vlan_ranges': cfg.CONF.ml2_type_vlan.network_vlan_ranges,
-            'switch_dict': config.create_switch_dictionary(),
-            'vpc_dict': config.create_vpc_dictionary(),
-            'external_network_dict':
-            config.create_external_network_dictionary(),
         }
         apic_system_id = cfg.CONF.apic_system_id
         keyclient_param = keyclient if client else None
