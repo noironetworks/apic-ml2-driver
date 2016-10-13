@@ -957,8 +957,9 @@ class APICMechanismDriver(api.MechanismDriver,
             openstack_owner=network['tenant_id'])
         bd_tenant = self._get_network_aci_tenant(network)
 
+        is_vrf_per_router = self._is_vrf_per_router(router)
         with self.apic_manager.apic.transaction() as trs:
-            if self._is_vrf_per_router(router):
+            if is_vrf_per_router:
                 vrf_info = self._get_router_vrf(router)
                 if is_delete:
                     # point BD back to the default VRF for this tenant
@@ -996,7 +997,9 @@ class APICMechanismDriver(api.MechanismDriver,
                     os_owner = (router['tenant_id'] if is_edge_nat
                                 else ext_net['tenant_id'])
                     l3out = self.name_mapper.l3_out(
-                        context, ext_net_id, openstack_owner=os_owner)
+                        context, ext_net_id, openstack_owner=os_owner,
+                        prefix='%s-' % router['id'] if (is_vrf_per_router and
+                                                        is_edge_nat) else '')
                 else:
                     # There is exactly one shadow L3Out for all tenants since
                     # there is exactly one VRF for all tenants
