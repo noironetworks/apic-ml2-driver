@@ -89,6 +89,10 @@ apic_opts = [
     cfg.BoolOpt('single_tenant_mode', default=False,
                 help=_("All the Openstack tenants will be described by a "
                        "single ACI tenant.")),
+    cfg.StrOpt('single_tenant_name',
+               default='${apic_system_id}',
+               help=_("The ACI tenant name which will be used when the "
+                      "single_tenant_mode is enabled.")),
     cfg.StrOpt('network_constraints_filename',
                default=None,
                help=_("Complete path of file containing network constraints")),

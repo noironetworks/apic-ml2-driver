@@ -3262,7 +3262,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
 
     def _get_expected_pg(self, net):
         if self.driver.single_tenant_mode:
-            return (mocked.APIC_SYSTEM_ID + '|' +
+            return (self.driver.single_tenant_name + '|' +
                     net['tenant_id'] + '|' + net['id'])
         else:
             return (net['tenant_id'] + '|' +
@@ -3461,6 +3461,18 @@ class ApicML2IntegratedTestCaseDvsSingleTenantMode(
         super(ApicML2IntegratedTestCaseDvsSingleTenantMode, self).setUp()
 
 
+class ApicML2IntegratedTestCaseDvsSingleTenantModeWithName(
+    ApicML2IntegratedTestCaseDvs):
+
+    def setUp(self, service_plugins=None):
+        self.override_conf('single_tenant_mode', True,
+                           'ml2_cisco_apic')
+        self.override_conf('single_tenant_name', "singleTenantName",
+                           'ml2_cisco_apic')
+        super(ApicML2IntegratedTestCaseDvsSingleTenantModeWithName,
+              self).setUp()
+
+
 class ApicML2IntegratedTestCaseSingleVRF(ApicML2IntegratedTestCase):
 
     def setUp(self, service_plugins=None):
@@ -3554,6 +3566,17 @@ class ApicML2IntegratedTestCaseSingleTenant(ApicML2IntegratedTestCase):
             service_plugins)
 
 
+class ApicML2IntegratedTestCaseSingleTenantWithName(ApicML2IntegratedTestCase):
+
+    def setUp(self, service_plugins=None):
+        self.override_conf('single_tenant_mode', True,
+                           'ml2_cisco_apic')
+        self.override_conf('single_tenant_name', "singleTenantName",
+                           'ml2_cisco_apic')
+        super(ApicML2IntegratedTestCaseSingleTenantWithName, self).setUp(
+            service_plugins)
+
+
 class ApicML2IntegratedTestCaseSingleTenantSingleContext(
         ApicML2IntegratedTestCaseSingleVRF):
 
@@ -3561,6 +3584,18 @@ class ApicML2IntegratedTestCaseSingleTenantSingleContext(
         self.override_conf('single_tenant_mode', True,
                            'ml2_cisco_apic')
         super(ApicML2IntegratedTestCaseSingleTenantSingleContext,
+              self).setUp(service_plugins)
+
+
+class ApicML2IntegratedTestCaseSingleTenantWithNameSingleContext(
+        ApicML2IntegratedTestCaseSingleVRF):
+
+    def setUp(self, service_plugins=None):
+        self.override_conf('single_tenant_mode', True,
+                           'ml2_cisco_apic')
+        self.override_conf('single_tenant_name', "singleTenantName",
+                           'ml2_cisco_apic')
+        super(ApicML2IntegratedTestCaseSingleTenantWithNameSingleContext,
               self).setUp(service_plugins)
 
 
@@ -3734,6 +3769,16 @@ class TestCiscoApicMechDriverSingleTenant(TestCiscoApicMechDriver):
         super(TestCiscoApicMechDriverSingleTenant, self).setUp()
 
 
+class TestCiscoApicMechDriverSingleTenantWithName(TestCiscoApicMechDriver):
+
+    def setUp(self):
+        self.override_conf('single_tenant_mode', True,
+                           'ml2_cisco_apic')
+        self.override_conf('single_tenant_name', "singleTenantName",
+                           'ml2_cisco_apic')
+        super(TestCiscoApicMechDriverSingleTenantWithName, self).setUp()
+
+
 class TestCiscoApicMechDriverSingleTenantSingleVRF(
         TestCiscoApicMechDriverSingleVRF):
 
@@ -3741,6 +3786,18 @@ class TestCiscoApicMechDriverSingleTenantSingleVRF(
         self.override_conf('single_tenant_mode', True,
                            'ml2_cisco_apic')
         super(TestCiscoApicMechDriverSingleTenantSingleVRF, self).setUp()
+
+
+class TestCiscoApicMechDriverSingleTenantWithNameSingleVRF(
+        TestCiscoApicMechDriverSingleVRF):
+
+    def setUp(self):
+        self.override_conf('single_tenant_mode', True,
+                           'ml2_cisco_apic')
+        self.override_conf('single_tenant_name', "singleTenantName",
+                           'ml2_cisco_apic')
+        super(TestCiscoApicMechDriverSingleTenantWithNameSingleVRF,
+              self).setUp()
 
 
 class VrfPerRouterBase(object):

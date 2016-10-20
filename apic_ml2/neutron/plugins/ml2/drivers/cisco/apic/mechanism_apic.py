@@ -439,6 +439,7 @@ class APICMechanismDriver(api.MechanismDriver,
         self.enable_metadata_opt = self.apic_manager.enable_optimized_metadata
         self.apic_system_id = cfg.CONF.apic_system_id
         self.single_tenant_mode = cfg.CONF.ml2_cisco_apic.single_tenant_mode
+        self.single_tenant_name = cfg.CONF.ml2_cisco_apic.single_tenant_name
         global _apic_driver_instance
         _apic_driver_instance = self
         self._l3_plugin = None
@@ -1880,7 +1881,7 @@ class APICMechanismDriver(api.MechanismDriver,
 
     def _get_tenant(self, object):
         if self.single_tenant_mode:
-            return self.apic_system_id
+            return self.single_tenant_name
         return self.name_mapper.tenant(None, object['tenant_id'])
 
     def _get_network_aci_tenant(self, network):
@@ -1926,7 +1927,7 @@ class APICMechanismDriver(api.MechanismDriver,
         return vrf
 
     def _get_tenant_vrf(self, tenant_id):
-        vrf = {'aci_tenant': self.apic_system_id,
+        vrf = {'aci_tenant': self.single_tenant_name,
                'aci_name': self.name_mapper.tenant(None, tenant_id)}
         if not self.single_tenant_mode:
             vrf['aci_tenant'] = (self.per_tenant_context and
@@ -1939,7 +1940,7 @@ class APICMechanismDriver(api.MechanismDriver,
 
     def _get_router_aci_tenant(self, router):
         if self.single_tenant_mode:
-            return self.apic_system_id
+            return self.single_tenant_name
         return apic_manager.TENANT_COMMON
 
     def _create_snat_ip_allocation_subnet(self, context, network,
