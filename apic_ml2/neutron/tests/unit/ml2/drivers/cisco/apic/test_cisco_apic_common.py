@@ -113,7 +113,7 @@ class ControllerMixin(object):
     def _tenant(self, ext_nat=False, vrf=False, shared=False,
                 neutron_tenant=None):
         if self.driver.single_tenant_mode:
-            return APIC_SYSTEM_ID
+            return self.driver.single_tenant_name
         if self.driver.per_tenant_context and not ext_nat:
             return neutron_tenant or APIC_TENANT
         if not self.driver.per_tenant_context and vrf:
@@ -141,7 +141,7 @@ class ControllerMixin(object):
 
     def _router_tenant(self):
         if self.driver.single_tenant_mode:
-            return APIC_SYSTEM_ID
+            return self.driver.single_tenant_name
         return 'common'
 
     def _app_profile(self, neutron_tenant=None):
@@ -151,7 +151,7 @@ class ControllerMixin(object):
 
     def _nat_vrf_tenant(self, net_shared=False, neutron_tenant=None):
         if self.driver.single_tenant_mode:
-            return APIC_SYSTEM_ID
+            return self.driver.single_tenant_name
         elif net_shared:
             return 'common'
         return neutron_tenant or APIC_TENANT
