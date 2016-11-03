@@ -241,6 +241,13 @@ class APICMechanismDriver(api.MechanismDriver,
         return _apic_driver_instance
 
     @property
+    def fabric_l3(self):
+        if self._fabric_l3 is None:
+            self._fabric_l3 = self._cisco_l3 or hasattr(self._l3_plugin,
+                                                        '_apic_driver')
+        return self._fabric_l3
+
+    @property
     def l3_plugin(self):
         if not self._l3_plugin:
             plugins = manager.NeutronManager.get_service_plugins()
@@ -457,6 +464,8 @@ class APICMechanismDriver(api.MechanismDriver,
         _apic_driver_instance = self
         self._l3_plugin = None
         self._db_plugin = None
+        self._fabric_l3 = None
+        self._cisco_l3 = cfg.CONF.ml2_cisco_apic.l3_cisco_router_plugin
         self.attestator = attestation.EndpointAttestator(self.apic_manager)
         net_cons_source = cfg.CONF.ml2_cisco_apic.network_constraints_filename
         if net_cons_source is not None:
@@ -1196,7 +1205,11 @@ class APICMechanismDriver(api.MechanismDriver,
     def _perform_port_operations(self, context):
         # Get port
         port = context.current
-        if port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
+        if not self.fabric_l3:
+            if (self._is_port_bound(port) and
+                    self._port_needs_static_path_binding(context)):
+                self._perform_path_port_operations(context, port)
+        elif port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
             self._perform_gw_port_operations(context, port)
         elif port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_INTF:
             self._perform_interface_port_operations(context, port,
@@ -1328,6 +1341,8 @@ class APICMechanismDriver(api.MechanismDriver,
                     self.notifier.port_update(context._plugin_context, port)
 
     def create_port_precommit(self, context):
+        if not self.fabric_l3:
+            return
         port = context.current
         network = context.network.current
         self._check_gw_port_operation(context, port)
@@ -1350,6 +1365,8 @@ class APICMechanismDriver(api.MechanismDriver,
                 context, context.current['network_id'], subs)
 
     def update_port_precommit(self, context):
+        if not self.fabric_l3:
+            return
         self._check_gw_port_operation(context, context.current)
         self._check_interface_port_operation(context, context.current)
 
@@ -1391,14 +1408,16 @@ class APICMechanismDriver(api.MechanismDriver,
                 self._is_port_bound(port) and context.bottom_bound_segment):
             self._delete_path_if_last(context)
             self._release_dynamic_segment(context)
-        if port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_GW:
-            if self._is_nat_enabled_on_ext_net(network):
-                self._delete_shadow_ext_net_for_nat(context, port, network)
-            else:
-                self._delete_gw_port_nat_disabled(context)
-        elif port.get('device_owner') == n_constants.DEVICE_OWNER_ROUTER_INTF:
-            self._perform_interface_port_operations(context, port, network,
-                                                    is_delete=True)
+        if self.fabric_l3:
+            owner = port.get('device_owner')
+            if owner == n_constants.DEVICE_OWNER_ROUTER_GW:
+                if self._is_nat_enabled_on_ext_net(network):
+                    self._delete_shadow_ext_net_for_nat(context, port, network)
+                else:
+                    self._delete_gw_port_nat_disabled(context)
+            elif owner == n_constants.DEVICE_OWNER_ROUTER_INTF:
+                self._perform_interface_port_operations(context, port, network,
+                                                        is_delete=True)
 
         self._notify_ports_due_to_router_update(port)
         if (port.get('binding:vif_details') and
@@ -1436,7 +1455,7 @@ class APICMechanismDriver(api.MechanismDriver,
                     app_profile_name=self._get_network_app_profile(
                         context.current), bd_name=bd_name,
                     transaction=trs)
-        else:
+        elif self.fabric_l3:
             self._create_real_external_network(context, context.current)
 
     def update_network_postcommit(self, context):
@@ -1491,6 +1510,8 @@ class APICMechanismDriver(api.MechanismDriver,
                         subnet_cidr=cidr, ext_net=network['name'])
 
     def create_subnet_postcommit(self, context):
+        if not self.fabric_l3:
+            return
         info = self._get_subnet_info(context, context.current)
         if info:
             tenant_id, network_id, gateway_ip = info
@@ -1501,7 +1522,8 @@ class APICMechanismDriver(api.MechanismDriver,
         self.notify_subnet_update(context.current)
 
     def update_subnet_postcommit(self, context):
-        if context.current['gateway_ip'] != context.original['gateway_ip']:
+        if self.fabric_l3 and (context.current['gateway_ip'] !=
+                               context.original['gateway_ip']):
             with self.apic_manager.apic.transaction() as trs:
                 info = self._get_subnet_info(context, context.original)
                 if info:
@@ -1531,7 +1553,7 @@ class APICMechanismDriver(api.MechanismDriver,
 
     def delete_subnet_postcommit(self, context):
         info = self._get_subnet_info(context, context.current)
-        if info:
+        if self.fabric_l3 and info:
             tenant_id, network_id, gateway_ip = info
             self.apic_manager.ensure_subnet_deleted_on_apic(
                 tenant_id, network_id, gateway_ip)

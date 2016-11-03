@@ -3730,6 +3730,7 @@ class TestApicML2IntegratedPhysicalNode(ApicML2IntegratedTestBase):
             'physnet1': {'hosts': set(['fw-app-01', 'lb-app-01'])}}
         self.mgr.ensure_path_created_for_port = mock.Mock()
         self.mgr.ensure_path_deleted_for_port = mock.Mock()
+        self.mgr.ensure_subnet_created_on_apic = mock.Mock()
         self._register_agent('fw-app-01')
         self._register_agent('lb-app-01')
         self.expected_bound_driver = 'cisco_apic_ml2'
@@ -4566,6 +4567,70 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
         subnets = self.driver.db_plugin.get_subnets(
             ctx, filters={'name': [acst.HOST_SNAT_POOL]})
         self.assertEqual(0, len(subnets))
+
+
+class TestCiscoApicMechDriverNoFabricL3(TestApicML2IntegratedPhysicalNode):
+
+    def setUp(self, service_plugins=None, ml2_opts=None):
+        # Mock out HA scheduler notifcations
+        # (irrelevant exceptions if it's not)
+        self._update_notify = mock.patch(
+            'neutron.db.l3_hascheduler_db._notify_l3_agent_ha_port_update')
+        self._update_notify.start()
+        # Configure reference L3 implementation, which
+        # disables routing and subnet configuration in the ACI fabric
+        super(TestCiscoApicMechDriverNoFabricL3, self).setUp(
+            service_plugins={'L3_ROUTER_NAT': 'router'})
+
+    def tearDown(self):
+        self._update_notify.stop()
+        super(TestCiscoApicMechDriverNoFabricL3, self).tearDown()
+
+    def test_create_subnet_no_l3(self):
+        ctx = context.get_admin_context()
+        tenant1 = self._tenant(neutron_tenant='onetenant')
+        app_prof1 = self._app_profile(neutron_tenant='onetenant')
+        self._register_agent('h1', agent_cfg=AGENT_CONF_OPFLEX)
+        net = self.create_network(
+            tenant_id='onetenant', is_admin_context=True)['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4, is_admin_context=True)
+        router = self.create_router(api=self.ext_api,
+                                    tenant_id='onetenant')['router']
+        self.driver._add_ip_mapping_details = mock.Mock()
+        with self.port(subnet=sub, tenant_id='onetenant') as p1:
+            p1 = p1['port']
+
+        # bind to VM-host
+        self._bind_port_to_host(p1['id'], 'h1')
+        bseg_p1, bdriver = self._get_bound_seg(p1['id'])
+        self.assertEqual(bseg_p1['network_type'], 'opflex')
+        self.assertEqual('cisco_apic_ml2', bdriver)
+        self.mgr.ensure_path_created_for_port.assert_not_called()
+
+        self.l3_plugin.add_router_interface(ctx,
+                                            router['id'],
+                                            {'subnet_id': sub['subnet']['id']})
+        self.mgr.ensure_subnet_created_on_apic.assert_not_called()
+        router_port = self.driver.db_plugin.get_ports(
+            ctx, filters={'device_id': [router['id']],
+                          'network_id': [net['id']]})[0]
+        self.mgr.ensure_path_created_for_port.reset_mock()
+        self._bind_port_to_host(router_port['id'], 'lb-app-01')
+        self.mgr.ensure_path_created_for_port.assert_called()
+        bseg_p1, bdriver = self._get_bound_seg(router_port['id'])
+        self.assertEqual(1, len(self._query_dynamic_seg(net['id'])))
+        self.mgr.ensure_path_created_for_port.assert_called_once_with(
+            tenant1, net['id'], 'lb-app-01', bseg_p1['segmentation_id'],
+            app_profile_name=app_prof1, transaction=mock.ANY)
+
+        self.l3_plugin.remove_router_interface(ctx,
+                                               router['id'],
+                                               {'port_id': router_port['id']})
+        self.assertEqual(0, len(self._query_dynamic_seg(net['id'])))
+        self.mgr.ensure_path_deleted_for_port.assert_called_once_with(
+            tenant1, net['id'], 'lb-app-01', app_profile_name=app_prof1)
 
 
 class FakeNetworkContext(object):
