@@ -35,6 +35,10 @@ class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
     def __init__(self):
         super(ApicL3ServicePlugin, self).__init__()
         self.synchronizer = None
+        # NB(tbachman): the mechanism driver depends on the existence
+        # of the _apic_driver member. If this member is changed or
+        # deleted, the code in the mechanism driver should be changed
+        # as well.
         self._apic_driver = apic_driver.ApicL3Driver(self)
 
     def _update_router_gw_info(self, context, router_id, info, router=None):
