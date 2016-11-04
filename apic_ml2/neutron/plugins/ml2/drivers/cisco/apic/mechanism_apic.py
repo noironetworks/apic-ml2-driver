@@ -578,7 +578,11 @@ class APICMechanismDriver(api.MechanismDriver,
         network = core_plugin.get_network(context, port['network_id'])
 
         def is_port_promiscuous(port):
-            return port['device_owner'] == n_constants.DEVICE_OWNER_DHCP
+            if port['device_owner'] == n_constants.DEVICE_OWNER_DHCP:
+                return True
+            if not port.get('port_security_enabled', True):
+                return True
+            return False
 
         segment = port_context.bottom_bound_segment or {}
         details = {'device': kwargs.get('device'),

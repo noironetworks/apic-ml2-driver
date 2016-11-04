@@ -116,6 +116,7 @@ def equal(x, y):
 class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
                                 mocked.ControllerMixin, mocked.ConfigMixin,
                                 mocked.ApicDBTestBase):
+    _extension_drivers = ['port_security']
 
     def setUp(self, service_plugins=None, ml2_opts=None):
         mocked.ControllerMixin.set_up_mocks(self)
@@ -124,6 +125,9 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
                            'ml2_cisco_apic')
         self.override_conf('per_tenant_context', False,
                            'ml2_cisco_apic')
+        self.override_conf('extension_drivers',
+                           self._extension_drivers,
+                           group='ml2')
         self.override_conf('path_mtu', 1000, group='ml2')
         self.override_conf('segment_mtu', 1000, group='ml2')
         self.override_conf('advertise_mtu', True, None)
@@ -334,6 +338,65 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             self.assertEqual(sub['subnet']['id'], details['subnets'][0]['id'])
             # Verify Interface MTU correctly set
             self.assertEqual(1000, details['interface_mtu'])
+
+    def test_port_security_port(self):
+        self._register_agent('h1')
+        net = self.create_network(
+            tenant_id='onetenant', expected_res_status=201, shared=True,
+            is_admin_context=True)['network']
+        self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4, is_admin_context=True)
+        self.driver._add_ip_mapping_details = mock.Mock()
+
+        # test compute port
+        p1 = self.create_port(
+            network_id=net['id'], tenant_id='onetenant',
+            device_owner='compute:', device_id='someid')['port']
+        self._bind_port_to_host(p1['id'], 'h1')
+        details = self._get_gbp_details(p1['id'], 'h1')
+        self.assertFalse(details['promiscuous_mode'])
+
+        p2 = self.create_port(
+            network_id=net['id'], tenant_id='onetenant',
+            device_owner='compute:', device_id='someid',
+            port_security_enabled=True)['port']
+        self._bind_port_to_host(p2['id'], 'h1')
+        details = self._get_gbp_details(p2['id'], 'h1')
+        self.assertFalse(details['promiscuous_mode'])
+
+        p3 = self.create_port(
+            network_id=net['id'], tenant_id='onetenant',
+            device_owner='compute:', device_id='someid',
+            port_security_enabled=False)['port']
+        self._bind_port_to_host(p3['id'], 'h1')
+        details = self._get_gbp_details(p3['id'], 'h1')
+        self.assertTrue(details['promiscuous_mode'])
+
+        # test DHCP port
+        p1_dhcp = self.create_port(
+            network_id=net['id'], tenant_id='onetenant',
+            device_owner=n_constants.DEVICE_OWNER_DHCP, device_id='someid')[
+                'port']
+        self._bind_port_to_host(p1_dhcp['id'], 'h1')
+        details = self._get_gbp_details(p1_dhcp['id'], 'h1')
+        self.assertTrue(details['promiscuous_mode'])
+
+        p2_dhcp = self.create_port(
+            network_id=net['id'], tenant_id='onetenant',
+            device_owner=n_constants.DEVICE_OWNER_DHCP, device_id='someid',
+            port_security_enabled=True)['port']
+        self._bind_port_to_host(p2_dhcp['id'], 'h1')
+        details = self._get_gbp_details(p2_dhcp['id'], 'h1')
+        self.assertTrue(details['promiscuous_mode'])
+
+        p3_dhcp = self.create_port(
+            network_id=net['id'], tenant_id='onetenant',
+            device_owner=n_constants.DEVICE_OWNER_DHCP, device_id='someid',
+            port_security_enabled=False)['port']
+        self._bind_port_to_host(p3_dhcp['id'], 'h1')
+        details = self._get_gbp_details(p3_dhcp['id'], 'h1')
+        self.assertTrue(details['promiscuous_mode'])
 
     def test_enhanced_subnet_options(self):
         self._register_agent('h1')
