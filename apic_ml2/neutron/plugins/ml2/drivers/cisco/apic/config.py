@@ -96,6 +96,10 @@ apic_opts = [
     cfg.StrOpt('network_constraints_filename',
                default=None,
                help=_("Complete path of file containing network constraints")),
+    cfg.BoolOpt('l3_cisco_router_plugin',
+                default=False,
+                help=_("Set to true when using the Cisco Router "
+                       "plugin for L3")),
     cfg.ListOpt('vrf_per_router_tenants',
                 default=[],
                 help=_('Projects in which each router maps to a '
