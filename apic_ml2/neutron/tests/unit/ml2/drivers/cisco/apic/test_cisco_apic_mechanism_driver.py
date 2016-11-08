@@ -4572,19 +4572,10 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
 class TestCiscoApicMechDriverNoFabricL3(TestApicML2IntegratedPhysicalNode):
 
     def setUp(self, service_plugins=None, ml2_opts=None):
-        # Mock out HA scheduler notifcations
-        # (irrelevant exceptions if it's not)
-        self._update_notify = mock.patch(
-            'neutron.db.l3_hascheduler_db._notify_l3_agent_ha_port_update')
-        self._update_notify.start()
         # Configure reference L3 implementation, which
         # disables routing and subnet configuration in the ACI fabric
         super(TestCiscoApicMechDriverNoFabricL3, self).setUp(
             service_plugins={'L3_ROUTER_NAT': 'router'})
-
-    def tearDown(self):
-        self._update_notify.stop()
-        super(TestCiscoApicMechDriverNoFabricL3, self).tearDown()
 
     def test_create_subnet_no_l3(self):
         ctx = context.get_admin_context()
