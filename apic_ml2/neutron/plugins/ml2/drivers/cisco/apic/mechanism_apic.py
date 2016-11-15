@@ -1430,6 +1430,11 @@ class APICMechanismDriver(api.MechanismDriver,
                 context.host
             )
 
+    def update_network_precommit(self, context):
+        if context.current['name'] == acst.APIC_SYNC_NETWORK:
+            raise aexc.ReservedSynchronizationName()
+        super(APICMechanismDriver, self).update_network_precommit(context)
+
     @sync_init
     def create_network_postcommit(self, context):
         # The following validation is not happening in the precommit to avoid
@@ -1438,6 +1443,7 @@ class APICMechanismDriver(api.MechanismDriver,
             raise aexc.ReservedSynchronizationName()
         tenant_id = self._get_network_aci_tenant(context.current)
         network_id = context.current['id']
+        network_name = context.current['name']
         # Convert to APIC IDs
         bd_name = self.name_mapper.bridge_domain(
             context, network_id, openstack_owner=context.current['tenant_id'])
@@ -1446,20 +1452,43 @@ class APICMechanismDriver(api.MechanismDriver,
             vrf = self._get_network_vrf(context, context.current)
 
             # Create BD and EPG for this network
+            app_profile_name = self._get_network_app_profile(context.current)
             with self.apic_manager.apic.transaction() as trs:
                 self.apic_manager.ensure_bd_created_on_apic(
                     tenant_id, bd_name, ctx_owner=vrf['aci_tenant'],
                     ctx_name=vrf['aci_name'], transaction=trs)
                 self.apic_manager.ensure_epg_created(
                     tenant_id, epg_name,
-                    app_profile_name=self._get_network_app_profile(
-                        context.current), bd_name=bd_name,
+                    app_profile_name=app_profile_name, bd_name=bd_name,
                     transaction=trs)
+            self.apic_manager.update_name_alias(
+                self.apic_manager.apic.fvBD, tenant_id, bd_name,
+                nameAlias=network_name)
+            self.apic_manager.update_name_alias(
+                self.apic_manager.apic.fvAEPg, tenant_id, app_profile_name,
+                epg_name, nameAlias=network_name)
         elif self.fabric_l3:
             self._create_real_external_network(context, context.current)
 
     def update_network_postcommit(self, context):
         super(APICMechanismDriver, self).update_network_postcommit(context)
+        if (not context.current.get('router:external') and
+                context.original['name'] != context.current['name']):
+            tenant_id = self._get_network_aci_tenant(context.current)
+            app_profile_name = self._get_network_app_profile(context.current)
+            network_id = context.current['id']
+            network_name = context.current['name']
+            bd_name = self.name_mapper.bridge_domain(
+                context, network_id,
+                openstack_owner=context.current['tenant_id'])
+            epg_name = self.name_mapper.endpoint_group(context,
+                                                       network_id)
+            self.apic_manager.update_name_alias(
+                self.apic_manager.apic.fvBD, tenant_id, bd_name,
+                nameAlias=network_name)
+            self.apic_manager.update_name_alias(
+                self.apic_manager.apic.fvAEPg, tenant_id, app_profile_name,
+                epg_name, nameAlias=network_name)
 
     def delete_network_postcommit(self, context):
         if not context.current.get('router:external'):
