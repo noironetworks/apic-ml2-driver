@@ -89,7 +89,7 @@ class TestCiscoApicL3Driver(testlib_api.SqlTestCase,
         self.contract = FakeContract()
         self.plugin.get_router = mock.Mock(
             return_value={'id': ROUTER, 'admin_state_up': True,
-                          'tenant_id': TENANT})
+                          'tenant_id': TENANT, 'name': ROUTER + '-name'})
         apic_driver.manager.apic.transaction = self.fake_transaction
 
         self.plugin._apic_driver._aci_mech_driver = self.ml2_driver
@@ -146,7 +146,8 @@ class TestCiscoApicL3Driver(testlib_api.SqlTestCase,
         mgr = apic_driver.manager
         router = {'id': ROUTER,
                   'tenant_id': TENANT,
-                  'admin_state_up': True}
+                  'admin_state_up': True,
+                  'name': ROUTER + '-name'}
         apic_driver._aci_mech_driver._get_tenant_vrf.return_value = {
             'aci_tenant': 'common',
             'aci_name': 'some_name'}
@@ -158,6 +159,9 @@ class TestCiscoApicL3Driver(testlib_api.SqlTestCase,
         mgr.enable_router.assert_called_once_with(mocked.APIC_ROUTER,
                                                   owner=self._tenant(),
                                                   transaction='transaction')
+        mgr.update_name_alias.assert_called_once_with(
+            mgr.apic.vzBrCP, self._tenant(), 'contract-%s' % ROUTER,
+            nameAlias=ROUTER + '-name')
         router['admin_state_up'] = False
         mgr.reset_mock()
         apic_driver.update_router_postcommit(self.context, router)
@@ -168,6 +172,9 @@ class TestCiscoApicL3Driver(testlib_api.SqlTestCase,
         mgr.disable_router.assert_called_once_with(mocked.APIC_ROUTER,
                                                    owner=self._tenant(),
                                                    transaction='transaction')
+        mgr.update_name_alias.assert_called_once_with(
+            mgr.apic.vzBrCP, self._tenant(), 'contract-%s' % ROUTER,
+            nameAlias=ROUTER + '-name')
 
     def test_create_router_postcommit(self):
         rtr = {'id': ROUTER, 'tenant_id': TENANT, 'admin_state_up': True}
@@ -183,7 +190,8 @@ class TestCiscoApicL3Driver(testlib_api.SqlTestCase,
         mgr.delete_router.assert_called_once_with(mocked.APIC_ROUTER)
         md = apic_driver._aci_mech_driver
         md.delete_vrf_per_router.assert_called_once_with(
-            {'id': ROUTER, 'tenant_id': TENANT, 'admin_state_up': True})
+            {'id': ROUTER, 'tenant_id': TENANT, 'name': ROUTER + '-name',
+             'admin_state_up': True})
 
     def _test_add_router_interface_postcommit(self, interface_info):
         apic_driver = self.plugin._apic_driver
@@ -205,6 +213,9 @@ class TestCiscoApicL3Driver(testlib_api.SqlTestCase,
         mgr.add_router_interface.assert_called_once_with(
             mocked.APIC_TENANT, mocked.APIC_ROUTER, mocked.APIC_NETWORK,
             app_profile_name=mocked.APIC_AP)
+        mgr.update_name_alias.assert_called_once_with(
+            mgr.apic.vzBrCP, self._tenant(), 'contract-%s' % ROUTER,
+            nameAlias=ROUTER + '-name')
 
     def test_add_router_interface_postcommit_subnet(self):
         self._test_add_router_interface_postcommit(

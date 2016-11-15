@@ -90,7 +90,7 @@ class TestCiscoApicL3Plugin(testlib_api.SqlTestCase,
         self.contract = FakeContract()
         self.plugin.get_router = mock.Mock(
             return_value={'id': ROUTER, 'admin_state_up': True,
-                          'tenant_id': TENANT})
+                          'tenant_id': TENANT, 'name': ROUTER + '-name'})
         apic_driver.manager.apic.transaction = self.fake_transaction
 
         self.plugin._apic_driver._aci_mech_driver = self.ml2_driver

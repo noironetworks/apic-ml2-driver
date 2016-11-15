@@ -14,6 +14,7 @@
 #    under the License.
 
 import base64
+import copy
 import hashlib
 import hmac
 import re
@@ -2264,6 +2265,39 @@ tt':
             self._tenant(), mocked.APIC_NETWORK, transaction='transaction',
             app_profile_name=self._app_profile(),
             bd_name=self._scoped_name(mocked.APIC_NETWORK))
+        expected_calls = [
+            mock.call(mgr.apic.fvBD, self._tenant(),
+                      self._scoped_name(mocked.APIC_NETWORK),
+                      nameAlias=mocked.APIC_NETWORK + '-name'),
+            mock.call(mgr.apic.fvAEPg, self._tenant(),
+                      self._app_profile(),
+                      mocked.APIC_NETWORK,
+                      nameAlias=mocked.APIC_NETWORK + '-name')]
+        self._check_call_list(expected_calls,
+                              mgr.update_name_alias.call_args_list)
+
+    def test_update_network_postcommit(self):
+        ctx = self._get_network_context(mocked.APIC_TENANT,
+                                        mocked.APIC_NETWORK,
+                                        TEST_SEGMENT1)
+        ctx.original = copy.copy(ctx.current)
+        mgr = self.driver.apic_manager
+        self.driver.update_network_postcommit(ctx)
+        self.assertFalse(mgr.apic.fvBD.update.called)
+        self.assertFalse(mgr.apic.fvAEPg.update.called)
+
+        # try again with a new network name
+        ctx.original['name'] = 'old_network_name'
+        self.driver.update_network_postcommit(ctx)
+        expected_calls = [
+            mock.call(mgr.apic.fvBD, self._tenant(),
+                      self._scoped_name(mocked.APIC_NETWORK),
+                      nameAlias=mocked.APIC_NETWORK + '-name'),
+            mock.call(mgr.apic.fvAEPg, self._tenant(),
+                      self._app_profile(), mocked.APIC_NETWORK,
+                      nameAlias=mocked.APIC_NETWORK + '-name')]
+        self._check_call_list(expected_calls,
+                              mgr.update_name_alias.call_args_list)
 
     def test_create_external_network_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
