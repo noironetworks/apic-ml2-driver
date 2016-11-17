@@ -188,6 +188,9 @@ class ApicL3Driver(apic_driver_api.ApicL3DriverBase):
             else:
                 self.manager.disable_router(arouter_id, owner=tenant_id,
                                             transaction=trs)
+        self.manager.update_name_alias(self.manager.apic.vzBrCP, tenant_id,
+                                       'contract-%s' % router['id'],
+                                       nameAlias=router['name'])
 
     def create_floatingip_postcommit(self, context, floatingip):
         port_id = floatingip.get('port_id')
