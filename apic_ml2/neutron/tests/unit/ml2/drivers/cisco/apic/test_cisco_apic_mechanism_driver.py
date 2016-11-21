@@ -2259,7 +2259,7 @@ tt':
             self._tenant(), self._scoped_name(mocked.APIC_NETWORK),
             ctx_owner=self._tenant(vrf=True),
             ctx_name=self._network_vrf_name(net_name=ctx.current['id']),
-            transaction='transaction')
+            transaction='transaction', unicast_route=True)
         mgr.ensure_epg_created.assert_called_once_with(
             self._tenant(), mocked.APIC_NETWORK, transaction='transaction',
             app_profile_name=self._app_profile(),
@@ -4465,6 +4465,7 @@ class TestCiscoApicMechDriverNoFabricL3(TestApicML2IntegratedPhysicalNode):
         ctx = context.get_admin_context()
         tenant1 = self._tenant(neutron_tenant='onetenant')
         app_prof1 = self._app_profile(neutron_tenant='onetenant')
+        self.mgr.ensure_bd_created_on_apic = mock.Mock()
         self._register_agent('h1', agent_cfg=AGENT_CONF_OPFLEX)
         net = self.create_network(
             tenant_id='onetenant', is_admin_context=True)['network']
@@ -4476,6 +4477,11 @@ class TestCiscoApicMechDriverNoFabricL3(TestApicML2IntegratedPhysicalNode):
         self.driver._add_ip_mapping_details = mock.Mock()
         with self.port(subnet=sub, tenant_id='onetenant') as p1:
             p1 = p1['port']
+        self.mgr.ensure_bd_created_on_apic.assert_called_once_with(
+            tenant1, mock.ANY,
+            ctx_owner=mock.ANY,
+            ctx_name=self._network_vrf_name(net_name=net['id']),
+            transaction='transaction', unicast_route=False)
 
         # bind to VM-host
         self._bind_port_to_host(p1['id'], 'h1')
@@ -4506,6 +4512,36 @@ class TestCiscoApicMechDriverNoFabricL3(TestApicML2IntegratedPhysicalNode):
         self.assertEqual(0, len(self._query_dynamic_seg(net['id'])))
         self.mgr.ensure_path_deleted_for_port.assert_called_once_with(
             tenant1, net['id'], 'lb-app-01', app_profile_name=app_prof1)
+
+    def test_no_l3_in_gbp_details(self):
+        self._register_agent('h1')
+        self.driver._get_tenant_vrf = mock.MagicMock()
+        net = self.create_network(
+            tenant_id='onetenant', expected_res_status=201, shared=True,
+            is_admin_context=True)['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.0.0/24',
+            ip_version=4, is_admin_context=True)
+        with self.port(subnet=sub, tenant_id='anothertenant') as p1:
+            p1 = p1['port']
+            self.assertEqual(net['id'], p1['network_id'])
+            # Bind port to trigger path binding
+            self._bind_port_to_host(p1['id'], 'h1')
+            self.driver._add_ip_mapping_details = mock.Mock()
+            details = self._get_gbp_details(p1['id'], 'h1')
+            self.assertEqual(self._tenant(neutron_tenant='onetenant'),
+                             details['ptg_tenant'])
+            self.assertEqual(self._app_profile(neutron_tenant='onetenant'),
+                             details['app_profile_name'])
+            self.assertEqual('onetenant',
+                             details['tenant_id'])
+            self.assertTrue(details['enable_dhcp_optimization'])
+            self.assertEqual(1, len(details['subnets']))
+            self.assertEqual(sub['subnet']['id'], details['subnets'][0]['id'])
+            self.assertIsNone(details.get('ip_mapping'))
+            self.assertIsNone(details.get('floating_ip'))
+            self.assertIsNone(details.get('host_snat_ips'))
+            self.driver._get_tenant_vrf.assert_called_with(net['tenant_id'])
 
 
 class FakeNetworkContext(object):
