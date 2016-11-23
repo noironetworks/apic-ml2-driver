@@ -623,7 +623,7 @@ class APICMechanismDriver(api.MechanismDriver,
             details['endpoint_group_name'] = self._get_ext_epg_for_ext_net(
                 details['endpoint_group_name'])
         router_id = None
-        if self._is_vrf_per_router(network):
+        if self.fabric_l3 and self._is_vrf_per_router(network):
             intf_ports = core_plugin.get_ports(
                 context,
                 filters={'device_owner':
@@ -767,6 +767,8 @@ class APICMechanismDriver(api.MechanismDriver,
     def _add_ip_mapping_details(self, context, port, host, owned_addr,
                                 details):
         """Add information about IP mapping for DNAT/SNAT."""
+        if not self.fabric_l3:
+            return
         l3plugin = manager.NeutronManager.get_service_plugins().get(
             constants.L3_ROUTER_NAT)
         core_plugin = context._plugin
@@ -1456,7 +1458,8 @@ class APICMechanismDriver(api.MechanismDriver,
             with self.apic_manager.apic.transaction() as trs:
                 self.apic_manager.ensure_bd_created_on_apic(
                     tenant_id, bd_name, ctx_owner=vrf['aci_tenant'],
-                    ctx_name=vrf['aci_name'], transaction=trs)
+                    ctx_name=vrf['aci_name'], transaction=trs,
+                    unicast_route=self.fabric_l3)
                 self.apic_manager.ensure_epg_created(
                     tenant_id, epg_name,
                     app_profile_name=app_profile_name, bd_name=bd_name,
@@ -1979,6 +1982,8 @@ class APICMechanismDriver(api.MechanismDriver,
                     self.notifier.port_update(admin_ctx, p)
 
     def _is_nat_enabled_on_ext_net(self, network):
+        if not self.fabric_l3:
+            return False
         ext_info = self.apic_manager.ext_net_dict.get(network['name'])
         if (self.nat_enabled and ext_info and
                 network.get('router:external')):
