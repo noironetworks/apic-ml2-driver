@@ -43,7 +43,7 @@ class ApicTopologyRpcCallback(object):
                             external=True)
     def update_link(self, context,
                     host, interface, mac,
-                    switch, module, port):
+                    switch, module, port, port_description=''):
         LOG.debug("APIC service agent: received update_link: %s",
                   ", ".join(map(str,
                                 [host, interface, mac, switch, module, port])))
@@ -97,7 +97,7 @@ class ApicTopologyRpcCallbackMechanism(ApicTopologyRpcCallback):
     runs within the mechanism driver, the standalone service should be
     disabled.
     """
-    RPC_API_VERSION = "1.1"
+    RPC_API_VERSION = "1.2"
     target = oslo_messaging.Target(version=RPC_API_VERSION)
 
     def __init__(self, apic_manager, driver):
@@ -184,15 +184,17 @@ class ApicTopologyRpcCallbackMechanism(ApicTopologyRpcCallback):
 class ApicTopologyServiceNotifierApi(object):
 
     def __init__(self):
-        target = oslo_messaging.Target(topic=TOPIC_APIC_SERVICE, version='1.1')
+        target = oslo_messaging.Target(topic=TOPIC_APIC_SERVICE, version='1.2')
         self.client = rpc.get_client(target)
 
-    def update_link(self, context, host, interface, mac, switch, module, port):
-        cctxt = self.client.prepare(version='1.1', fanout=True)
+    def update_link(self, context, host, interface, mac, switch, module, port,
+                    port_description=''):
+        cctxt = self.client.prepare(version='1.2', fanout=True)
         cctxt.cast(context, 'update_link', host=host, interface=interface,
-                   mac=mac, switch=switch, module=module, port=port)
+                   mac=mac, switch=switch, module=module, port=port,
+                   port_description=port_description)
 
     def delete_link(self, context, host, interface):
-        cctxt = self.client.prepare(version='1.1', fanout=True)
+        cctxt = self.client.prepare(version='1.2', fanout=True)
         cctxt.cast(context, 'delete_link', host=host, interface=interface,
                    mac=None, switch=0, module=0, port=0)

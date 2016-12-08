@@ -17,13 +17,16 @@ import sys
 
 import mock
 
-sys.modules["apicapi"] = mock.Mock()
+sys.modules["opflexagent"] = mock.Mock()
 
 from neutron.tests import base
 
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_topology
 from apic_ml2.neutron.tests.unit.ml2.drivers.cisco.apic import (
     test_cisco_apic_common as mocked)
+
+sys.modules["apicapi"] = mock.Mock()
+
 
 NOTIFIER = ('apic_ml2.neutron.plugins.ml2.drivers.cisco.apic.'
             'rpc.ApicTopologyServiceNotifierApi')
@@ -33,6 +36,8 @@ PERIODIC_TASK = 'oslo_service.periodic_task'
 DEV_EXISTS = 'neutron.agent.linux.ip_lib.device_exists'
 IP_DEVICE = 'neutron.agent.linux.ip_lib.IPDevice'
 EXECUTE = 'neutron.agent.linux.utils.execute'
+MD_KLASS = ('apic_ml2.neutron.plugins.ml2.drivers.cisco.apic.'
+            'mechanism_apic.APICMechanismDriver')
 
 LLDP_CMD = ['lldpctl', '-f', 'keyvalue']
 ETH0 = mocked.SERVICE_HOST_IFACE
@@ -68,8 +73,8 @@ class TestCiscoApicTopologyService(base.BaseTestCase,
         connection_c.return_value = self.connection
         # Patch agents db
         self.agents_db = mock.patch(AGENTS_DB).start()
-        self.service = apic_topology.ApicTopologyService()
-        self.service.apic_manager = mock.Mock()
+        with mock.patch(MD_KLASS):
+            self.service = apic_topology.ApicTopologyService()
 
     def test_init_host(self):
         self.service.init_host()
@@ -81,7 +86,8 @@ class TestCiscoApicTopologyService(base.BaseTestCase,
         args = (mocked.SERVICE_HOST, mocked.SERVICE_HOST_IFACE,
                 mocked.SERVICE_HOST_MAC, mocked.APIC_EXT_SWITCH,
                 mocked.APIC_EXT_MODULE, mocked.APIC_EXT_PORT)
-        self.service.update_link(None, *args)
+        desc = (mocked.SERVICE_PEER_PORT_DESC,)
+        self.service.update_link(None, *(args + desc))
         self.service.apic_manager.add_hostlink.assert_called_once_with(*args)
         self.assertEqual(args,
                          self.service.peers[(mocked.SERVICE_HOST,
@@ -91,9 +97,10 @@ class TestCiscoApicTopologyService(base.BaseTestCase,
         args = (mocked.SERVICE_HOST, mocked.SERVICE_HOST_IFACE,
                 mocked.SERVICE_HOST_MAC, mocked.APIC_EXT_SWITCH,
                 mocked.APIC_EXT_MODULE, mocked.APIC_EXT_PORT)
+        desc = (mocked.SERVICE_PEER_PORT_DESC,)
         args_prime = args[:2] + tuple(x + '1' for x in args[2:])
         self.service.peers = {args_prime[:2]: args_prime}
-        self.service.update_link(None, *args)
+        self.service.update_link(None, *(args + desc))
         self.service.apic_manager.remove_hostlink.assert_called_once_with(
             *args_prime)
         self.service.apic_manager.add_hostlink.assert_called_once_with(*args)
@@ -106,15 +113,17 @@ class TestCiscoApicTopologyService(base.BaseTestCase,
                 mocked.SERVICE_HOST_MAC,
                 mocked.APIC_EXT_SWITCH,
                 mocked.APIC_EXT_MODULE, mocked.APIC_EXT_PORT)
+        desc = (mocked.SERVICE_PEER_PORT_DESC,)
         self.service.peers = {args[:2]: args}
-        self.service.update_link(None, *args)
+        self.service.update_link(None, *(args + desc))
+        self.service.apic_manager.assert_not_called()
 
     def test_update_link_rem_with_peers(self):
         args = (mocked.SERVICE_HOST, mocked.SERVICE_HOST_IFACE,
                 mocked.SERVICE_HOST_MAC, 0,
                 mocked.APIC_EXT_MODULE, mocked.APIC_EXT_PORT)
         self.service.peers = {args[:2]: args}
-        self.service.update_link(None, *args)
+        self.service.update_link(None, *(args + ('',)))
         self.service.apic_manager.remove_hostlink.assert_called_once_with(
             *args)
         self.assertFalse(bool(self.service.peers))
@@ -123,7 +132,8 @@ class TestCiscoApicTopologyService(base.BaseTestCase,
         args = (mocked.SERVICE_HOST, mocked.SERVICE_HOST_IFACE,
                 mocked.SERVICE_HOST_MAC, 0,
                 mocked.APIC_EXT_MODULE, mocked.APIC_EXT_PORT)
-        self.service.update_link(None, *args)
+        self.service.update_link(None, *(args + ('',)))
+        self.service.apic_manager.remove_hostlink.assert_not_called()
 
 
 class TestCiscoApicTopologyAgent(base.BaseTestCase,
@@ -173,7 +183,8 @@ class TestCiscoApicTopologyAgent(base.BaseTestCase,
             peers = self.agent._get_peers()
             expected = [(mocked.SERVICE_HOST, mocked.SERVICE_HOST_IFACE,
                          mocked.SERVICE_HOST_MAC, mocked.APIC_EXT_SWITCH,
-                         mocked.APIC_EXT_MODULE, mocked.APIC_EXT_PORT)]
+                         mocked.APIC_EXT_MODULE, mocked.APIC_EXT_PORT,
+                         mocked.SERVICE_PEER_PORT_DESC)]
             self.assertEqual(expected,
                              peers[mocked.SERVICE_HOST_IFACE])
 
@@ -181,7 +192,8 @@ class TestCiscoApicTopologyAgent(base.BaseTestCase,
             self.agent.peers = {}
             expected = (mocked.SERVICE_HOST, mocked.SERVICE_HOST_IFACE,
                         mocked.SERVICE_HOST_MAC, mocked.APIC_EXT_SWITCH,
-                        mocked.APIC_EXT_MODULE, mocked.APIC_EXT_PORT)
+                        mocked.APIC_EXT_MODULE, mocked.APIC_EXT_PORT,
+                        mocked.SERVICE_PEER_PORT_DESC)
             peers = {mocked.SERVICE_HOST_IFACE: [expected]}
             context = mock.Mock()
             with mock.patch.object(self.agent, '_get_peers',
@@ -195,7 +207,8 @@ class TestCiscoApicTopologyAgent(base.BaseTestCase,
         def test_check_for_new_peers_with_peers(self):
             expected = (mocked.SERVICE_HOST, mocked.SERVICE_HOST_IFACE,
                         mocked.SERVICE_HOST_MAC, mocked.APIC_EXT_SWITCH,
-                        mocked.APIC_EXT_MODULE, mocked.APIC_EXT_PORT)
+                        mocked.APIC_EXT_MODULE, mocked.APIC_EXT_PORT,
+                        mocked.SERVICE_PEER_PORT_DESC)
             peers = {mocked.SERVICE_HOST_IFACE: [expected]}
             self.agent.peers = {mocked.SERVICE_HOST_IFACE:
                                 [tuple(x + '1' for x in expected)]}
