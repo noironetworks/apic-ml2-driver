@@ -47,6 +47,7 @@ from opflexagent import rpc as o_rpc
 from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
+import oslo_messaging
 from oslo_serialization import jsonutils
 from oslo_utils import importutils
 
@@ -189,6 +190,44 @@ class NameMapper(object):
             kwargs.pop('openstack_owner', None)
             return getattr(self.aci_mapper, new_item)(*args, **kwargs)
         return name_wrapper
+
+
+class KeystoneNotificationEndpoint(object):
+    filter_rule = oslo_messaging.NotificationFilter(
+        event_type='identity.project.update')
+
+    def __init__(self, mechanism_driver):
+        self._driver = mechanism_driver
+
+    def info(self, ctxt, publisher_id, event_type, payload, metadata):
+        LOG.debug("Keystone notification getting called!")
+
+        tenant_id = payload.get('resource_info')
+        # malformed notification?
+        if not tenant_id:
+            return None
+        # we only update tenants which have been created in APIC. For other
+        # cases, their nameAlias will be set when the first network is being
+        # created under that tenant
+        if not self._driver.name_mapper.is_tenant_in_apic(tenant_id):
+            return None
+
+        new_tenant_name = self._driver.name_mapper.update_tenant_name(
+            tenant_id)
+        if new_tenant_name:
+            obj = {}
+            obj['tenant_id'] = tenant_id
+            apic_tenant_name = self._driver._get_tenant(obj)
+            if not self._driver.single_tenant_mode:
+                self._driver.apic_manager.update_name_alias(
+                    self._driver.apic_manager.apic.fvTenant, apic_tenant_name,
+                    nameAlias=new_tenant_name)
+            else:
+                apic_app_profile = self._driver._get_network_app_profile(obj)
+                self._driver.apic_manager.update_name_alias(
+                    self._driver.apic_manager.apic.fvAp, apic_tenant_name,
+                    apic_app_profile, nameAlias=new_tenant_name)
+        return oslo_messaging.NotificationResult.HANDLED
 
 
 class APICMechanismDriver(api.MechanismDriver,
@@ -449,6 +488,7 @@ class APICMechanismDriver(api.MechanismDriver,
         self._setup_rpc()
         self._setup_topology_rpc_listeners()
         self._setup_opflex_rpc_listeners()
+        self._setup_keystone_notification_listeners()
         self.name_mapper = NameMapper(self.apic_manager.apic_mapper)
         self.synchronizer = None
         self.apic_manager.ensure_infra_created_on_apic()
@@ -471,7 +511,6 @@ class APICMechanismDriver(api.MechanismDriver,
         if net_cons_source is not None:
             net_cons_source = net_cons.ConfigFileSource(net_cons_source)
         self.net_cons = net_cons.NetworkConstraints(net_cons_source)
-
         self.l3out_vlan_alloc = l3out_vlan_alloc.L3outVlanAlloc()
         self.l3out_vlan_alloc.sync_vlan_allocations(
             self.apic_manager.ext_net_dict)
@@ -479,6 +518,7 @@ class APICMechanismDriver(api.MechanismDriver,
         self.vrf_per_router_tenants = [
             x.strip() for x in cfg.CONF.ml2_cisco_apic.vrf_per_router_tenants
             if x.strip()]
+        self.tenants_with_name_alias_set = set()
 
     def _setup_opflex_rpc_listeners(self):
         self.opflex_endpoints = [o_rpc.GBPServerRpcCallback(
@@ -488,6 +528,16 @@ class APICMechanismDriver(api.MechanismDriver,
         self.opflex_conn.create_consumer(
             self.opflex_topic, self.opflex_endpoints, fanout=False)
         return self.opflex_conn.consume_in_threads()
+
+    def _setup_keystone_notification_listeners(self):
+        transport = oslo_messaging.get_transport(cfg.CONF)
+        targets = [oslo_messaging.Target(exchange='keystone',
+                                         topic='notifications', fanout=True)]
+        endpoints = [KeystoneNotificationEndpoint(self)]
+        pool = "listener-workers"
+        server = oslo_messaging.get_notification_listener(
+            transport, targets, endpoints, executor='eventlet', pool=pool)
+        server.start()
 
     def _setup_topology_rpc_listeners(self):
         self.topology_endpoints = []
@@ -1470,6 +1520,27 @@ class APICMechanismDriver(api.MechanismDriver,
             self.apic_manager.update_name_alias(
                 self.apic_manager.apic.fvAEPg, tenant_id, app_profile_name,
                 epg_name, nameAlias=network_name)
+            # set the tenant or application profile nameAlias if this is the
+            # first network being created under this tenant
+            if (context.current['tenant_id'] in
+                    self.tenants_with_name_alias_set):
+                return
+            tenant_name_alias = self.name_mapper.get_tenant_name(
+                context.current['tenant_id'], require_keystone_session=True)
+            if not tenant_name_alias:
+                return
+            if self.single_tenant_mode:
+                self.apic_manager.update_name_alias(
+                    self.apic_manager.apic.fvAp, tenant_id,
+                    app_profile_name, nameAlias=tenant_name_alias)
+                self.tenants_with_name_alias_set.add(
+                    context.current['tenant_id'])
+            elif tenant_id != apic_manager.TENANT_COMMON:
+                self.apic_manager.update_name_alias(
+                    self.apic_manager.apic.fvTenant, tenant_id,
+                    nameAlias=tenant_name_alias)
+                self.tenants_with_name_alias_set.add(
+                    context.current['tenant_id'])
         elif self.fabric_l3:
             self._create_real_external_network(context, context.current)
 

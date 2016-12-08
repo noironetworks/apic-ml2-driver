@@ -1329,6 +1329,10 @@ class TestCiscoApicMechDriver(base.BaseTestCase,
         self.driver.name_mapper.aci_mapper.echo = echo
         self.driver.name_mapper.aci_mapper.app_profile.return_value = (
             mocked.APIC_AP)
+        self.driver.name_mapper.aci_mapper.get_tenant_name.return_value = (
+            mocked.APIC_TENANT)
+        self.driver.name_mapper.aci_mapper.update_tenant_name.return_value = (
+            'new_name')
 
         self.driver.apic_manager.apic.transaction = self.fake_transaction
         self.agent = {'configurations': {
@@ -2385,10 +2389,16 @@ tt':
             mock.call(mgr.apic.fvBD, self._tenant(),
                       self._scoped_name(mocked.APIC_NETWORK),
                       nameAlias=mocked.APIC_NETWORK + '-name'),
-            mock.call(mgr.apic.fvAEPg, self._tenant(),
-                      self._app_profile(),
+            mock.call(mgr.apic.fvAEPg, self._tenant(), self._app_profile(),
                       mocked.APIC_NETWORK,
                       nameAlias=mocked.APIC_NETWORK + '-name')]
+        if self.driver.single_tenant_mode:
+            expected_calls.append(mock.call(mgr.apic.fvAp, self._tenant(),
+                                            self._app_profile(),
+                                            nameAlias=mocked.APIC_TENANT))
+        else:
+            expected_calls.append(mock.call(mgr.apic.fvTenant, self._tenant(),
+                                            nameAlias=mocked.APIC_TENANT))
         self._check_call_list(expected_calls,
                               mgr.update_name_alias.call_args_list)
 
@@ -3370,6 +3380,22 @@ tt':
             port['device_id'] = router_owner or mocked.APIC_ROUTER
 
         return FakePortContext(port, network_ctx)
+
+    def test_keystone_notification_endpoint(self):
+        self.driver.name_mapper.aci_mapper.is_tenant_in_apic = mock.Mock(
+            return_value=True)
+        payload = {}
+        payload['resource_info'] = mocked.APIC_TENANT
+        keystone_ep = md.KeystoneNotificationEndpoint(self.driver)
+        keystone_ep.info(None, None, None, payload, None)
+        mgr = self.driver.apic_manager
+        if self.driver.single_tenant_mode:
+            mgr.update_name_alias.assert_called_once_with(
+                mgr.apic.fvAp, self._tenant(), self._app_profile(),
+                nameAlias='new_name')
+        else:
+            mgr.update_name_alias.assert_called_once_with(
+                mgr.apic.fvTenant, self._tenant(), nameAlias='new_name')
 
 
 class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
