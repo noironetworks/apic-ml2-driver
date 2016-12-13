@@ -475,6 +475,10 @@ class APICMechanismDriver(api.MechanismDriver,
         self._setup_topology_rpc_listeners()
         self._setup_opflex_rpc_listeners()
         self._setup_rpc()
+        self.keystone_notification_exchange = (self.apic_manager.
+                                               keystone_notification_exchange)
+        self.keystone_notification_topic = (self.apic_manager.
+                                            keystone_notification_topic)
         self._setup_keystone_notification_listeners()
         self.name_mapper = NameMapper(self.apic_manager.apic_mapper)
         self.synchronizer = None
@@ -517,8 +521,9 @@ class APICMechanismDriver(api.MechanismDriver,
 
     def _setup_keystone_notification_listeners(self):
         transport = oslo_messaging.get_transport(cfg.CONF)
-        targets = [oslo_messaging.Target(exchange='keystone',
-                                         topic='notifications', fanout=True)]
+        targets = [oslo_messaging.Target(
+            exchange=self.keystone_notification_exchange,
+            topic=self.keystone_notification_topic, fanout=True)]
         endpoints = [KeystoneNotificationEndpoint(self)]
         pool = "listener-workers"
         server = oslo_messaging.get_notification_listener(
