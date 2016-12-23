@@ -525,7 +525,7 @@ class APICMechanismDriver(api.MechanismDriver,
             exchange=self.keystone_notification_exchange,
             topic=self.keystone_notification_topic, fanout=True)]
         endpoints = [KeystoneNotificationEndpoint(self)]
-        pool = "listener-workers"
+        pool = "cisco_ml2_listener-workers"
         server = oslo_messaging.get_notification_listener(
             transport, targets, endpoints, executor='eventlet', pool=pool)
         server.start()
