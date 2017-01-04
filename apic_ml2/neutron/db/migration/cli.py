@@ -20,5 +20,5 @@ def main():
         'script_location',
         'apic_ml2.neutron.db.migration:alembic_migrations')
     config.neutron_config = CONF
-    CONF()
+    CONF(project='neutron')
     CONF.command.func(config, CONF.command.name)
