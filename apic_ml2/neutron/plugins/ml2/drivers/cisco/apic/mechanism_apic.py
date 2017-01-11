@@ -534,14 +534,14 @@ class APICMechanismDriver(api.MechanismDriver,
         return self.opflex_conn.consume_in_threads()
 
     def _setup_keystone_notification_listeners(self):
-        transport = oslo_messaging.get_transport(cfg.CONF)
         targets = [oslo_messaging.Target(
             exchange=self.keystone_notification_exchange,
             topic=self.keystone_notification_topic, fanout=True)]
         endpoints = [KeystoneNotificationEndpoint(self)]
         pool = "cisco_ml2_listener-workers"
         server = oslo_messaging.get_notification_listener(
-            transport, targets, endpoints, executor='eventlet', pool=pool)
+            n_rpc.TRANSPORT, targets, endpoints,
+            executor='eventlet', pool=pool)
         server.start()
 
     def _setup_topology_rpc_listeners(self):
