@@ -282,7 +282,7 @@ class APICMechanismDriver(api.MechanismDriver,
     @property
     def fabric_l3(self):
         if self._fabric_l3 is None:
-            self._fabric_l3 = self._cisco_l3 or hasattr(self._l3_plugin,
+            self._fabric_l3 = self._cisco_l3 or hasattr(self.l3_plugin,
                                                         '_apic_driver')
         return self._fabric_l3
 
