@@ -314,6 +314,7 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                     neutron_tenant='onetenant'))
 
     def test_port_on_shared_opflex_network(self):
+        self.driver.apic_optimized_dhcp_lease_time = 100
         self._register_agent('h1')
         net = self.create_network(
             tenant_id='onetenant', expected_res_status=201, shared=True,
@@ -339,6 +340,7 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             self.assertEqual(sub['subnet']['id'], details['subnets'][0]['id'])
             # Verify Interface MTU correctly set
             self.assertEqual(1000, details['interface_mtu'])
+            self.assertEqual(100, details['dhcp_lease_time'])
 
     def test_port_security_port(self):
         self._register_agent('h1')

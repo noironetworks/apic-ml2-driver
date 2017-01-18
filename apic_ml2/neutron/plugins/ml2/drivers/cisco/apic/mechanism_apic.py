@@ -523,6 +523,8 @@ class APICMechanismDriver(api.MechanismDriver,
             x.strip() for x in cfg.CONF.ml2_cisco_apic.vrf_per_router_tenants
             if x.strip()]
         self.tenants_with_name_alias_set = set()
+        self.apic_optimized_dhcp_lease_time = (
+            self.apic_manager.apic_optimized_dhcp_lease_time)
 
     def _setup_opflex_rpc_listeners(self):
         self.opflex_endpoints = [o_rpc.GBPServerRpcCallback(
@@ -700,6 +702,9 @@ class APICMechanismDriver(api.MechanismDriver,
 
         if self.advertise_mtu and network.get('mtu'):
             details['interface_mtu'] = network['mtu']
+
+        if self.apic_optimized_dhcp_lease_time > 0:
+            details['dhcp_lease_time'] = self.apic_optimized_dhcp_lease_time
 
         return details
 
