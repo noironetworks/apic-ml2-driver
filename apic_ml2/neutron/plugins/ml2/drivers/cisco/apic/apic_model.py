@@ -69,6 +69,9 @@ class ApicDbModel(object):
     def __init__(self):
         self.session = db_api.get_session()
 
+    def get_session(self, session=None):
+        return session or db_api.get_session()
+
     def get_contract_for_router(self, router_id):
         """Returns the specified router's contract."""
         return self.session.query(RouterContract).filter_by(
@@ -158,35 +161,41 @@ class ApicDbModel(object):
             po.id == pb.port_id).filter(pb.host == host).filter(
                 po.network_id == ns.network_id).distinct()
 
-    def add_apic_name(self, neutron_id, neutron_type, apic_name):
+    def add_apic_name(self, neutron_id, neutron_type, apic_name,
+                      session=None):
         name = ApicName(neutron_id=neutron_id,
                         neutron_type=neutron_type,
                         apic_name=apic_name)
-        with self.session.begin(subtransactions=True):
-            self.session.add(name)
+        sess = self.get_session(session)
+        with sess.begin(subtransactions=True):
+            sess.add(name)
 
-    def update_apic_name(self, neutron_id, neutron_type, apic_name):
-        with self.session.begin(subtransactions=True):
-            name = self.session.query(ApicName).filter_by(
+    def update_apic_name(self, neutron_id, neutron_type, apic_name,
+                         session=None):
+        sess = self.get_session(session)
+        with sess.begin(subtransactions=True):
+            name = sess.query(ApicName).filter_by(
                 neutron_id=neutron_id,
                 neutron_type=neutron_type).with_lockmode('update').first()
             if name:
                 name.apic_name = apic_name
-                self.session.merge(name)
+                sess.merge(name)
             else:
-                self.add_apic_name(neutron_id, neutron_type, apic_name)
+                self.add_apic_name(neutron_id, neutron_type, apic_name,
+                                   session=sess)
 
     def get_apic_names(self):
-        return self.session.query(ApicName).all()
+        return self.get_session().query(ApicName).all()
 
     def get_apic_name(self, neutron_id, neutron_type):
-        return self.session.query(ApicName.apic_name).filter_by(
+        return self.get_session().query(ApicName.apic_name).filter_by(
             neutron_id=neutron_id, neutron_type=neutron_type).first()
 
-    def delete_apic_name(self, neutron_id):
-        with self.session.begin(subtransactions=True):
+    def delete_apic_name(self, neutron_id, session=None):
+        sess = self.get_session(session)
+        with sess.begin(subtransactions=True):
             try:
-                self.session.query(ApicName).filter_by(
+                sess.query(ApicName).filter_by(
                     neutron_id=neutron_id).delete()
             except orm.exc.NoResultFound:
                 return
