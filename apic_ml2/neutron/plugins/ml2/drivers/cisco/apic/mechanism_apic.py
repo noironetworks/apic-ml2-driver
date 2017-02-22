@@ -519,9 +519,18 @@ class APICMechanismDriver(api.MechanismDriver,
         self.l3out_vlan_alloc.sync_vlan_allocations(
             self.apic_manager.ext_net_dict)
         self.advertise_mtu = cfg.CONF.advertise_mtu
-        self.vrf_per_router_tenants = [
-            x.strip() for x in cfg.CONF.ml2_cisco_apic.vrf_per_router_tenants
-            if x.strip()]
+        self.vrf_per_router_tenants = []
+        for vpr_tenant in cfg.CONF.ml2_cisco_apic.vrf_per_router_tenants:
+            vpr_tenant = vpr_tenant.strip()
+            if not vpr_tenant:
+                continue
+            try:
+                re.compile(vpr_tenant)
+                self.vrf_per_router_tenants.append(vpr_tenant)
+            except re.error:
+                LOG.warning(_("Bad regex: %(regex)s is defined for the "
+                              "vrf_per_router_tenants config parameter."),
+                            {'regex': vpr_tenant})
         self.tenants_with_name_alias_set = set()
         self.apic_optimized_dhcp_lease_time = (
             self.apic_manager.apic_optimized_dhcp_lease_time)
@@ -2530,7 +2539,9 @@ class APICMechanismDriver(api.MechanismDriver,
     def _is_vrf_per_router(self, object):
         if self.per_tenant_context and object.get('tenant_id'):
             tenant = str(self.name_mapper.tenant(None, object['tenant_id']))
-            return tenant in self.vrf_per_router_tenants
+            for vpr_tenant in self.vrf_per_router_tenants:
+                if re.search(vpr_tenant, tenant):
+                    return True
         return False
 
     def _get_router_vrf(self, router):
