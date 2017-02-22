@@ -3982,19 +3982,19 @@ class TestCiscoApicMechDriverSingleTenantWithNameSingleVRF(
 class VrfPerRouterBase(object):
     def doSetup(self):
         self.override_conf('vrf_per_router_tenants',
-                           [' coke ', '', ' ', mocked.APIC_TENANT],
+                           [mocked.APIC_TENANT, ' ^coke* ', '', ' ', '['],
                            'ml2_cisco_apic')
 
     def test_config_option(self):
-        self.assertEqual(['coke', mocked.APIC_TENANT],
+        self.assertEqual([mocked.APIC_TENANT, '^coke*'],
                          self.driver.vrf_per_router_tenants)
 
     def test_create_delete_router_vrf(self):
-        routers = [{'id': 'r1', 'tenant_id': mocked.APIC_TENANT},
-                   {'id': 'r2', 'tenant_id': 'another'}]
+        routers = [{'id': 'r1', 'tenant_id': 'coke_1_tenant'},
+                   {'id': 'r2', 'tenant_id': 'another_coke_1_tenant'}]
 
         for rtr in routers:
-            is_vrf_per_router = (rtr['tenant_id'] == mocked.APIC_TENANT)
+            is_vrf_per_router = (rtr['tenant_id'] == 'coke_1_tenant')
             mgr = self.driver.apic_manager
             vrf_tenant = self._tenant(neutron_tenant=rtr['tenant_id'])
             vrf_name = self._routed_network_vrf_name(router=rtr['id'],
