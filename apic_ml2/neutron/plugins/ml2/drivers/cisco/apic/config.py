@@ -102,7 +102,7 @@ apic_opts = [
                        "plugin for L3")),
     cfg.ListOpt('vrf_per_router_tenants',
                 default=[],
-                help=_('Projects in which each router maps to a '
+                help=_('Project regexes in which each router maps to a '
                        'separate VRF')),
 ]
 
