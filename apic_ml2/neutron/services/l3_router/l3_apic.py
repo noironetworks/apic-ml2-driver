@@ -14,10 +14,12 @@
 #    under the License.
 
 from neutron.common import constants as q_const
+from neutron.common import exceptions as n_exc
 from neutron.db import common_db_mixin
 from neutron.db import extraroute_db
 from neutron.db import l3_db
 from neutron.db import l3_gwmode_db
+from neutron.extensions import l3
 from neutron.plugins.common import constants
 from oslo_log import log as logging
 from oslo_utils import excutils
@@ -27,10 +29,30 @@ from apic_ml2.neutron.services.l3_router import apic_driver
 LOG = logging.getLogger(__name__)
 
 
+# REVISIT: The following patch can be easily eliminated
+# by using the project_id that is available in the context.
+def _get_tenant_id_for_create(self, context, resource):
+    if context.is_admin and 'tenant_id' in resource:
+        tenant_id = resource['tenant_id']
+    elif ('tenant_id' in resource and
+          resource['tenant_id'] != context.project_id):
+        reason = _('Cannot create resource for another tenant')
+        raise n_exc.AdminRequired(reason=reason)
+    else:
+        tenant_id = context.project_id
+
+    return tenant_id
+
+
+common_db_mixin.CommonDbMixin._get_tenant_id_for_create = (
+    _get_tenant_id_for_create)
+
+
 class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
                           extraroute_db.ExtraRoute_db_mixin,
                           l3_gwmode_db.L3_NAT_db_mixin):
-    supported_extension_aliases = ["router", "ext-gw-mode", "extraroute"]
+    supported_extension_aliases = ["router", "ext-gw-mode", "extraroute",
+                                   "l3-flavors"]
 
     def __init__(self):
         super(ApicL3ServicePlugin, self).__init__()
@@ -155,3 +177,11 @@ class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
         res = super(ApicL3ServicePlugin, self).delete_floatingip(context, id)
         self._apic_driver.delete_floatingip_postcommit(context, id)
         return res
+
+
+def add_flavor_id(plugin, router_res, router_db):
+    router_res['flavor_id'] = router_db['flavor_id']
+
+
+common_db_mixin.CommonDbMixin.register_dict_extend_funcs(
+    l3.ROUTERS, [add_flavor_id])

@@ -30,8 +30,8 @@ from neutron.common import exceptions as n_exc
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron import context as nctx
-from neutron.db import allowedaddresspairs_db as n_addr_pair_db
 from neutron.db import db_base_plugin_v2 as n_db
+from neutron.db.models import allowed_address_pair as n_addr_pair_db
 from neutron.db import models_v2
 from neutron.extensions import portbindings
 from neutron import manager
@@ -539,7 +539,7 @@ class APICMechanismDriver(api.MechanismDriver,
         self.opflex_endpoints = [o_rpc.GBPServerRpcCallback(
             self, self.notifier)]
         self.opflex_topic = o_rpc.TOPIC_OPFLEX
-        self.opflex_conn = n_rpc.create_connection(new=True)
+        self.opflex_conn = n_rpc.create_connection()
         self.opflex_conn.create_consumer(
             self.opflex_topic, self.opflex_endpoints, fanout=False)
         return self.opflex_conn.consume_in_threads()
@@ -564,7 +564,7 @@ class APICMechanismDriver(api.MechanismDriver,
         if self.topology_endpoints:
             LOG.debug("New RPC endpoints: %s", self.topology_endpoints)
             self.topology_topic = t_rpc.TOPIC_APIC_SERVICE
-            self.topology_conn = n_rpc.create_connection(new=True)
+            self.topology_conn = n_rpc.create_connection()
             self.topology_conn.create_consumer(
                 self.topology_topic, self.topology_endpoints, fanout=False)
             return self.topology_conn.consume_in_threads()
@@ -2165,7 +2165,7 @@ class APICMechanismDriver(api.MechanismDriver,
         snat_network = self.db_plugin.create_network(
             context._plugin_context, attrs)
         segment = {api.NETWORK_TYPE: constants.TYPE_LOCAL}
-        ml2_db.add_network_segment(context._plugin_context.session,
+        ml2_db.add_network_segment(context._plugin_context,
                                    snat_network['id'], segment)
 
         if not snat_network:
