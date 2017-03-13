@@ -24,6 +24,7 @@ from oslo_log import log as logging
 from oslo_service import periodic_task
 from oslo_service import service as svc
 
+from neutron._i18n import _LE, _LI
 from neutron.agent.common import config
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
@@ -31,7 +32,6 @@ from neutron.agent import rpc as agent_rpc
 from neutron.common import config as common_cfg
 from neutron.common import utils as neutron_utils
 from neutron.db import agents_db
-from neutron.i18n import _LE, _LI
 from neutron import manager
 from neutron import service
 import oslo_messaging

@@ -29,9 +29,7 @@ import netaddr
 from neutron.api import extensions
 from neutron.common import constants as n_constants
 from neutron import context
-from neutron.db import api as db_api
 from neutron.db import db_base_plugin_v2  # noqa
-from neutron.db import model_base
 from neutron.db import models_v2  # noqa
 from neutron.extensions import portbindings
 from neutron import manager
@@ -39,9 +37,9 @@ from neutron.plugins.ml2 import db as ml2_db
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2 import driver_context
 from neutron.plugins.ml2.drivers import type_vlan  # noqa
-from neutron.tests import base
 from neutron.tests.unit.api import test_extensions
 from neutron.tests.unit.db import test_db_base_plugin_v2 as test_plugin
+from neutron.tests.unit import testlib_api
 from opflexagent import constants as ofcst
 from oslo_serialization import jsonutils as json
 # Mock the opflex agent type driver, and its constants,
@@ -100,6 +98,7 @@ AGENT_CONF_OPFLEX = {'alive': True, 'binary': 'somebinary',
                          'opflex_networks': None,
                          'bridge_mappings': {'physnet1': 'br-eth1'}}}
 APIC_EXTERNAL_RID = '1.0.0.1'
+TEST_TENANT = test_plugin.TEST_TENANT_ID
 
 
 def echo(context, id, prefix=''):
@@ -135,7 +134,9 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
         service_plugins = (
             service_plugins or
             {'L3_ROUTER_NAT': 'apic_ml2.neutron.services.l3_router.'
-                              'l3_apic.ApicL3ServicePlugin'})
+                              'l3_apic.ApicL3ServicePlugin',
+             'flavors_plugin_name': 'neutron.services.flavors.'
+                                    'flavors_plugin.FlavorsPlugin'})
         mock.patch('apic_ml2.neutron.plugins.ml2.drivers.'
                    'cisco.apic.nova_client.NovaClient').start()
         apic_client.RestClient = mock.Mock()
@@ -229,7 +230,14 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
         return self.deserialize(self.fmt, req.get_response(self.api))
 
     def _check_call_list(self, expected, observed):
+        for obs in observed:
+            if len(obs[0]) > 1 and type(obs[0][1]) is dict and (
+                'fixed_ips' in obs[0][1]):
+                obs[0][1]['fixed_ips'][0]['ip_address'] = ''
         for call in expected:
+            if len(call[1]) > 1 and type(call[1][1]) is dict and (
+                'fixed_ips' in call[1][1]):
+                call[1][1]['fixed_ips'][0]['ip_address'] = ''
             self.assertTrue(call in observed,
                             msg='Call not found, expected:\n%s\nobserved:'
                                 '\n%s' % (str(call), str(observed)))
@@ -259,6 +267,9 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
             context.get_admin_context(),
             request={'device': 'tap%s' % port_id, 'timestamp': 0,
                      'request_id': 'request_id'}, host=host)
+
+    def _check_ip_in_cidr(self, ip_addr, cidr):
+        self.assertTrue(netaddr.IPAddress(ip_addr) in netaddr.IPNetwork(cidr))
 
 
 class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
@@ -533,8 +544,8 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                 {'port_id': p1['port']['id']})
             self.mgr.add_router_interface.assert_called_once_with(
                 self._tenant(neutron_tenant='onetenant'),
-                self._scoped_name(router['id'], tenant='test-tenant'),
-                net['id'],
+                self._scoped_name(
+                    router['id'], tenant=TEST_TENANT), net['id'],
                 app_profile_name=self._app_profile(neutron_tenant='onetenant'))
 
             self.mgr.remove_router_interface = mock.Mock()
@@ -544,8 +555,7 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                 {'port_id': p1['port']['id']})
             self.mgr.remove_router_interface.assert_called_once_with(
                 self._tenant(neutron_tenant='onetenant'),
-                self._scoped_name(router['id'], tenant='test-tenant'),
-                net['id'],
+                self._scoped_name(router['id'], tenant=TEST_TENANT), net['id'],
                 app_profile_name=self._app_profile(neutron_tenant='onetenant'))
 
     def test_add_router_interface_on_shared_net_by_subnet(self):
@@ -566,8 +576,7 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             {'subnet_id': sub['id']})
         self.mgr.add_router_interface.assert_called_once_with(
             self._tenant(neutron_tenant='onetenant'),
-            self._scoped_name(router['id'], tenant='test-tenant'),
-            net['id'],
+            self._scoped_name(router['id'], tenant=TEST_TENANT), net['id'],
             app_profile_name=self._app_profile(neutron_tenant='onetenant'))
 
         self.mgr.remove_router_interface = mock.Mock()
@@ -577,8 +586,7 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             {'subnet_id': sub['id']})
         self.mgr.remove_router_interface.assert_called_once_with(
             self._tenant(neutron_tenant='onetenant'),
-            self._scoped_name(router['id'], tenant='test-tenant'),
-            net['id'],
+            self._scoped_name(router['id'], tenant=TEST_TENANT), net['id'],
             app_profile_name=self._app_profile(neutron_tenant='onetenant'))
 
     def test_sync_on_demand(self):
@@ -663,8 +671,6 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                                         is_admin_context=True)['port']
                     p2 = self.show_port(p2['port']['id'],
                                         is_admin_context=True)['port']
-                    p1['dns_name'] = None
-                    p2['dns_name'] = None
                     expected_calls = [
                         mock.call(mock.ANY, p1),
                         mock.call(mock.ANY, p2)]
@@ -719,8 +725,6 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                                         is_admin_context=True)['port']
                     p2 = self.show_port(p2['port']['id'],
                                         is_admin_context=True)['port']
-                    p1['dns_name'] = None
-                    p2['dns_name'] = None
                     expected_calls = [
                         mock.call(mock.ANY, p1),
                         mock.call(mock.ANY, p2)]
@@ -1124,12 +1128,14 @@ default = private
             tenant_id=mocked.APIC_TENANT,
             network_id=net1['id'], cidr='30.10.10.0/24', ip_version=4,
             expected_res_status=500)
-        self.assertEqual('MechanismDriverError', res['NeutronError']['type'])
+        self.assertEqual('HTTPInternalServerError',
+                         res['NeutronError']['type'])
         res = self.create_subnet(
             tenant_id=mocked.APIC_TENANT,
             network_id=net2['id'], cidr='10.10.10.0/24', ip_version=4,
             expected_res_status=500)
-        self.assertEqual('MechanismDriverError', res['NeutronError']['type'])
+        self.assertEqual('HTTPInternalServerError',
+                         res['NeutronError']['type'])
 
 
 class MechanismRpcTestCase(ApicML2IntegratedTestBase):
@@ -1305,12 +1311,10 @@ class MechanismRpcTestCase(ApicML2IntegratedTestBase):
             mock.Mock(), 'h1', 'static', None, '1', '1', '1')
 
 
-class TestCiscoApicMechDriver(base.BaseTestCase,
+class TestCiscoApicMechDriver(testlib_api.SqlTestCase,
                               mocked.ControllerMixin,
                               mocked.ConfigMixin):
     def setUp(self):
-        model_base.BASEV2.metadata.create_all(db_api.get_engine())
-
         super(TestCiscoApicMechDriver, self).setUp()
         mocked.ControllerMixin.set_up_mocks(self)
         mocked.ConfigMixin.set_up_mocks(self)
@@ -4117,8 +4121,6 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
             'opflex_networks': None,
             'bridge_mappings': {'physnet1': 'br-eth1'}}}
         self.actual_core_plugin = manager.NeutronManager.get_plugin()
-        self.mgr_patch = mock.patch('neutron.manager.NeutronManager')
-        self.mgr_patch.start()
         self.driver._l3_plugin = mock.Mock()
 
         def get_resource(context, resource_id):
@@ -4127,7 +4129,6 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
         self.driver._l3_plugin.get_router = get_resource
 
     def tearDown(self):
-        self.mgr_patch.stop()
         super(TestCiscoApicMechDriverHostSNAT, self).tearDown()
 
     def _get_network_context(self, plugin, tenant_id, net_id, seg_id=None,
@@ -4179,8 +4180,6 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
             # We need the db_plugin to get invoked from the code being
             # tested. However, this was earlier mocked out in the setup,
             # hence we reset it here.
-            manager.NeutronManager.get_plugin.return_value = (
-                self.driver.db_plugin)
             self.driver.db_plugin._device_to_port_id = (
                 self.actual_core_plugin._device_to_port_id)
             self.driver.db_plugin.get_bound_port_context = (
@@ -4189,8 +4188,6 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                 self.actual_core_plugin.get_agents)
             self.driver.db_plugin.create_or_update_agent = (
                 self.actual_core_plugin.create_or_update_agent)
-            self.driver.db_plugin._create_or_update_agent = (
-                self.actual_core_plugin._create_or_update_agent)
             self.driver._is_nat_enabled_on_ext_net = mock.Mock()
             self.driver._is_connected_to_ext_net = mock.Mock()
             self.driver.agent_type = 'Open vSwitch agent'
@@ -4200,8 +4197,9 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
             self.assertEqual(1, len(host_snat_ips))
             self.assertEqual(db_net['name'],
                              host_snat_ips[0]['external_segment_name'])
-            self.assertEqual('192.168.0.2',
-                             host_snat_ips[0]['host_snat_ip'])
+            hcidr = self.driver.apic_manager.ext_net_dict[
+                db_net['name']]['host_pool_cidr']
+            self._check_ip_in_cidr(host_snat_ips[0]['host_snat_ip'], hcidr)
             self.assertEqual('192.168.0.1',
                              host_snat_ips[0]['gateway_ip'])
             self.assertEqual(
@@ -4225,8 +4223,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                 self.assertEqual(1, len(host_snat_ips))
                 self.assertEqual(db_net['name'],
                                  host_snat_ips[0]['external_segment_name'])
-                self.assertEqual('192.168.0.2',
-                                 host_snat_ips[0]['host_snat_ip'])
+                self._check_ip_in_cidr(host_snat_ips[0]['host_snat_ip'], hcidr)
                 self.assertEqual('192.168.0.1',
                                  host_snat_ips[0]['gateway_ip'])
                 self.assertEqual(
@@ -4250,8 +4247,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                 self.assertEqual(1, len(host_snat_ips))
                 self.assertEqual(db_net['name'],
                                  host_snat_ips[0]['external_segment_name'])
-                self.assertEqual('192.168.0.3',
-                                 host_snat_ips[0]['host_snat_ip'])
+                self._check_ip_in_cidr(host_snat_ips[0]['host_snat_ip'], hcidr)
                 self.assertEqual('192.168.0.1',
                                  host_snat_ips[0]['gateway_ip'])
                 self.assertEqual(
@@ -4315,8 +4311,6 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
             # We need the db_plugin to get invoked from the code being
             # tested. However, this was earlier mocked out in the setup,
             # hence we reset it here.
-            manager.NeutronManager.get_plugin.return_value = (
-                self.driver.db_plugin)
             self.driver.db_plugin._device_to_port_id = (
                 self.actual_core_plugin._device_to_port_id)
             self.driver.db_plugin.get_bound_port_context = (
@@ -4325,8 +4319,6 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                 self.actual_core_plugin.get_agents)
             self.driver.db_plugin.create_or_update_agent = (
                 self.actual_core_plugin.create_or_update_agent)
-            self.driver.db_plugin._create_or_update_agent = (
-                self.actual_core_plugin._create_or_update_agent)
             self.driver._is_nat_enabled_on_ext_net = mock.Mock()
             self.driver._is_connected_to_ext_net = mock.Mock()
             self.driver.agent_type = 'Open vSwitch agent'
@@ -4364,8 +4356,6 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
         # We need the db_plugin to get invoked from the code being
         # tested. However, this was earlier mocked out in the setup,
         # hence we reset it here.
-        manager.NeutronManager.get_plugin.return_value = (
-            self.driver.db_plugin)
         self.driver.db_plugin._device_to_port_id = (
             self.actual_core_plugin._device_to_port_id)
         self.driver.db_plugin.get_bound_port_context = (
@@ -4374,8 +4364,6 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
             self.actual_core_plugin.get_agents)
         self.driver.db_plugin.create_or_update_agent = (
             self.actual_core_plugin.create_or_update_agent)
-        self.driver.db_plugin._create_or_update_agent = (
-            self.actual_core_plugin._create_or_update_agent)
         self.driver._is_nat_enabled_on_ext_net = mock.Mock()
         self.driver._is_connected_to_ext_net = mock.Mock()
         self.driver.agent_type = 'Open vSwitch agent'
@@ -4401,6 +4389,8 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
             network_id=net['id'], cidr='10.0.0.0/24',
             ip_version=4, is_admin_context=True)
         host_arg = {'binding:host_id': 'h2'}
+        hcidr = self.driver.apic_manager.ext_net_dict[
+            db_net['name']]['host_pool_cidr']
         # Create port with a different tenant
         with self.port(subnet=sub, tenant_id=TEST_TENANT_ID2,
                        device_owner='compute:', device_id='someid',
@@ -4413,7 +4403,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
             # allocated in the SNAT network tenant ID
             self.assertEqual(db_net['name'],
                              details['external_segment_name'])
-            self.assertEqual('192.168.0.2', details['host_snat_ip'])
+            self._check_ip_in_cidr(details['host_snat_ip'], hcidr)
             self.assertEqual('192.168.0.1', details['gateway_ip'])
             self.assertEqual(
                 netaddr.IPNetwork(mocked.HOST_POOL_CIDR).prefixlen,
@@ -4436,7 +4426,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                                                           db_net)
                 self.assertEqual(db_net['name'],
                                  details['external_segment_name'])
-                self.assertEqual('192.168.0.2', details['host_snat_ip'])
+                self._check_ip_in_cidr(details['host_snat_ip'], hcidr)
                 self.assertEqual('192.168.0.1', details['gateway_ip'])
                 self.assertEqual(
                     netaddr.IPNetwork(mocked.HOST_POOL_CIDR).prefixlen,
@@ -4458,8 +4448,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                                                           db_net)
                 self.assertEqual(db_net['name'],
                                  details['external_segment_name'])
-                self.assertEqual('192.168.0.2',
-                                 details['host_snat_ip'])
+                self._check_ip_in_cidr(details['host_snat_ip'], hcidr)
                 self.assertEqual('192.168.0.1',
                                  details['gateway_ip'])
                 self.assertEqual(
@@ -4522,8 +4511,10 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
             # allocated in the SNAT network tenant ID
             self.assertEqual(db_net['name'],
                              details['external_segment_name'])
-            self.assertEqual('192.168.0.2',
-                             details['host_snat_ip'])
+            hcidr = self.driver.apic_manager.ext_net_dict[
+                db_net['name']]['host_pool_cidr']
+            self._check_ip_in_cidr(
+                details['host_snat_ip'], hcidr)
             self.assertEqual('192.168.0.1',
                              details['gateway_ip'])
             self.assertEqual(
@@ -4549,8 +4540,8 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                                                           db_net)
                 self.assertEqual(db_net['name'],
                                  details['external_segment_name'])
-                self.assertEqual('192.168.0.3',
-                                 details['host_snat_ip'])
+                self._check_ip_in_cidr(
+                    details['host_snat_ip'], hcidr)
                 self.assertEqual('192.168.0.1',
                                  details['gateway_ip'])
                 self.assertEqual(
@@ -4575,8 +4566,8 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
                                                           db_net)
                 self.assertEqual(db_net['name'],
                                  details['external_segment_name'])
-                self.assertEqual('192.168.0.2',
-                                 details['host_snat_ip'])
+                self._check_ip_in_cidr(
+                    details['host_snat_ip'], hcidr)
                 self.assertEqual('192.168.0.1',
                                  details['gateway_ip'])
                 self.assertEqual(
@@ -4649,7 +4640,10 @@ class TestCiscoApicMechDriverNoFabricL3(TestApicML2IntegratedPhysicalNode):
         # Configure reference L3 implementation, which
         # disables routing and subnet configuration in the ACI fabric
         super(TestCiscoApicMechDriverNoFabricL3, self).setUp(
-            service_plugins={'L3_ROUTER_NAT': 'router'})
+            service_plugins={
+                'L3_ROUTER_NAT': 'router',
+                'flavors_plugin_name': 'neutron.services.flavors.'
+                                       'flavors_plugin.FlavorsPlugin'})
 
     def tearDown(self):
         self._update_notify.stop()
