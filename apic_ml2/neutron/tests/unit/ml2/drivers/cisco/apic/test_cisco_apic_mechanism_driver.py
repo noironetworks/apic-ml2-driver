@@ -179,6 +179,10 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
             'dirtylittlesecret')
         self.driver.notifier = mock.Mock()
 
+        self.driver._query_external_EPG = mock.Mock()
+        self.driver._query_external_EPG.return_value = ['5.5.5.0/24',
+                                                        '6.6.6.0/24']
+
     def _mock_external_dict(self, data, is_edge_nat=False):
         self.driver.apic_manager.ext_net_dict = {}
         for x in data:
@@ -1372,6 +1376,10 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
 "vlan-999"}}}]}}]}}, {"l3extRsEctx": {"attributes": {"dn": "uni/tn-Sub\
 /out-Auto-Sub/rsectx", "tnFvCtxName": "ctx-Sub"}}}]}}'
 
+        self.driver._query_external_EPG = mock.Mock()
+        self.driver._query_external_EPG.return_value = ['5.5.5.0/24',
+                                                        '6.6.6.0/24']
+
     def _check_call_list(self, expected, observed):
         exp_bkp = expected[:]
         obs_bkp = observed[:]
@@ -1582,7 +1590,10 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
             mgr.ensure_external_routed_network_created.call_args_list)
 
         expected_calls = [
-            mock.call("Shd-%s" % shd_l3out,
+            mock.call("Shd-%s" % shd_l3out, subnet='5.5.5.0/24',
+                      external_epg="Shd-%s" % mocked.APIC_EXT_EPG,
+                      owner=self._tenant(ext_nat=True), transaction=mock.ANY),
+            mock.call("Shd-%s" % shd_l3out, subnet='6.6.6.0/24',
                       external_epg="Shd-%s" % mocked.APIC_EXT_EPG,
                       owner=self._tenant(ext_nat=True), transaction=mock.ANY)]
 
@@ -1653,7 +1664,10 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
             mgr.ensure_external_routed_network_created.call_args_list)
 
         expected_calls = [
-            mock.call(l3out_name,
+            mock.call(l3out_name, subnet='5.5.5.0/24',
+                      external_epg="Auto-%s" % mocked.APIC_EXT_EPG,
+                      owner=self._tenant(ext_nat=True), transaction=mock.ANY),
+            mock.call(l3out_name, subnet='6.6.6.0/24',
                       external_epg="Auto-%s" % mocked.APIC_EXT_EPG,
                       owner=self._tenant(ext_nat=True), transaction=mock.ANY)]
         self._check_call_list(
@@ -1889,11 +1903,19 @@ tt':
             mgr.apic.l3extOut.mo, final_req, self._tenant(ext_nat=True),
             l3out_name)
 
-        mgr.ensure_external_epg_created.assert_called_once_with(
-            l3out_name,
-            external_epg="Auto-%s" % self._scoped_name(mocked.APIC_EXT_EPG,
-                                                       preexisting=True),
-            owner=self._tenant(ext_nat=True), transaction=mock.ANY)
+        expected_calls = [
+            mock.call(
+                l3out_name, subnet='5.5.5.0/24',
+                external_epg="Auto-%s" % self._scoped_name(
+                    mocked.APIC_EXT_EPG, preexisting=True),
+                owner=self._tenant(ext_nat=True), transaction=mock.ANY),
+            mock.call(
+                l3out_name, subnet='6.6.6.0/24',
+                external_epg="Auto-%s" % self._scoped_name(
+                    mocked.APIC_EXT_EPG, preexisting=True),
+                owner=self._tenant(ext_nat=True), transaction=mock.ANY)]
+        self._check_call_list(
+            expected_calls, mgr.ensure_external_epg_created.call_args_list)
 
         mgr.set_l3out_for_bd.assert_called_once_with(
             self._tenant(), self._scoped_name('net_id'), l3out_name,
@@ -1965,11 +1987,19 @@ tt':
         self.assertFalse(mgr.ensure_logical_node_profile_created.called)
         self.assertFalse(mgr.ensure_static_route_created.called)
 
-        mgr.ensure_external_epg_created.assert_called_once_with(
-            "Shd-%s" % shd_l3out,
-            external_epg="Shd-%s" % self._scoped_name(mocked.APIC_EXT_EPG,
-                                                      preexisting=True),
-            owner=self._tenant(ext_nat=True), transaction=mock.ANY)
+        expected_calls = [
+            mock.call(
+                "Shd-%s" % shd_l3out, subnet='5.5.5.0/24',
+                external_epg="Shd-%s" % self._scoped_name(
+                    mocked.APIC_EXT_EPG, preexisting=True),
+                owner=self._tenant(ext_nat=True), transaction=mock.ANY),
+            mock.call(
+                "Shd-%s" % shd_l3out, subnet='6.6.6.0/24',
+                external_epg="Shd-%s" % self._scoped_name(
+                    mocked.APIC_EXT_EPG, preexisting=True),
+                owner=self._tenant(ext_nat=True), transaction=mock.ANY)]
+        self._check_call_list(
+            expected_calls, mgr.ensure_external_epg_created.call_args_list)
 
         expected_calls = [
             mock.call(
