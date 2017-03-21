@@ -1146,7 +1146,8 @@ class APICMechanismDriver(api.MechanismDriver,
 
             if nat_enabled:
                 self._create_shadow_ext_net_for_nat(
-                    context, l3out_name, external_epg, cid, network, router)
+                    context, l3out_name_pre or l3out_name,
+                    external_epg, cid, network, router)
             else:
                 with self.apic_manager.apic.transaction() as trs:
                     # Connect L3-out to tenant's VRF
@@ -1931,9 +1932,19 @@ class APICMechanismDriver(api.MechanismDriver,
                 self._manage_bd_to_l3out_link(
                     context, router, shadow_l3out)
 
-            self.apic_manager.ensure_external_epg_created(
-                shadow_l3out, external_epg=shadow_ext_epg,
-                owner=vrf_info['aci_tenant'], transaction=trs)
+            ext_subnets = self._query_external_EPG(
+                l3out_name, vrf_info['aci_tenant'], ext_epg_name)
+            if ext_subnets:
+                for ext_subnet in ext_subnets:
+                    self.apic_manager.ensure_external_epg_created(
+                        shadow_l3out, subnet=ext_subnet,
+                        external_epg=shadow_ext_epg,
+                        owner=vrf_info['aci_tenant'], transaction=trs)
+            else:
+                # just use the default subnet
+                self.apic_manager.ensure_external_epg_created(
+                    shadow_l3out, external_epg=shadow_ext_epg,
+                    owner=vrf_info['aci_tenant'], transaction=trs)
 
             # make them use router-contract
             self.apic_manager.ensure_external_epg_consumed_contract(
@@ -2463,6 +2474,18 @@ class APICMechanismDriver(api.MechanismDriver,
         if return_full:
             info['l3out'] = l3out_children
         return info
+
+    def _query_external_EPG(self, l3out_name, tenant_id, ext_EPG_name):
+        ext_EPG_children = self.apic_manager.apic.l3extInstP.get_subtree(
+            tenant_id, l3out_name, ext_EPG_name)
+        if not ext_EPG_children:
+            ext_EPG_children = self.apic_manager.apic.l3extOut.get_subtree(
+                apic_manager.TENANT_COMMON, l3out_name, ext_EPG_name)
+            if not ext_EPG_children:
+                return None
+        ext_subnets = [x['l3extSubnet'].get('attributes', {}).get('ip')
+                       for x in ext_EPG_children if x.get('l3extSubnet')]
+        return ext_subnets
 
     def _is_pre_existing(self, ext_info):
         opt = ext_info.get('preexisting', 'false')
