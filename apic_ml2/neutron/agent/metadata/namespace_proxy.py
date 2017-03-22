@@ -22,7 +22,7 @@ from neutron.agent.linux import daemon
 from neutron.agent.linux import utils as agent_utils
 from neutron.common import config
 from neutron.common import utils
-from neutron.i18n import _LE
+from neutron._i18n import _LE
 from neutron import wsgi
 from oslo_serialization import jsonutils
 
