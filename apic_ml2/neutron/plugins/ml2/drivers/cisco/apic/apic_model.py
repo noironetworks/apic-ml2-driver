@@ -17,16 +17,17 @@ import sqlalchemy as sa
 from sqlalchemy import orm
 
 from neutron.db import api as db_api
-from neutron.db import model_base
 from neutron.db import models_v2
+from neutron.db import segments_db
 from neutron.plugins.ml2 import models as models_ml2
+from neutron_lib.db import model_base
 
 
-class RouterContract(model_base.BASEV2, models_v2.HasTenant):
+class RouterContract(model_base.BASEV2, model_base.HasProject):
 
     """Contracts created on the APIC.
 
-    tenant_id represents the owner (APIC side) of the contract.
+    project_id represents the owner (APIC side) of the contract.
     router_id is the UUID of the router (Neutron side) this contract is
     referring to.
     """
@@ -77,23 +78,23 @@ class ApicDbModel(object):
         return self.session.query(RouterContract).filter_by(
             router_id=router_id).first()
 
-    def write_contract_for_router(self, tenant_id, router_id):
+    def write_contract_for_router(self, project_id, router_id):
         """Stores a new contract for the given tenant."""
-        contract = RouterContract(tenant_id=tenant_id,
+        contract = RouterContract(project_id=project_id,
                                   router_id=router_id)
         with self.session.begin(subtransactions=True):
             self.session.add(contract)
         return contract
 
-    def update_contract_for_router(self, tenant_id, router_id):
+    def update_contract_for_router(self, project_id, router_id):
         with self.session.begin(subtransactions=True):
             contract = self.session.query(RouterContract).filter_by(
                 router_id=router_id).with_lockmode('update').first()
             if contract:
-                contract.tenant_id = tenant_id
+                contract.project_id = project_id
                 self.session.merge(contract)
             else:
-                self.write_contract_for_router(tenant_id, router_id)
+                self.write_contract_for_router(project_id, router_id)
 
     def delete_contract_for_router(self, router_id):
         with self.session.begin(subtransactions=True):
@@ -155,9 +156,9 @@ class ApicDbModel(object):
     def get_tenant_network_vlan_for_host(self, host):
         pb = models_ml2.PortBinding
         po = models_v2.Port
-        ns = models_ml2.NetworkSegment
+        ns = segments_db.NetworkSegment
         return self.session.query(
-            po.tenant_id, ns.network_id, ns.segmentation_id).filter(
+            po.project_id, ns.network_id, ns.segmentation_id).filter(
             po.id == pb.port_id).filter(pb.host == host).filter(
                 po.network_id == ns.network_id).distinct()
 
