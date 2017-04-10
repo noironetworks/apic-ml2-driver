@@ -61,6 +61,7 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
     rpc as mech_rpc)
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import constants as acst
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import nova_client
 from apic_ml2.neutron.services.l3_router import apic_driver as driver
 from apic_ml2.neutron.tests.unit.ml2.drivers.cisco.apic import (
     test_cisco_apic_common as mocked)
@@ -1140,6 +1141,40 @@ default = private
             expected_res_status=500)
         self.assertEqual('HTTPInternalServerError',
                          res['NeutronError']['type'])
+
+    def test_allow_vm_names(self):
+        class MockVM(object):
+            def __init__(self, vm_name):
+                self.name = vm_name
+        self.driver._agent_bind_port = mock.Mock()
+
+        cons_data = """
+[common/shared]
+allow_vm_names = secure_vm*, safe_vm*
+            """
+        self.driver.net_cons.source.last_refresh_time = 0
+        with open(self.cons_file_name, 'w') as fd:
+            fd.write(cons_data)
+
+        net = self.create_network(
+            name='net', tenant_id=mocked.APIC_TENANT,
+            expected_res_status=201)['network']
+        sub = self.create_subnet(
+            tenant_id=mocked.APIC_TENANT,
+            network_id=net['id'], cidr='192.168.0.0/24', ip_version=4)
+
+        nova_client.NovaClient().get_server = mock.Mock(
+            return_value=MockVM('bad_vm1'))
+        with self.port(subnet=sub, tenant_id=mocked.APIC_TENANT) as p1:
+            self._bind_port_to_host(p1['port']['id'], 'h1')
+        self.assertFalse(self.driver._agent_bind_port.called)
+
+        # try one more time with different vm name
+        nova_client.NovaClient().get_server = mock.Mock(
+            return_value=MockVM('safe_vm1'))
+        with self.port(subnet=sub, tenant_id=mocked.APIC_TENANT) as p2:
+            self._bind_port_to_host(p2['port']['id'], 'h1')
+        self.assertTrue(self.driver._agent_bind_port.called)
 
 
 class MechanismRpcTestCase(ApicML2IntegratedTestBase):
