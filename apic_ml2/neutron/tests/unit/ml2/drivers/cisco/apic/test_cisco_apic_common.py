@@ -270,7 +270,7 @@ class ConfigMixin(object):
             '102': {
                 '4/21': ['rhel01', 'rhel02'],
                 '1/4/22': ['rhel03'],
-                '4/23': ['h1'],
+                '4/23': ['h1', 'h2'],
             },
         }
         self.vpc_dict = {
