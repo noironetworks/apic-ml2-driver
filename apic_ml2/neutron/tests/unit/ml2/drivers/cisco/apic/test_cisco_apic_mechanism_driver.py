@@ -59,6 +59,8 @@ sys.modules[T_DRV].OpflexTypeDriver().allocate_tenant_segment.return_value = (
 
 from apic_ml2.neutron.db import port_ha_ipaddress_binding as ha
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
+    extension_db as extn_db)
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
     mechanism_apic as md)
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
     rpc as mech_rpc)
@@ -100,6 +102,7 @@ AGENT_CONF_OPFLEX = {'alive': True, 'binary': 'somebinary',
                          'opflex_networks': None,
                          'bridge_mappings': {'physnet1': 'br-eth1'}}}
 APIC_EXTERNAL_RID = '1.0.0.1'
+ALLOW_ROUTE_LEAK = 'apic:allow_route_leak'
 
 
 def echo(context, id, prefix=''):
@@ -117,7 +120,7 @@ def equal(x, y):
 class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
                                 mocked.ControllerMixin, mocked.ConfigMixin,
                                 mocked.ApicDBTestBase):
-    _extension_drivers = ['port_security']
+    _extension_drivers = ['port_security', 'apic_ml2']
 
     def setUp(self, service_plugins=None, ml2_opts=None):
         mocked.ControllerMixin.set_up_mocks(self)
@@ -469,6 +472,18 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
         self.create_subnet(
             network_id=net2['id'], cidr='192.168.8.0/24',
             ip_version=4, is_admin_context=True)
+        net_route_leak = self.create_network(
+            tenant_id=mocked.APIC_TENANT, is_admin_context=True,
+            **{'apic:allow_route_leak': 'True'})['network']
+        sub_route_leak = self.create_subnet(
+            network_id=net_route_leak['id'], cidr='192.168.96.0/24',
+            ip_version=4, is_admin_context=True)
+        net_route_leak1 = self.create_network(
+            tenant_id=mocked.APIC_TENANT, is_admin_context=True,
+            **{'apic:allow_route_leak': 'True'})['network']
+        sub_route_leak1 = self.create_subnet(
+            network_id=net_route_leak1['id'], cidr='192.168.98.0/24',
+            ip_version=4, is_admin_context=True)
         router = self.create_router(api=self.ext_api,
                                     tenant_id=mocked.APIC_TENANT)['router']
         self.l3_plugin.add_router_interface(
@@ -477,21 +492,27 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
         self.l3_plugin.add_router_interface(
             context.get_admin_context(), router['id'],
             {'subnet_id': sub3['subnet']['id']})
+        self.l3_plugin.add_router_interface(
+            context.get_admin_context(), router['id'],
+            {'subnet_id': sub_route_leak['subnet']['id']})
+        self.l3_plugin.add_router_interface(
+            context.get_admin_context(), router['id'],
+            {'subnet_id': sub_route_leak1['subnet']['id']})
         self.driver._add_ip_mapping_details = mock.Mock()
-        with self.port(subnet=sub, tenant_id=mocked.APIC_TENANT) as p1:
-            p1 = p1['port']
-            self._bind_port_to_host(p1['id'], 'h1')
-            details = self._get_gbp_details(p1['id'], 'h1')
+        with self.port(subnet=sub_route_leak,
+                       tenant_id=mocked.APIC_TENANT) as p0:
+            p0 = p0['port']
+            self._bind_port_to_host(p0['id'], 'h1')
+            details = self._get_gbp_details(p0['id'], 'h1')
             if self.driver.per_tenant_context and vrf_per_router:
-                self.assertEqual('router:%s' % router['id'],
+                self.assertEqual(mocked.APIC_TENANT,
                                  details['l3_policy_id'])
                 self.assertEqual(self._tenant(vrf=True),
                                  details['vrf_tenant'])
-                self.assertEqual(
-                    self._routed_network_vrf_name(router=router['id']),
-                    details['vrf_name'])
-                self.assertEqual(['192.168.0.0/24', '192.168.2.0/24',
-                                  '192.168.6.0/24', '192.168.8.0/24'],
+                self.assertEqual(self._network_vrf_name(),
+                                 details['vrf_name'])
+                self.assertEqual(['192.168.4.0/24', '192.168.96.0/24',
+                                  '192.168.98.0/24'],
                                  details['vrf_subnets'])
             else:
                 if self.driver.per_tenant_context:
@@ -506,7 +527,41 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                                  details['vrf_name'])
                 self.assertEqual(['192.168.0.0/24', '192.168.2.0/24',
                                   '192.168.4.0/24', '192.168.6.0/24',
-                                  '192.168.8.0/24'],
+                                  '192.168.8.0/24', '192.168.96.0/24',
+                                  '192.168.98.0/24'],
+                                 details['vrf_subnets'])
+
+        with self.port(subnet=sub, tenant_id=mocked.APIC_TENANT) as p1:
+            p1 = p1['port']
+            self._bind_port_to_host(p1['id'], 'h1')
+            details = self._get_gbp_details(p1['id'], 'h1')
+            if self.driver.per_tenant_context and vrf_per_router:
+                self.assertEqual('router:%s' % router['id'],
+                                 details['l3_policy_id'])
+                self.assertEqual(self._tenant(vrf=True),
+                                 details['vrf_tenant'])
+                self.assertEqual(
+                    self._routed_network_vrf_name(router=router['id']),
+                    details['vrf_name'])
+                self.assertEqual(['192.168.0.0/24', '192.168.2.0/24',
+                                  '192.168.6.0/24', '192.168.8.0/24',
+                                  '192.168.96.0/24', '192.168.98.0/24'],
+                                 details['vrf_subnets'])
+            else:
+                if self.driver.per_tenant_context:
+                    self.assertEqual(mocked.APIC_TENANT,
+                                     details['l3_policy_id'])
+                else:
+                    self.assertEqual('%s-shared' % self._tenant(vrf=True),
+                                     details['l3_policy_id'])
+                self.assertEqual(self._tenant(vrf=True),
+                                 details['vrf_tenant'])
+                self.assertEqual(self._network_vrf_name(),
+                                 details['vrf_name'])
+                self.assertEqual(['192.168.0.0/24', '192.168.2.0/24',
+                                  '192.168.4.0/24', '192.168.6.0/24',
+                                  '192.168.8.0/24', '192.168.96.0/24',
+                                  '192.168.98.0/24'],
                                  details['vrf_subnets'])
             # remove the router interface
             self.l3_plugin.remove_router_interface(
@@ -514,12 +569,14 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                 {'subnet_id': sub3['subnet']['id']})
             details = self._get_gbp_details(p1['id'], 'h1')
             if self.driver.per_tenant_context and vrf_per_router:
-                self.assertEqual(['192.168.0.0/24', '192.168.2.0/24'],
+                self.assertEqual(['192.168.0.0/24', '192.168.2.0/24',
+                                  '192.168.96.0/24', '192.168.98.0/24'],
                                  details['vrf_subnets'])
             else:
                 self.assertEqual(['192.168.0.0/24', '192.168.2.0/24',
                                   '192.168.4.0/24', '192.168.6.0/24',
-                                  '192.168.8.0/24'],
+                                  '192.168.8.0/24', '192.168.96.0/24',
+                                  '192.168.98.0/24'],
                                  details['vrf_subnets'])
 
         with self.port(subnet=sub2, tenant_id=mocked.APIC_TENANT) as p2:
@@ -536,10 +593,17 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                              details['vrf_tenant'])
             self.assertEqual(self._network_vrf_name(),
                              details['vrf_name'])
-            self.assertEqual(['192.168.0.0/24', '192.168.2.0/24',
-                              '192.168.4.0/24', '192.168.6.0/24',
-                              '192.168.8.0/24'],
-                             details['vrf_subnets'])
+            if self.driver.per_tenant_context and vrf_per_router:
+                self.assertEqual(['192.168.4.0/24', '192.168.6.0/24',
+                                  '192.168.8.0/24', '192.168.96.0/24',
+                                  '192.168.98.0/24'],
+                                 details['vrf_subnets'])
+            else:
+                self.assertEqual(['192.168.0.0/24', '192.168.2.0/24',
+                                  '192.168.4.0/24', '192.168.6.0/24',
+                                  '192.168.8.0/24', '192.168.96.0/24',
+                                  '192.168.98.0/24'],
+                                 details['vrf_subnets'])
 
     def test_vrf_details(self):
         self._test_vrf_details()
@@ -950,6 +1014,67 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             for p in sorted([p1['id'], p2['id'], p4['id']])]
         self._check_call_list(
             expected_calls, self.driver.notify_port_update.call_args_list)
+
+    def test_gbp_details_for_route_leak_network(self):
+        self.driver.per_tenant_context = True
+        self.driver.vrf_per_router_tenants.append(mocked.APIC_TENANT)
+        self._register_agent('h1')
+        net_route_leak = self.create_network(
+            tenant_id=mocked.APIC_TENANT, expected_res_status=201,
+            **{'apic:allow_route_leak': 'True'})['network']
+        sub_route_leak = self.create_subnet(
+            tenant_id=mocked.APIC_TENANT,
+            network_id=net_route_leak['id'], cidr='10.0.0.0/24',
+            ip_version=4)['subnet']
+        rtr1 = self.create_router(
+            api=self.ext_api, tenant_id=mocked.APIC_TENANT)['router']
+        self.l3_plugin.add_router_interface(
+            context.get_admin_context(), rtr1['id'],
+            {'subnet_id': sub_route_leak['id']})
+        p1 = self.create_port(
+            network_id=net_route_leak['id'], tenant_id=mocked.APIC_TENANT,
+            device_owner='compute:', device_id='someid',
+            fixed_ips=[{'subnet_id': sub_route_leak['id'],
+                        'ip_address': '10.0.0.10'}])['port']
+        self._bind_port_to_host(p1['id'], 'h1')
+        rtr2 = self.create_router(
+            api=self.ext_api, tenant_id=mocked.APIC_TENANT)['router']
+        p2 = self.create_port(
+            network_id=net_route_leak['id'], tenant_id=mocked.APIC_TENANT,
+            device_owner='network:router_interface',
+            fixed_ips=[{'subnet_id': sub_route_leak['id'],
+                        'ip_address': '10.0.0.2'}])['port']
+        self.l3_plugin.add_router_interface(
+            context.get_admin_context(), rtr2['id'],
+            {'port_id': p2['id']})
+
+        details = self._get_gbp_details(p1['id'], 'h1')
+
+        self.assertEqual(2, len(details['floating_ip']))
+        self.assertEqual('10.0.0.10',
+                         details['floating_ip'][0]['fixed_ip_address'])
+        self.assertEqual('10.0.0.10',
+                         details['floating_ip'][0]['floating_ip_address'])
+        self.assertEqual(self._tenant(),
+                         details['floating_ip'][0]['nat_epg_tenant'])
+        self.assertEqual(self._app_profile(),
+                         details['floating_ip'][0]['nat_epg_app_profile'])
+        leak_epg_name = 'Leak-%s-%s' % (rtr1['id'],
+                                        net_route_leak['id'])
+        self.assertEqual(leak_epg_name,
+                         details['floating_ip'][0]['nat_epg_name'])
+        self.assertEqual('10.0.0.10',
+                         details['floating_ip'][1]['fixed_ip_address'])
+        self.assertEqual('10.0.0.10',
+                         details['floating_ip'][1]['floating_ip_address'])
+        self.assertEqual(self._tenant(),
+                         details['floating_ip'][1]['nat_epg_tenant'])
+        self.assertEqual(self._app_profile(),
+                         details['floating_ip'][1]['nat_epg_app_profile'])
+        leak_epg_name = 'Leak-%s-%s' % (rtr2['id'],
+                                        net_route_leak['id'])
+        self.assertEqual(leak_epg_name,
+                         details['floating_ip'][1]['nat_epg_name'])
 
     def test_notify_router_interface_update(self):
         exc = driver.InterTenantRouterInterfaceNotAllowedOnPerTenantContext
@@ -1735,7 +1860,8 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
         self._test_update_edge_nat_gw_port_postcommit('admin_tenant')
 
     def _test_update_interface_port_postcommit(self, no_nat=False, pre=False,
-                                               net_tenant=None):
+                                               net_tenant=None,
+                                               route_leak=False):
         net_tenant = net_tenant or mocked.APIC_TENANT
         if self.driver.vrf_per_router_tenants:
             self.driver.vrf_per_router_tenants.append(net_tenant)
@@ -1753,13 +1879,19 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
             ext_net = mocked.APIC_NETWORK_EDGE_NAT
         net_ctx = self._get_network_context(net_tenant,
                                             'net_id',
-                                            TEST_SEGMENT1)
+                                            TEST_SEGMENT1,
+                                            route_leak=route_leak)
+        net_ctx1 = self._get_network_context(net_tenant,
+                                             'net_id1',
+                                             TEST_SEGMENT1,
+                                             route_leak=route_leak)
         port_ctx = self._get_port_context(net_tenant,
                                           'net_id',
                                           'vm1', net_ctx, HOST_ID1,
                                           interface=True)
         self.driver._l3_plugin.get_router = mock.Mock(
             return_value={'id': mocked.APIC_ROUTER,
+                          'name': mocked.APIC_ROUTER + '-name',
                           'tenant_id': net_tenant,
                           'external_gateway_info':
                               {'network_id': ext_net,
@@ -1768,6 +1900,23 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
             return_value={'name': ext_net + '-name',
                           'tenant_id': mocked.APIC_TENANT,
                           'router:external': True})
+        self.driver._get_route_leak_networks = mock.Mock(
+            return_value=([net_ctx.current, net_ctx1.current]))
+        port_ctx._plugin.get_subnets = mock.Mock(
+            return_value=[{'tenant_id': mocked.APIC_TENANT,
+                           'id': 'some_id',
+                           'cidr': '5.5.5.0/24'}])
+        if route_leak:
+            self.driver._get_subnet_info = mock.Mock(
+                return_value=(mocked.APIC_TENANT, ext_net + '-name',
+                              '3.3.3.1/24'))
+            port_ctx._plugin.get_subnets = mock.Mock(
+                return_value=[{'tenant_id': mocked.APIC_TENANT,
+                               'id': 'some_id',
+                               'cidr': '5.5.5.0/24'},
+                              {'tenant_id': mocked.APIC_TENANT,
+                               'id': 'some_id1',
+                               'cidr': '6.6.6.0/24'}])
 
         self.driver.update_port_postcommit(port_ctx)
 
@@ -1783,10 +1932,76 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
         bd_name = self._scoped_name('net_id', tenant=net_tenant)
         mgr = self.driver.apic_manager
         if self.driver.vrf_per_router_tenants:
-            mgr.set_context_for_bd.assert_called_once_with(
-                bd_tenant, bd_name,
-                self._routed_network_vrf_name(tenant=net_tenant),
-                transaction=mock.ANY)
+            leak_l3out = 'Leak-%s' % net_ctx.current['name']
+            leak_l3out1 = 'Leak-%s' % net_ctx1.current['name']
+            leak_ext_epg = 'Leak-%s-%s' % (mocked.APIC_ROUTER + '-name',
+                                           mocked.APIC_EXT_EPG)
+            if route_leak:
+                leak_bd_name = 'Leak-%s-%s' % (mocked.APIC_ROUTER, bd_name)
+                mgr.ensure_bd_created_on_apic.assert_called_once_with(
+                    bd_tenant, leak_bd_name, ctx_owner=bd_tenant,
+                    ctx_name=self._routed_network_vrf_name(tenant=net_tenant),
+                    transaction=mock.ANY)
+                leak_epg_name = 'Leak-%s-%s' % (mocked.APIC_ROUTER, 'net_id')
+                mgr.ensure_epg_created.assert_called_once_with(
+                    bd_tenant, leak_epg_name, bd_name=leak_bd_name,
+                    app_profile_name=self._app_profile(),
+                    transaction=mock.ANY)
+                mgr.ensure_subnet_created_on_apic.assert_called_once_with(
+                    bd_tenant, leak_bd_name, '3.3.3.1/24',
+                    scope=None, transaction=mock.ANY)
+                contract_name = 'contract-%s' % mocked.APIC_ROUTER
+                expected_calls = [
+                    mock.call(
+                        bd_tenant, leak_epg_name, contract_name,
+                        app_profile_name=self._app_profile(),
+                        transaction=mock.ANY),
+                    mock.call(
+                        bd_tenant, leak_epg_name, contract_name,
+                        app_profile_name=self._app_profile(), provider=True,
+                        transaction=mock.ANY)]
+                self._check_call_list(
+                    expected_calls, mgr.set_contract_for_epg.call_args_list)
+                expected_calls = [
+                    mock.call(leak_l3out, subnet='5.5.5.0/24',
+                              external_epg=leak_ext_epg,
+                              owner=bd_tenant, transaction=mock.ANY),
+                    mock.call(leak_l3out, subnet='6.6.6.0/24',
+                              external_epg=leak_ext_epg,
+                              owner=bd_tenant, transaction=mock.ANY)]
+                self._check_call_list(
+                    expected_calls,
+                    mgr.ensure_external_epg_created.call_args_list)
+                (mgr.ensure_external_epg_consumed_contract.
+                    assert_called_once_with(
+                        leak_l3out, contract_name,
+                        external_epg=leak_ext_epg,
+                        owner=bd_tenant, transaction=mock.ANY))
+                (mgr.ensure_external_epg_provided_contract.
+                    assert_called_once_with(
+                        leak_l3out, contract_name,
+                        external_epg=leak_ext_epg,
+                        owner=bd_tenant, transaction=mock.ANY))
+                mgr.associate_external_epg_to_nat_epg.assert_called_once_with(
+                    bd_tenant, leak_l3out, leak_ext_epg,
+                    leak_epg_name, target_owner=bd_tenant,
+                    app_profile_name=self._app_profile(),
+                    transaction=mock.ANY)
+            else:
+                mgr.set_context_for_bd.assert_called_once_with(
+                    bd_tenant, bd_name,
+                    self._routed_network_vrf_name(tenant=net_tenant),
+                    transaction=mock.ANY)
+                expected_calls = [
+                    mock.call(leak_l3out, subnet='5.5.5.0/24',
+                              external_epg=leak_ext_epg,
+                              owner=bd_tenant, transaction=mock.ANY),
+                    mock.call(leak_l3out1, subnet='5.5.5.0/24',
+                              external_epg=leak_ext_epg,
+                              owner=bd_tenant, transaction=mock.ANY)]
+                self._check_call_list(
+                    expected_calls,
+                    mgr.ensure_external_epg_created.call_args_list)
         mgr.set_l3out_for_bd.assert_called_once_with(
             bd_tenant, bd_name, l3out_name,
             transaction=mock.ANY)
@@ -1794,8 +2009,15 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
     def test_update_edge_nat_interface_port_postcommit(self):
         self._test_update_interface_port_postcommit()
 
+    def test_update_route_leak_edge_nat_interface_port_postcommit(self):
+        self._test_update_interface_port_postcommit(route_leak=True)
+
     def test_update_cross_tenant_edge_nat_interface_port_postcommit(self):
         self._test_update_interface_port_postcommit('another')
+
+    def test_update_route_leak_cross_tenant_edge_nat_interface_port_postcommit(
+            self):
+        self._test_update_interface_port_postcommit('another', route_leak=True)
 
     def test_update_no_nat_interface_port_postcommit(self):
         self._test_update_interface_port_postcommit(no_nat=True)
@@ -2232,16 +2454,22 @@ tt':
         mgr.unset_l3out_for_bd.assert_called_once_with(
             self._tenant(), bd_name, l3out_name, transaction=mock.ANY)
 
-    def test_delete_edge_nat_interface_port_postcommit(self):
+    def _test_delete_interface_port_postcommit(self, route_leak=False):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
                                             'net_id',
-                                            TEST_SEGMENT1)
+                                            TEST_SEGMENT1,
+                                            route_leak=route_leak)
+        net_ctx1 = self._get_network_context(mocked.APIC_TENANT,
+                                             'net_id1',
+                                             TEST_SEGMENT1,
+                                             route_leak=route_leak)
         port_ctx = self._get_port_context(mocked.APIC_TENANT,
                                           'net_id',
                                           'vm1', net_ctx, HOST_ID1,
                                           interface=True)
         self.driver._l3_plugin.get_router = mock.Mock(
             return_value={'id': mocked.APIC_ROUTER,
+                          'name': mocked.APIC_ROUTER + '-name',
                           'tenant_id': mocked.APIC_TENANT,
                           'external_gateway_info':
                               {'network_id': mocked.APIC_NETWORK_EDGE_NAT,
@@ -2249,6 +2477,12 @@ tt':
         port_ctx._plugin.get_network = mock.Mock(
             return_value={'name': mocked.APIC_NETWORK_EDGE_NAT + '-name',
                           'router:external': True})
+        self.driver._get_route_leak_networks = mock.Mock(
+            return_value=([net_ctx.current, net_ctx1.current]))
+        port_ctx._plugin.get_subnets = mock.Mock(
+            return_value=[{'tenant_id': mocked.APIC_TENANT,
+                           'id': 'some_id',
+                           'cidr': '5.5.5.0/24'}])
 
         self.driver.delete_port_postcommit(port_ctx)
 
@@ -2263,12 +2497,46 @@ tt':
         mgr.unset_l3out_for_bd.assert_called_once_with(
             self._tenant(), bd_name, l3out_name, transaction=mock.ANY)
         if self.driver.vrf_per_router_tenants:
-            mgr.ensure_context_deleted(
-                owner=self._tenant(), ctx_id=self._routed_network_vrf_name(),
-                transaction=mock.ANY)
-            mgr.set_context_for_bd.assert_called_once_with(
-                self._tenant(), bd_name, self._network_vrf_name(),
-                transaction=mock.ANY)
+            leak_l3out = 'Leak-%s' % net_ctx.current['name']
+            leak_l3out1 = 'Leak-%s' % net_ctx1.current['name']
+            leak_ext_epg = 'Leak-%s-%s' % (mocked.APIC_ROUTER + '-name',
+                                           mocked.APIC_EXT_EPG)
+            if route_leak:
+                leak_epg_name = 'Leak-%s-%s' % (mocked.APIC_ROUTER, 'net_id')
+                mgr.delete_epg_for_network.assert_called_once_with(
+                    self._tenant(), leak_epg_name,
+                    app_profile_name=self._app_profile(),
+                    transaction=mock.ANY)
+                leak_bd_name = 'Leak-%s-%s' % (mocked.APIC_ROUTER, bd_name)
+                mgr.delete_bd_on_apic.assert_called_once_with(
+                    self._tenant(), leak_bd_name, transaction=mock.ANY)
+                mgr.ensure_external_epg_deleted.assert_called_once_with(
+                    leak_l3out, external_epg=leak_ext_epg,
+                    owner=self._tenant(), transaction=mock.ANY)
+            else:
+                expected_calls = [
+                    mock.call(leak_l3out, subnets=['5.5.5.0/24'],
+                              external_epg=leak_ext_epg,
+                              owner=self._tenant(), transaction=mock.ANY),
+                    mock.call(leak_l3out1, subnets=['5.5.5.0/24'],
+                              external_epg=leak_ext_epg,
+                              owner=self._tenant(), transaction=mock.ANY)]
+                self._check_call_list(
+                    expected_calls,
+                    mgr.ensure_external_epg_routes_deleted.call_args_list)
+                mgr.ensure_context_deleted(
+                    owner=self._tenant(),
+                    ctx_id=self._routed_network_vrf_name(),
+                    transaction=mock.ANY)
+                mgr.set_context_for_bd.assert_called_once_with(
+                    self._tenant(), bd_name, self._network_vrf_name(),
+                    transaction=mock.ANY)
+
+    def test_delete_edge_nat_interface_port_postcommit(self):
+        self._test_delete_interface_port_postcommit()
+
+    def test_delete_route_leak_edge_nat_interface_port_postcommit(self):
+        self._test_delete_interface_port_postcommit(route_leak=True)
 
     def test_update_no_nat_gw_port_postcommit(self):
         net_ctx = self._get_network_context(mocked.APIC_TENANT,
@@ -2448,6 +2716,45 @@ tt':
             self._tenant(), mocked.APIC_NETWORK, transaction='transaction',
             app_profile_name=self._app_profile(),
             bd_name=self._scoped_name(mocked.APIC_NETWORK))
+        expected_calls = [
+            mock.call(mgr.apic.fvBD, self._tenant(),
+                      self._scoped_name(mocked.APIC_NETWORK),
+                      nameAlias=mocked.APIC_NETWORK + '-name'),
+            mock.call(mgr.apic.fvAEPg, self._tenant(), self._app_profile(),
+                      mocked.APIC_NETWORK,
+                      nameAlias=mocked.APIC_NETWORK + '-name')]
+        if self.driver.single_tenant_mode:
+            expected_calls.append(mock.call(mgr.apic.fvAp, self._tenant(),
+                                            self._app_profile(),
+                                            nameAlias=mocked.APIC_TENANT))
+        else:
+            expected_calls.append(mock.call(mgr.apic.fvTenant, self._tenant(),
+                                            nameAlias=mocked.APIC_TENANT))
+        self._check_call_list(expected_calls,
+                              mgr.update_name_alias.call_args_list)
+
+    def test_create_route_leak_network_postcommit(self):
+        ctx = self._get_network_context(mocked.APIC_TENANT,
+                                        mocked.APIC_NETWORK,
+                                        TEST_SEGMENT1,
+                                        route_leak=True)
+        mgr = self.driver.apic_manager
+        self.driver.create_network_postcommit(ctx)
+        mgr.ensure_bd_created_on_apic.assert_called_once_with(
+            self._tenant(), self._scoped_name(mocked.APIC_NETWORK),
+            ctx_owner=self._tenant(vrf=True),
+            ctx_name=self._network_vrf_name(net_name=ctx.current['id']),
+            transaction='transaction', unicast_route=True)
+        mgr.ensure_epg_created.assert_called_once_with(
+            self._tenant(), mocked.APIC_NETWORK, transaction='transaction',
+            app_profile_name=self._app_profile(),
+            bd_name=self._scoped_name(mocked.APIC_NETWORK))
+        if self.driver.vrf_per_router_tenants:
+            leak_l3out = "Leak-%s" % ctx.current['name']
+            mgr.ensure_external_routed_network_created.assert_called_once_with(
+                leak_l3out, owner=self._tenant(vrf=True),
+                context=self._network_vrf_name(net_name=ctx.current['id']),
+                transaction='transaction')
         expected_calls = [
             mock.call(mgr.apic.fvBD, self._tenant(),
                       self._scoped_name(mocked.APIC_NETWORK),
@@ -2681,6 +2988,25 @@ tt':
         mgr.delete_epg_for_network.assert_called_once_with(
             self._tenant(), mocked.APIC_NETWORK, transaction='transaction',
             app_profile_name=self._app_profile())
+
+    def test_delete_route_leak_network_postcommit(self):
+        ctx = self._get_network_context(mocked.APIC_TENANT,
+                                        mocked.APIC_NETWORK,
+                                        TEST_SEGMENT1,
+                                        route_leak=True)
+        mgr = self.driver.apic_manager
+        self.driver.delete_network_postcommit(ctx)
+        mgr.delete_bd_on_apic.assert_called_once_with(
+            self._tenant(), self._scoped_name(mocked.APIC_NETWORK),
+            transaction='transaction')
+        mgr.delete_epg_for_network.assert_called_once_with(
+            self._tenant(), mocked.APIC_NETWORK, transaction='transaction',
+            app_profile_name=self._app_profile())
+        if self.driver.vrf_per_router_tenants:
+            leak_l3out = "Leak-%s" % ctx.current['name']
+            mgr.delete_external_routed_network.assert_called_once_with(
+                leak_l3out, owner=self._tenant(vrf=True),
+                transaction='transaction')
 
     def test_delete_external_network_postcommit(self):
         ctx = self._get_network_context(mocked.APIC_TENANT,
@@ -3398,7 +3724,8 @@ tt':
                           port_ctx)
 
     def _get_network_context(self, tenant_id, net_id, seg_id=None,
-                             seg_type='vlan', external=False, shared=False):
+                             seg_type='vlan', external=False, shared=False,
+                             route_leak=False):
         network = {'id': net_id,
                    'name': net_id + '-name',
                    'tenant_id': tenant_id,
@@ -3414,6 +3741,8 @@ tt':
                                  'physical_network': 'physnet1'}]
         else:
             network_segments = []
+        if route_leak:
+            network[ALLOW_ROUTE_LEAK] = True
         return FakeNetworkContext(network, network_segments)
 
     def _get_subnet_context(self, gateway_ip, cidr, network):
@@ -3434,7 +3763,9 @@ tt':
                 'tenant_id': tenant_id,
                 'id': mocked.APIC_PORT,
                 'name': mocked.APIC_PORT,
-                'network_id': net_id}
+                'network_id': net_id,
+                'fixed_ips': [{'subnet_id': 'some_id',
+                               'ip_address': '3.3.3.1'}]}
         if gw:
             port['device_owner'] = n_constants.DEVICE_OWNER_ROUTER_GW
             port['device_id'] = router_owner or mocked.APIC_ROUTER
@@ -3759,6 +4090,16 @@ class ApicML2IntegratedTestCaseSingleVRF(ApicML2IntegratedTestCase):
         sub2 = self.create_subnet(
             network_id=net['id'], cidr='192.168.1.0/24',
             tenant_id=mocked.APIC_TENANT, ip_version=4)
+        net1 = self.create_network(tenant_id=mocked.APIC_TENANT)['network']
+        sub3 = self.create_subnet(
+            network_id=net1['id'], cidr='192.168.2.0/24',
+            tenant_id=mocked.APIC_TENANT, ip_version=4)
+        net_route_leak = self.create_network(
+            tenant_id=mocked.APIC_TENANT,
+            **{'apic:allow_route_leak': 'True'})['network']
+        sub_route_leak = self.create_subnet(
+            network_id=net_route_leak['id'], cidr='192.168.96.0/24',
+            tenant_id=mocked.APIC_TENANT, ip_version=4)
         router = self.create_router(api=self.ext_api,
                                     tenant_id=mocked.APIC_TENANT)['router']
         with self.port(subnet=sub1,
@@ -3777,26 +4118,59 @@ class ApicML2IntegratedTestCaseSingleVRF(ApicML2IntegratedTestCase):
                        fixed_ips=[{'subnet_id': sub2['subnet']['id']}],
                        tenant_id=mocked.APIC_TENANT) as p:
             p2_1 = p['port']
+        with self.port(subnet=sub3,
+                       fixed_ips=[{'subnet_id': sub3['subnet']['id']}],
+                       tenant_id=mocked.APIC_TENANT) as p:
+            p3 = p['port']
+        with self.port(subnet=sub3,
+                       fixed_ips=[{'subnet_id': sub3['subnet']['id']}],
+                       tenant_id=mocked.APIC_TENANT) as p:
+            p3_1 = p['port']
+        with self.port(subnet=sub_route_leak,
+                       fixed_ips=[{'subnet_id':
+                                   sub_route_leak['subnet']['id']}],
+                       tenant_id=mocked.APIC_TENANT) as p:
+            p_route_leak = p['port']
+        with self.port(subnet=sub_route_leak,
+                       fixed_ips=[{'subnet_id':
+                                   sub_route_leak['subnet']['id']}],
+                       tenant_id=mocked.APIC_TENANT) as p:
+            p_route_leak_1 = p['port']
 
         self.mgr.add_router_interface = mock.Mock()
         self.driver.notifier.port_update = mock.Mock()
 
         self._register_agent('h1')
         self._bind_port_to_host(p1['id'], 'h1')
-        self._bind_port_to_host(p2['id'], 'h1')
+        self._bind_port_to_host(p1_1['id'], 'h1')
+        self._bind_port_to_host(p_route_leak['id'], 'h1')
+        self._bind_port_to_host(p_route_leak_1['id'], 'h1')
+
         self._register_agent('h2')
-        self._bind_port_to_host(p1_1['id'], 'h2')
+        self._bind_port_to_host(p2['id'], 'h2')
         self._bind_port_to_host(p2_1['id'], 'h2')
+        self._bind_port_to_host(p3['id'], 'h2')
+        self._bind_port_to_host(p3_1['id'], 'h2')
+
+        notified_p1_id = sorted([p1, p1_1])[0]['id']
+        notified_p2_id = sorted([p2, p2_1])[0]['id']
+        notified_p3_id = sorted([p3, p3_1])[0]['id']
+        notified_p_route_leak_id = sorted([p_route_leak,
+                                           p_route_leak_1])[0]['id']
 
         ctx = context.Context(user_id=None, tenant_id=mocked.APIC_TENANT)
 
+        self.l3_plugin.add_router_interface(
+            ctx, router['id'], {'subnet_id': sub3['subnet']['id']})
         self.driver.notifier.port_update.reset_mock()
         self.l3_plugin.add_router_interface(
             ctx, router['id'], {'subnet_id': sub1['subnet']['id']})
         updates = sorted(set(
             [pt[0][1]['id']
              for pt in self.driver.notifier.port_update.call_args_list]))
-        self.assertEqual(sorted([p1['id'], p1_1['id']]), updates)
+        self.assertEqual(sorted([notified_p1_id, notified_p2_id,
+                                 notified_p3_id, notified_p_route_leak_id]),
+                         updates)
 
         self.driver.notifier.port_update.reset_mock()
         self.l3_plugin.remove_router_interface(
@@ -3804,7 +4178,9 @@ class ApicML2IntegratedTestCaseSingleVRF(ApicML2IntegratedTestCase):
         updates = sorted(set(
             [pt[0][1]['id']
              for pt in self.driver.notifier.port_update.call_args_list]))
-        self.assertEqual(sorted([p1['id'], p1_1['id']]), updates)
+        self.assertEqual(sorted([notified_p1_id, notified_p2_id,
+                                 notified_p3_id, notified_p_route_leak_id]),
+                         updates)
 
 
 class ApicML2IntegratedTestCaseSingleTenant(ApicML2IntegratedTestCase):
@@ -4135,7 +4511,12 @@ class VrfPerRouterBase(object):
             port.current['id'] += x
             port._plugin.get_ports = get_ports
             intf_ports.append(port)
+            port._plugin.get_subnets = mock.Mock(
+                return_value=[{'tenant_id': mocked.APIC_TENANT,
+                               'id': 'some_id',
+                               'cidr': '5.5.5.0/24'}])
 
+        self.driver._get_route_leak_networks = mock.Mock(return_value=([]))
         while intf_ports:
             port = intf_ports[0]
             del intf_ports[0]
@@ -4804,6 +5185,30 @@ class TestCiscoApicMechDriverNoFabricL3(TestApicML2IntegratedPhysicalNode):
             self.assertIsNone(details.get('floating_ip'))
             self.assertIsNone(details.get('host_snat_ips'))
             self.driver._get_tenant_vrf.assert_called_with(net['tenant_id'])
+
+
+class TestExtensionAttributes(ApicML2IntegratedTestBase):
+
+    def test_route_leak_network_lifecycle(self):
+        net = self.create_network(
+            tenant_id='onetenant', expected_res_status=201)['network']
+        self.assertEqual(False,
+                         net[ALLOW_ROUTE_LEAK])
+        net = self.create_network(
+            tenant_id='onetenant', expected_res_status=201,
+            **{'apic:allow_route_leak': 'True'})['network']
+        self.assertEqual(True,
+                         net[ALLOW_ROUTE_LEAK])
+        # update is not allowed
+        self.update_network(
+            net['id'], expected_res_status=400,
+            **{'apic:allow_route_leak': 'False'})
+        self.assertEqual(True,
+                         net[ALLOW_ROUTE_LEAK])
+        self.delete_network(net['id'], tenant_id=net['tenant_id'])
+        session = db_api.get_session()
+        extn = extn_db.ExtensionDbMixin()
+        self.assertFalse(extn.get_network_extn_db(session, net['id']))
 
 
 class FakeNetworkContext(object):
