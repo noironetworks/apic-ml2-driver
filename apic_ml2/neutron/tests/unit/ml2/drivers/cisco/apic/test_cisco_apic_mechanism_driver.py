@@ -461,11 +461,22 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
         sub2 = self.create_subnet(
             network_id=net1['id'], cidr='192.168.4.0/24',
             ip_version=4, is_admin_context=True)
+        net2 = self.create_network(
+            tenant_id=mocked.APIC_TENANT, is_admin_context=True)['network']
+        sub3 = self.create_subnet(
+            network_id=net2['id'], cidr='192.168.6.0/24',
+            ip_version=4, is_admin_context=True)
+        self.create_subnet(
+            network_id=net2['id'], cidr='192.168.8.0/24',
+            ip_version=4, is_admin_context=True)
         router = self.create_router(api=self.ext_api,
                                     tenant_id=mocked.APIC_TENANT)['router']
         self.l3_plugin.add_router_interface(
             context.get_admin_context(), router['id'],
             {'subnet_id': sub['subnet']['id']})
+        self.l3_plugin.add_router_interface(
+            context.get_admin_context(), router['id'],
+            {'subnet_id': sub3['subnet']['id']})
         self.driver._add_ip_mapping_details = mock.Mock()
         with self.port(subnet=sub, tenant_id=mocked.APIC_TENANT) as p1:
             p1 = p1['port']
@@ -479,7 +490,8 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                 self.assertEqual(
                     self._routed_network_vrf_name(router=router['id']),
                     details['vrf_name'])
-                self.assertEqual(['192.168.0.0/24', '192.168.2.0/24'],
+                self.assertEqual(['192.168.0.0/24', '192.168.2.0/24',
+                                  '192.168.6.0/24', '192.168.8.0/24'],
                                  details['vrf_subnets'])
             else:
                 if self.driver.per_tenant_context:
@@ -493,7 +505,21 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                 self.assertEqual(self._network_vrf_name(),
                                  details['vrf_name'])
                 self.assertEqual(['192.168.0.0/24', '192.168.2.0/24',
-                                  '192.168.4.0/24'],
+                                  '192.168.4.0/24', '192.168.6.0/24',
+                                  '192.168.8.0/24'],
+                                 details['vrf_subnets'])
+            # remove the router interface
+            self.l3_plugin.remove_router_interface(
+                context.get_admin_context(), router['id'],
+                {'subnet_id': sub3['subnet']['id']})
+            details = self._get_gbp_details(p1['id'], 'h1')
+            if self.driver.per_tenant_context and vrf_per_router:
+                self.assertEqual(['192.168.0.0/24', '192.168.2.0/24'],
+                                 details['vrf_subnets'])
+            else:
+                self.assertEqual(['192.168.0.0/24', '192.168.2.0/24',
+                                  '192.168.4.0/24', '192.168.6.0/24',
+                                  '192.168.8.0/24'],
                                  details['vrf_subnets'])
 
         with self.port(subnet=sub2, tenant_id=mocked.APIC_TENANT) as p2:
@@ -511,7 +537,8 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             self.assertEqual(self._network_vrf_name(),
                              details['vrf_name'])
             self.assertEqual(['192.168.0.0/24', '192.168.2.0/24',
-                              '192.168.4.0/24'],
+                              '192.168.4.0/24', '192.168.6.0/24',
+                              '192.168.8.0/24'],
                              details['vrf_subnets'])
 
     def test_vrf_details(self):
@@ -3738,10 +3765,18 @@ class ApicML2IntegratedTestCaseSingleVRF(ApicML2IntegratedTestCase):
                        fixed_ips=[{'subnet_id': sub1['subnet']['id']}],
                        tenant_id=mocked.APIC_TENANT) as p:
             p1 = p['port']
+        with self.port(subnet=sub1,
+                       fixed_ips=[{'subnet_id': sub1['subnet']['id']}],
+                       tenant_id=mocked.APIC_TENANT) as p:
+            p1_1 = p['port']
         with self.port(subnet=sub2,
                        fixed_ips=[{'subnet_id': sub2['subnet']['id']}],
                        tenant_id=mocked.APIC_TENANT) as p:
             p2 = p['port']
+        with self.port(subnet=sub2,
+                       fixed_ips=[{'subnet_id': sub2['subnet']['id']}],
+                       tenant_id=mocked.APIC_TENANT) as p:
+            p2_1 = p['port']
 
         self.mgr.add_router_interface = mock.Mock()
         self.driver.notifier.port_update = mock.Mock()
@@ -3749,6 +3784,9 @@ class ApicML2IntegratedTestCaseSingleVRF(ApicML2IntegratedTestCase):
         self._register_agent('h1')
         self._bind_port_to_host(p1['id'], 'h1')
         self._bind_port_to_host(p2['id'], 'h1')
+        self._register_agent('h2')
+        self._bind_port_to_host(p1_1['id'], 'h2')
+        self._bind_port_to_host(p2_1['id'], 'h2')
 
         ctx = context.Context(user_id=None, tenant_id=mocked.APIC_TENANT)
 
@@ -3758,7 +3796,7 @@ class ApicML2IntegratedTestCaseSingleVRF(ApicML2IntegratedTestCase):
         updates = sorted(set(
             [pt[0][1]['id']
              for pt in self.driver.notifier.port_update.call_args_list]))
-        self.assertEqual(sorted([p1['id'], p2['id']]), updates)
+        self.assertEqual(sorted([p1['id'], p1_1['id']]), updates)
 
         self.driver.notifier.port_update.reset_mock()
         self.l3_plugin.remove_router_interface(
@@ -3766,7 +3804,7 @@ class ApicML2IntegratedTestCaseSingleVRF(ApicML2IntegratedTestCase):
         updates = sorted(set(
             [pt[0][1]['id']
              for pt in self.driver.notifier.port_update.call_args_list]))
-        self.assertEqual(sorted([p1['id'], p2['id']]), updates)
+        self.assertEqual(sorted([p1['id'], p1_1['id']]), updates)
 
 
 class ApicML2IntegratedTestCaseSingleTenant(ApicML2IntegratedTestCase):
