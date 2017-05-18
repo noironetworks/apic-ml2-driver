@@ -2043,9 +2043,30 @@ class APICMechanismDriver(api.MechanismDriver,
             ports = core_plugin.get_ports(
                 admin_ctx,
                 filters={'network_id': [router_port['network_id']]})
+            hosts_notified = set()
             for p in ports:
-                if p['device_owner'] not in skip and self._is_port_bound(p):
+                if (p['device_owner'] not in skip and self._is_port_bound(p)
+                        and p[portbindings.HOST_ID] not in hosts_notified):
                     self.notifier.port_update(admin_ctx, p)
+                    hosts_notified.add(p[portbindings.HOST_ID])
+            # also need to call port_update() on one of the bound ports
+            # on the network which is still connected to this router
+            intf_ports = core_plugin.get_ports(
+                admin_ctx,
+                filters={'device_owner':
+                         [n_constants.DEVICE_OWNER_ROUTER_INTF],
+                         'device_id': [router_port['device_id']]})
+            net_ids = [p['network_id'] for p in intf_ports
+                       if p['network_id'] != router_port['network_id']]
+            other_ports = core_plugin.get_ports(
+                admin_ctx,
+                filters={'network_id': net_ids})
+            hosts_notified = set()
+            for p in other_ports:
+                if (p['device_owner'] not in skip and self._is_port_bound(p)
+                        and p[portbindings.HOST_ID] not in hosts_notified):
+                    self.notifier.port_update(admin_ctx, p)
+                    hosts_notified.add(p[portbindings.HOST_ID])
             return
 
         # Find ports whose DNAT/SNAT info may be affected due to change
