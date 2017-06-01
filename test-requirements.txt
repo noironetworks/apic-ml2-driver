@@ -2,11 +2,11 @@
 # of appearance. Changing the order has an impact on the overall integration
 # process, which may cause wedges in the gate later.
 
--e git+https://github.com/openstack/neutron.git@stable/liberty#egg=neutron
+-e git+https://github.com/openstack/neutron.git@liberty-eol#egg=neutron
 -e git+https://github.com/Mirantis/vmware-dvs.git@master#egg=vmware_dvs
 hacking<0.11,>=0.10.0
 
-cliff>=1.14.0 # Apache-2.0
+cliff!=1.16.0,!=1.17.0,>=1.14.0 # Apache-2.0
 coverage>=3.6
 fixtures>=1.3.1
 mock>=1.2
