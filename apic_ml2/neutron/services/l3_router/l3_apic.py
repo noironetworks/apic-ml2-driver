@@ -54,6 +54,9 @@ class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
     supported_extension_aliases = ["router", "ext-gw-mode", "extraroute",
                                    "l3-flavors"]
 
+    # Set this to False so that the mixin code doesn't try to call
+    # _process_dns_floatingip_create_precommit
+    _dns_integration = False
     def __init__(self):
         super(ApicL3ServicePlugin, self).__init__()
         self.synchronizer = None
