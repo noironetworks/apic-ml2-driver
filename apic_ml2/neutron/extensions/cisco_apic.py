@@ -15,7 +15,6 @@
 
 from neutron.api import extensions
 from neutron.api.v2 import attributes
-from neutron_lib.api import converters as conv
 
 ALIAS = 'cisco-apic'
 ALLOW_ROUTE_LEAK = 'apic:allow_route_leak'
@@ -24,7 +23,7 @@ NET_ATTRIBUTES = {
     ALLOW_ROUTE_LEAK: {
         'allow_post': True, 'allow_put': False,
         'is_visible': True, 'default': False,
-        'convert_to': conv.convert_to_boolean,
+        'convert_to': attributes.convert_to_boolean,
     },
 }
 

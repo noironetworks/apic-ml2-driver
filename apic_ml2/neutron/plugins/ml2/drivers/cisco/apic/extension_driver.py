@@ -13,8 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron._i18n import _LI
 from neutron.api import extensions
+from neutron.i18n import _LI
 from neutron.plugins.ml2 import driver_api
 from oslo_log import log
 
