@@ -250,13 +250,14 @@ class APICMechanismDriver(api.MechanismDriver,
         session = None
         if client:
             keystone_authtoken = cfg.CONF.keystone_authtoken
-            pass_params = apic_mapper.APICNameMapper.get_key_password_params(
-                keystone_authtoken)
+            pass_params = (
+                apic_mapper.APICNameMapper.get_key_password_params_ext(
+                    keystone_authtoken))
             admin_auth = keypassword.Password(
                 auth_url=pass_params[0],
                 username=pass_params[1], password=pass_params[2],
-                tenant_name=pass_params[3],
-                user_domain_id='Default', project_domain_id='Default')
+                tenant_name=pass_params[3], user_domain_id=pass_params[5],
+                project_domain_id=pass_params[4])
             session = keysession.Session(auth=admin_auth)
         if cfg.CONF.ml2_cisco_apic.single_tenant_mode:
             # Force scope names to False
