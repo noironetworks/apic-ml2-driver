@@ -36,6 +36,18 @@ def upgrade():
                                 ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('network_id')
     )
+    op.create_table(
+        'apic_ml2_router_extensions',
+        sa.Column('router_id', sa.String(36), nullable=False),
+        sa.Column('use_routing_context', sa.String(36)),
+        sa.ForeignKeyConstraint(['router_id'], ['routers.id'],
+                                name='apic_ml2_router_extn_fk_router_id',
+                                ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['use_routing_context'], ['routers.id'],
+                                name='apic_ml2_router_extn_fk_routing_cxt',
+                                ondelete='RESTRICT'),
+        sa.PrimaryKeyConstraint('router_id')
+    )
 
 
 def downgrade():

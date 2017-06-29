@@ -103,6 +103,7 @@ AGENT_CONF_OPFLEX = {'alive': True, 'binary': 'somebinary',
                          'bridge_mappings': {'physnet1': 'br-eth1'}}}
 APIC_EXTERNAL_RID = '1.0.0.1'
 ALLOW_ROUTE_LEAK = 'apic:allow_route_leak'
+USE_ROUTING_CONTEXT = 'apic:use_routing_context'
 
 
 def echo(context, id, prefix=''):
@@ -486,14 +487,20 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             ip_version=4, is_admin_context=True)
         router = self.create_router(api=self.ext_api,
                                     tenant_id=mocked.APIC_TENANT)['router']
+        # use_routing_context router
+        router1 = self.create_router(api=self.ext_api,
+                                     tenant_id=mocked.APIC_TENANT,
+                                     **{'apic:use_routing_context':
+                                        router['id']}
+                                     )['router']
         self.l3_plugin.add_router_interface(
-            context.get_admin_context(), router['id'],
+            context.get_admin_context(), router1['id'],
             {'subnet_id': sub['subnet']['id']})
         self.l3_plugin.add_router_interface(
             context.get_admin_context(), router['id'],
             {'subnet_id': sub3['subnet']['id']})
         self.l3_plugin.add_router_interface(
-            context.get_admin_context(), router['id'],
+            context.get_admin_context(), router1['id'],
             {'subnet_id': sub_route_leak['subnet']['id']})
         self.l3_plugin.add_router_interface(
             context.get_admin_context(), router['id'],
@@ -1047,6 +1054,18 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
         self.l3_plugin.add_router_interface(
             context.get_admin_context(), rtr2['id'],
             {'port_id': p2['id']})
+        # use_routing_context router
+        rtr3 = self.create_router(
+            api=self.ext_api, tenant_id=mocked.APIC_TENANT,
+            **{'apic:use_routing_context': rtr1['id']})['router']
+        p3 = self.create_port(
+            network_id=net_route_leak['id'], tenant_id=mocked.APIC_TENANT,
+            device_owner='network:router_interface',
+            fixed_ips=[{'subnet_id': sub_route_leak['id'],
+                        'ip_address': '10.0.0.3'}])['port']
+        self.l3_plugin.add_router_interface(
+            context.get_admin_context(), rtr3['id'],
+            {'port_id': p3['id']})
 
         details = self._get_gbp_details(p1['id'], 'h1')
 
@@ -1889,13 +1908,23 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
                                           'net_id',
                                           'vm1', net_ctx, HOST_ID1,
                                           interface=True)
-        self.driver._l3_plugin.get_router = mock.Mock(
-            return_value={'id': mocked.APIC_ROUTER,
-                          'name': mocked.APIC_ROUTER + '-name',
-                          'tenant_id': net_tenant,
-                          'external_gateway_info':
-                              {'network_id': ext_net,
-                               'external_fixed_ips': []}})
+        if route_leak:
+            self.driver._l3_plugin.get_router = mock.Mock(
+                return_value={'id': 'some_id',
+                              'name': mocked.APIC_ROUTER + '-name',
+                              'tenant_id': net_tenant,
+                              'apic:use_routing_context': mocked.APIC_ROUTER,
+                              'external_gateway_info':
+                                  {'network_id': ext_net,
+                                   'external_fixed_ips': []}})
+        else:
+            self.driver._l3_plugin.get_router = mock.Mock(
+                return_value={'id': mocked.APIC_ROUTER,
+                              'name': mocked.APIC_ROUTER + '-name',
+                              'tenant_id': net_tenant,
+                              'external_gateway_info':
+                                  {'network_id': ext_net,
+                                   'external_fixed_ips': []}})
         port_ctx._plugin.get_network = mock.Mock(
             return_value={'name': ext_net + '-name',
                           'tenant_id': mocked.APIC_TENANT,
@@ -2467,13 +2496,23 @@ tt':
                                           'net_id',
                                           'vm1', net_ctx, HOST_ID1,
                                           interface=True)
-        self.driver._l3_plugin.get_router = mock.Mock(
-            return_value={'id': mocked.APIC_ROUTER,
-                          'name': mocked.APIC_ROUTER + '-name',
-                          'tenant_id': mocked.APIC_TENANT,
-                          'external_gateway_info':
-                              {'network_id': mocked.APIC_NETWORK_EDGE_NAT,
-                               'external_fixed_ips': []}})
+        if route_leak:
+            self.driver._l3_plugin.get_router = mock.Mock(
+                return_value={'id': 'some_id',
+                              'name': mocked.APIC_ROUTER + '-name',
+                              'tenant_id': mocked.APIC_TENANT,
+                              'apic:use_routing_context': mocked.APIC_ROUTER,
+                              'external_gateway_info':
+                                  {'network_id': mocked.APIC_NETWORK_EDGE_NAT,
+                                   'external_fixed_ips': []}})
+        else:
+            self.driver._l3_plugin.get_router = mock.Mock(
+                return_value={'id': mocked.APIC_ROUTER,
+                              'name': mocked.APIC_ROUTER + '-name',
+                              'tenant_id': mocked.APIC_TENANT,
+                              'external_gateway_info':
+                                  {'network_id': mocked.APIC_NETWORK_EDGE_NAT,
+                                   'external_fixed_ips': []}})
         port_ctx._plugin.get_network = mock.Mock(
             return_value={'name': mocked.APIC_NETWORK_EDGE_NAT + '-name',
                           'router:external': True})
@@ -4439,7 +4478,9 @@ class VrfPerRouterBase(object):
 
     def test_create_delete_router_vrf(self):
         routers = [{'id': 'r1', 'tenant_id': 'coke_1_tenant'},
-                   {'id': 'r2', 'tenant_id': 'another_coke_1_tenant'}]
+                   {'id': 'r2', 'tenant_id': 'another_coke_1_tenant'},
+                   {'id': 'r3', 'tenant_id': 'coke_1_tenant',
+                    'apic:use_routing_context': 'r1'}]
 
         for rtr in routers:
             is_vrf_per_router = (rtr['tenant_id'] == 'coke_1_tenant')
@@ -4450,7 +4491,7 @@ class VrfPerRouterBase(object):
 
             mgr.ensure_context_enforced.reset_mock()
             self.driver.create_vrf_per_router(rtr, 'txn')
-            if is_vrf_per_router:
+            if is_vrf_per_router and not rtr.get(USE_ROUTING_CONTEXT):
                 mgr.ensure_context_enforced.assert_called_once_with(
                     owner=vrf_tenant, ctx_id=vrf_name, transaction='txn')
             else:
@@ -4458,7 +4499,7 @@ class VrfPerRouterBase(object):
 
             mgr.ensure_context_deleted.reset_mock()
             self.driver.delete_vrf_per_router(rtr, 'txn')
-            if is_vrf_per_router:
+            if is_vrf_per_router and not rtr.get(USE_ROUTING_CONTEXT):
                 mgr.ensure_context_deleted.assert_called_once_with(
                     owner=vrf_tenant, ctx_id=vrf_name, transaction='txn')
             else:
@@ -4492,6 +4533,36 @@ class VrfPerRouterBase(object):
                                   self.driver.create_port_precommit, port)
                 self.assertRaises(md.OnlyOneRouterPermittedIfVrfPerRouter,
                                   self.driver.update_port_precommit, port)
+
+    def test_use_routing_context_routers_precommit(self):
+        intf_ports = []
+
+        def get_ports(ctx, filters):
+            return [p.current for p in intf_ports]
+
+        self.driver._l3_plugin.get_routers = mock.Mock(return_value=[
+            {'id': mocked.APIC_ROUTER + '-0', 'tenant_id': mocked.APIC_TENANT},
+            {'id': mocked.APIC_ROUTER + '-1', 'tenant_id': mocked.APIC_TENANT,
+             'apic:use_routing_context': mocked.APIC_ROUTER + '-0'}])
+        net_ctx = self._get_network_context(mocked.APIC_TENANT,
+                                            mocked.APIC_NETWORK, TEST_SEGMENT1)
+        for x in range(0, 3):
+            rtr = '%s-%d' % (mocked.APIC_ROUTER, x / 2)
+            self.driver._l3_plugin.get_router = mock.Mock(return_value={
+                'id': rtr, 'tenant_id': mocked.APIC_TENANT,
+                'apic:use_routing_context': mocked.APIC_ROUTER + '-0'})
+            port = self._get_port_context(mocked.APIC_TENANT,
+                                          mocked.APIC_NETWORK,
+                                          'intf', net_ctx, HOST_ID1,
+                                          router_owner=rtr,
+                                          interface=True)
+            port.current['id'] += x
+            port._plugin.get_ports = get_ports
+            intf_ports.append(port)
+
+            # no exception expected
+            self.driver.create_port_precommit(port)
+            self.driver.update_port_precommit(port)
 
     def test_multiple_intf_ports_delete(self):
         intf_ports = []
@@ -5221,6 +5292,46 @@ class TestExtensionAttributes(ApicML2IntegratedTestBase):
         session = db_api.get_session()
         extn = extn_db.ExtensionDbMixin()
         self.assertFalse(extn.get_network_extn_db(session, net['id']))
+
+    def test_router_lifecycle(self):
+        session = db_api.get_session()
+        extn = extn_db.ExtensionDbMixin()
+        # default value
+        rtr0 = self.create_router(api=self.ext_api,
+                                  expected_res_status=201)['router']
+        self.assertEqual(None, rtr0[USE_ROUTING_CONTEXT])
+        self.assertFalse(extn.get_router_extn_db(session, rtr0['id']))
+        # bad value
+        self.create_router(api=self.ext_api,
+                           expected_res_status=400,
+                           **{'apic:use_routing_context': '12345'})
+        self.create_router(api=self.ext_api,
+                           expected_res_status=500,
+                           **{'apic:use_routing_context':
+                              '39266936-70b8-437b-b779-74ae099ff0db'})
+        # good value
+        rtr1 = self.create_router(api=self.ext_api,
+                                  expected_res_status=201,
+                                  **{'apic:use_routing_context': rtr0['id']}
+                                  )['router']
+        self.assertEqual(rtr0['id'], rtr1[USE_ROUTING_CONTEXT])
+        self.assertEqual(extn.get_router_extn_db(session, rtr1['id']),
+                         {'apic:use_routing_context': rtr0['id']})
+        # can't delete rtr0 now
+        self.delete_router(rtr0['id'], api=self.ext_api,
+                           expected_res_status=500)
+        # update is not allowed
+        self.update_router(
+            rtr1['id'], api=self.ext_api,
+            expected_res_status=400,
+            **{'apic:use_routing_context': rtr1['id']})
+        # deletion
+        self.delete_router(rtr1['id'], api=self.ext_api,
+                           expected_res_status=204)
+        # can delete rtr0 now after rtr1 is gone
+        self.delete_router(rtr0['id'], api=self.ext_api,
+                           expected_res_status=204)
+        self.assertFalse(extn.get_router_extn_db(session, rtr1['id']))
 
 
 class FakeNetworkContext(object):

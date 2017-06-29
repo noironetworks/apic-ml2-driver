@@ -54,6 +54,7 @@ from oslo_utils import importutils
 from apic_ml2.neutron.db import l3out_vlan_allocation as l3out_vlan_alloc
 from apic_ml2.neutron.db import port_ha_ipaddress_binding as ha_ip_db
 from apic_ml2.neutron.extensions import cisco_apic
+from apic_ml2.neutron.extensions import cisco_apic_l3
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
     network_constraints as net_cons)
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_model
@@ -585,7 +586,11 @@ class APICMechanismDriver(api.MechanismDriver,
         router = None
         if vrf_id.startswith('router:'):
             router_id = vrf_id[len('router:'):]
+            real_vrf = router_id
             router = self.l3_plugin.get_router(ctx, router_id)
+            if router.get(cisco_apic_l3.USE_ROUTING_CONTEXT):
+                real_vrf = router[cisco_apic_l3.USE_ROUTING_CONTEXT]
+                vrf_id = 'router:%s' % real_vrf
 
         # For the APIC ML2 driver, VRF ID is a tenant_id, need to return all
         # the subnets for this tenant. If vrf-per-router is enabled for the
@@ -593,10 +598,12 @@ class APICMechanismDriver(api.MechanismDriver,
         # all connected networks
         if self.per_tenant_context:
             if router:
+                same_vrf_routers = self._get_same_vrf_routers(
+                    ctx, router['tenant_id'], real_vrf)
                 intf_ports = core_plugin.get_ports(
                     ctx, filters={'device_owner':
                                   [n_constants.DEVICE_OWNER_ROUTER_INTF],
-                                  'device_id': [router['id']]})
+                                  'device_id': same_vrf_routers})
                 nets = set([p['network_id'] for p in intf_ports])
             else:
                 networks = core_plugin.get_networks(ctx,
@@ -945,8 +952,16 @@ class APICMechanismDriver(api.MechanismDriver,
                        'floating_ip_address': fixed_ips[0]}
                 epg_name = self.name_mapper.endpoint_group(context,
                                                            port_network['id'])
-                fip['nat_epg_name'] = self._get_leak_name_for_net(router_id,
-                                                                  epg_name)
+                real_router_id = router_id
+                router = self.l3_plugin.get_router(context._plugin_context,
+                                                   router_id)
+                if router.get(cisco_apic_l3.USE_ROUTING_CONTEXT):
+                    real_router_id = router[cisco_apic_l3.USE_ROUTING_CONTEXT]
+                    # skip the duplicate entry
+                    if real_router_id in router_ids:
+                        continue
+                fip['nat_epg_name'] = self._get_leak_name_for_net(
+                    real_router_id, epg_name)
                 fip['nat_epg_app_profile'] = str(
                     self._get_network_app_profile(port_network))
                 fip['nat_epg_tenant'] = epg_tenant
@@ -1074,21 +1089,24 @@ class APICMechanismDriver(api.MechanismDriver,
         return subnets[0]
 
     def _handle_leak_epg_and_l3out(self, context, bd_tenant, router_id,
-                                   network, bd_name, leak_ext_epg, trs,
-                                   vrf_info=None, route_leak_intf_nets=None,
-                                   intf_port_subnet=None, is_delete=True):
-        leak_bd_name = self._get_leak_name_for_net(router_id,
+                                   real_router_id, network, bd_name,
+                                   leak_ext_epg, trs, vrf_info=None,
+                                   route_leak_intf_nets=None,
+                                   intf_port_subnet=None, is_delete=True,
+                                   other_ports=None):
+        leak_bd_name = self._get_leak_name_for_net(real_router_id,
                                                    bd_name)
         epg_name = self.name_mapper.endpoint_group(context, network['id'])
-        leak_epg_name = self._get_leak_name_for_net(router_id, epg_name)
+        leak_epg_name = self._get_leak_name_for_net(real_router_id, epg_name)
         app_profile_name = self._get_network_app_profile(network)
         leak_l3out = self._get_leak_name_for_ext_net(network['name'])
         if is_delete:
-            self.apic_manager.delete_epg_for_network(
-                bd_tenant, leak_epg_name,
-                app_profile_name=app_profile_name, transaction=trs)
-            self.apic_manager.delete_bd_on_apic(
-                bd_tenant, leak_bd_name, transaction=trs)
+            if not other_ports:
+                self.apic_manager.delete_epg_for_network(
+                    bd_tenant, leak_epg_name,
+                    app_profile_name=app_profile_name, transaction=trs)
+                self.apic_manager.delete_bd_on_apic(
+                    bd_tenant, leak_bd_name, transaction=trs)
             self.apic_manager.ensure_external_epg_deleted(
                 leak_l3out, external_epg=leak_ext_epg,
                 owner=bd_tenant, transaction=trs)
@@ -1169,6 +1187,9 @@ class APICMechanismDriver(api.MechanismDriver,
         with self.apic_manager.apic.transaction() as trs:
             if is_vrf_per_router:
                 vrf_info = self._get_router_vrf(router)
+                real_router_id = router_id
+                if router.get(cisco_apic_l3.USE_ROUTING_CONTEXT):
+                    real_router_id = router[cisco_apic_l3.USE_ROUTING_CONTEXT]
                 router_name = router_id
                 if router.get('name'):
                     router_name = router['name']
@@ -1199,12 +1220,23 @@ class APICMechanismDriver(api.MechanismDriver,
                                  'network_id': [network['id']]})
                     if not [p for p in intf_net_ports
                             if p['id'] != port['id']]:
+                        same_vrf_routers = self._get_same_vrf_routers(
+                            context._plugin_context, router['tenant_id'],
+                            vrf_info['aci_name'])
+                        other_ports = context._plugin.get_ports(
+                            context._plugin_context,
+                            filters={
+                                'device_owner':
+                                [n_constants.DEVICE_OWNER_ROUTER_INTF],
+                                'network_id': [network['id']],
+                                'device_id': same_vrf_routers})
                         # route leak network
                         if network.get(cisco_apic.ALLOW_ROUTE_LEAK, False):
                             self._handle_leak_epg_and_l3out(
-                                context, bd_tenant, router_id, network,
-                                bd_name, leak_ext_epg, trs)
-                        else:
+                                context, bd_tenant, router_id,
+                                real_router_id, network, bd_name,
+                                leak_ext_epg, trs, other_ports=other_ports)
+                        elif not other_ports:
                             # point BD back to the default VRF for this tenant
                             # if router is not connected to any subnet anymore
                             vrf_default = self._get_network_vrf(context,
@@ -1220,9 +1252,10 @@ class APICMechanismDriver(api.MechanismDriver,
                     # route leak network
                     if network.get(cisco_apic.ALLOW_ROUTE_LEAK, False):
                         self._handle_leak_epg_and_l3out(
-                            context, bd_tenant, router_id, network, bd_name,
-                            leak_ext_epg, trs, vrf_info, route_leak_intf_nets,
-                            intf_port_subnet, is_delete=False)
+                            context, bd_tenant, router_id, real_router_id,
+                            network, bd_name, leak_ext_epg, trs, vrf_info,
+                            route_leak_intf_nets, intf_port_subnet,
+                            is_delete=False)
                     else:
                         self.apic_manager.set_context_for_bd(
                             bd_tenant, bd_name, vrf_info['aci_name'],
@@ -1255,8 +1288,8 @@ class APICMechanismDriver(api.MechanismDriver,
                                 else ext_net['tenant_id'])
                     l3out = self.name_mapper.l3_out(
                         context, ext_net_id, openstack_owner=os_owner,
-                        prefix='%s-' % router['id'] if (is_vrf_per_router and
-                                                        is_edge_nat) else '')
+                        prefix='%s-' % real_router_id if (is_vrf_per_router and
+                                                          is_edge_nat) else '')
                 else:
                     # There is exactly one shadow L3Out for all tenants since
                     # there is exactly one VRF for all tenants
@@ -1439,12 +1472,19 @@ class APICMechanismDriver(api.MechanismDriver,
             network = context.network.current
             if network.get(cisco_apic.ALLOW_ROUTE_LEAK, False):
                 return
+            # allow the network to be connected to those same vrf routers
+            real_vrf = router_id
+            if router.get(cisco_apic_l3.USE_ROUTING_CONTEXT):
+                real_vrf = router[cisco_apic_l3.USE_ROUTING_CONTEXT]
+            same_vrf_routers = self._get_same_vrf_routers(
+                context._plugin_context, router['tenant_id'], real_vrf)
             other_ports = context._plugin.get_ports(
                 context._plugin_context,
                 filters={
                     'device_owner': [n_constants.DEVICE_OWNER_ROUTER_INTF],
                     'network_id': [network['id']]})
-            if [p for p in other_ports if p['device_id'] != router_id]:
+            if [p for p in other_ports if p['device_id'] != router_id and
+                    p['device_id'] not in same_vrf_routers]:
                 raise OnlyOneRouterPermittedIfVrfPerRouter(
                     tenant=network['tenant_id'], net=network['name'])
 
@@ -1923,6 +1963,13 @@ class APICMechanismDriver(api.MechanismDriver,
 
     def _get_ext_epg_for_ext_net(self, l3out_name):
         return "EXT-epg-%s" % l3out_name
+
+    def _get_same_vrf_routers(self, plugin_context, tenant_id, vrf):
+        tenant_routers = self.l3_plugin.get_routers(
+            plugin_context, filters={'tenant_id': [tenant_id]})
+        return [r['id'] for r in tenant_routers if
+                r.get(cisco_apic_l3.USE_ROUTING_CONTEXT) == vrf or
+                r['id'] == vrf]
 
     def _get_route_leak_networks(self, context, router_id):
         intf_ports = context._plugin.get_ports(
@@ -2815,12 +2862,17 @@ class APICMechanismDriver(api.MechanismDriver,
 
     def _get_router_vrf(self, router):
         tenant = self.name_mapper.tenant(None, router['tenant_id'])
-        vrf_name = ('%s-%s' % (tenant, router['id'])
-                    if self.single_tenant_mode else router['id'])
+        router_id = router['id']
+        if router.get(cisco_apic_l3.USE_ROUTING_CONTEXT):
+            router_id = router[cisco_apic_l3.USE_ROUTING_CONTEXT]
+        vrf_name = ('%s-%s' % (tenant, router_id)
+                    if self.single_tenant_mode else router_id)
         return {'aci_name': vrf_name, 'aci_tenant': self._get_tenant(router)}
 
     def create_vrf_per_router(self, router, transaction=None):
         if self._is_vrf_per_router(router):
+            if router.get(cisco_apic_l3.USE_ROUTING_CONTEXT):
+                return
             vrf_info = self._get_router_vrf(router)
             self.apic_manager.ensure_context_enforced(
                 owner=vrf_info['aci_tenant'], ctx_id=vrf_info['aci_name'],
@@ -2828,6 +2880,8 @@ class APICMechanismDriver(api.MechanismDriver,
 
     def delete_vrf_per_router(self, router, transaction=None):
         if self._is_vrf_per_router(router):
+            if router.get(cisco_apic_l3.USE_ROUTING_CONTEXT):
+                return
             vrf_info = self._get_router_vrf(router)
             self.apic_manager.ensure_context_deleted(
                 owner=vrf_info['aci_tenant'], ctx_id=vrf_info['aci_name'],
