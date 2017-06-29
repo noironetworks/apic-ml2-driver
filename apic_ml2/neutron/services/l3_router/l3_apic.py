@@ -13,6 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron.api import extensions
 from neutron.common import constants as q_const
 from neutron.db import common_db_mixin
 from neutron.db import extraroute_db
@@ -21,7 +22,12 @@ from neutron.db import l3_gwmode_db
 from neutron.plugins.common import constants
 from oslo_log import log as logging
 from oslo_utils import excutils
+from sqlalchemy import inspect
 
+from apic_ml2.neutron import extensions as extensions_pkg
+from apic_ml2.neutron.extensions import cisco_apic_l3 as l3_ext
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
+    extension_db as extn_db)
 from apic_ml2.neutron.services.l3_router import apic_driver
 
 LOG = logging.getLogger(__name__)
@@ -29,10 +35,13 @@ LOG = logging.getLogger(__name__)
 
 class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
                           extraroute_db.ExtraRoute_db_mixin,
-                          l3_gwmode_db.L3_NAT_db_mixin):
-    supported_extension_aliases = ["router", "ext-gw-mode", "extraroute"]
+                          l3_gwmode_db.L3_NAT_db_mixin,
+                          extn_db.ExtensionDbMixin):
+    supported_extension_aliases = ["router", "ext-gw-mode", "extraroute",
+                                   "cisco-apic-l3"]
 
     def __init__(self):
+        extensions.append_api_extensions_path(extensions_pkg.__path__)
         super(ApicL3ServicePlugin, self).__init__()
         self.synchronizer = None
         # NB(tbachman): the mechanism driver depends on the existence
@@ -62,6 +71,17 @@ class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
         """Returns string description of the plugin."""
         return _("L3 Router Service Plugin for basic L3 using the APIC")
 
+    def _extend_router_dict_apic(self, router_res, router_db):
+        session = inspect(router_db).session
+        attr = self.get_router_extn_db(session, router_res['id'])
+        if not attr:
+            attr = {l3_ext.USE_ROUTING_CONTEXT: None}
+        router_res.update(attr)
+        LOG.debug("APIC L3 Plugin extending router dict: %s", router_res)
+
+    common_db_mixin.CommonDbMixin.register_dict_extend_funcs(
+        l3.ROUTERS, ['_extend_router_dict_apic'])
+
     # Router API
 
     def create_router(self, context, router):
@@ -79,6 +99,11 @@ class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
                                 "the router: %s"), router)
                 self.delete_router(context, router_db.id)
         result = self._make_router_dict(router_db)
+        res_dict = {l3_ext.USE_ROUTING_CONTEXT:
+                    r.get(l3_ext.USE_ROUTING_CONTEXT)}
+        self.set_router_extn_db(context.session, router_db['id'],
+                                res_dict)
+        result.update(res_dict)
         self.create_router_postcommit(context, result)
         return result
 
