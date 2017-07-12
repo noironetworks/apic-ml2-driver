@@ -5110,14 +5110,14 @@ class TestCiscoApicMechDriverNoFabricL3(TestApicML2IntegratedPhysicalNode):
         app_prof1 = self._app_profile(neutron_tenant='onetenant')
         self.mgr.ensure_bd_created_on_apic = mock.Mock()
         self._register_agent('h1', agent_cfg=AGENT_CONF_OPFLEX)
+        # Create a network with a subnet, then add
+        # a port to the subnet and bind it to a host
+        # (e.g. as if Nova did a port binding for a VM port)
         net = self.create_network(
             tenant_id='onetenant', is_admin_context=True)['network']
         sub = self.create_subnet(
             network_id=net['id'], cidr='192.168.0.0/24',
             ip_version=4, is_admin_context=True)
-        router = self.create_router(api=self.ext_api,
-                                    tenant_id='onetenant')['router']
-        self.driver._add_ip_mapping_details = mock.Mock()
         with self.port(subnet=sub, tenant_id='onetenant') as p1:
             p1 = p1['port']
         self.mgr.ensure_bd_created_on_apic.assert_called_once_with(
@@ -5131,7 +5131,16 @@ class TestCiscoApicMechDriverNoFabricL3(TestApicML2IntegratedPhysicalNode):
         bseg_p1, bdriver = self._get_bound_seg(p1['id'])
         self.assertEqual(bseg_p1['network_type'], 'opflex')
         self.assertEqual('cisco_apic_ml2', bdriver)
+        # We shouldn't be using a PhysDom for opflex network
+        # type ports -- make sure we didn't use one
         self.mgr.ensure_path_created_for_port.assert_not_called()
+
+        # Create a router and add an interface from
+        # the subnet we created above. Make explicit call for
+        # port binding for the newly created router port as well.
+        router = self.create_router(api=self.ext_api,
+                                    tenant_id='onetenant',
+                                    is_admin_context=True)['router']
 
         self.l3_plugin.add_router_interface(ctx,
                                             router['id'],
@@ -5141,9 +5150,11 @@ class TestCiscoApicMechDriverNoFabricL3(TestApicML2IntegratedPhysicalNode):
             ctx, filters={'device_id': [router['id']],
                           'network_id': [net['id']]})[0]
         self.mgr.ensure_path_created_for_port.reset_mock()
-        self._bind_port_to_host(router_port['id'], 'lb-app-01')
+
+        # Bind the port to a host that's not running OpFlex.
+        self._bind_port_to_host(p1['id'], 'lb-app-01')
         self.mgr.ensure_path_created_for_port.assert_called()
-        bseg_p1, bdriver = self._get_bound_seg(router_port['id'])
+        bseg_p1, bdriver = self._get_bound_seg(p1['id'])
         self.assertEqual(1, len(self._query_dynamic_seg(net['id'])))
         self.mgr.ensure_path_created_for_port.assert_called_once_with(
             tenant1, net['id'], 'lb-app-01', bseg_p1['segmentation_id'],
@@ -5152,6 +5163,7 @@ class TestCiscoApicMechDriverNoFabricL3(TestApicML2IntegratedPhysicalNode):
         self.l3_plugin.remove_router_interface(ctx,
                                                router['id'],
                                                {'port_id': router_port['id']})
+        self.delete_port(p1['id'], tenant_id=p1['tenant_id'])
         self.assertEqual(0, len(self._query_dynamic_seg(net['id'])))
         self.mgr.ensure_path_deleted_for_port.assert_called_once_with(
             tenant1, net['id'], 'lb-app-01', app_profile_name=app_prof1)
