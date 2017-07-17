@@ -19,6 +19,7 @@ from neutron.db import common_db_mixin
 from neutron.db import extraroute_db
 from neutron.db import l3_db
 from neutron.db import l3_gwmode_db
+from neutron.extensions import l3
 from neutron.plugins.common import constants
 from oslo_log import log as logging
 from oslo_utils import excutils
