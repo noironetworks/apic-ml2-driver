@@ -102,7 +102,7 @@ class ApicL3ServicePlugin(common_db_mixin.CommonDbMixin,
         if not attr:
             attr = {l3_ext.USE_ROUTING_CONTEXT: None}
         router_res.update(attr)
-        LOG.debug("APIC ML2 L3 Plugin extending router dict: %s", router_res)
+        LOG.debug("APIC L3 Plugin extending router dict: %s", router_res)
 
     common_db_mixin.CommonDbMixin.register_dict_extend_funcs(
         l3.ROUTERS, ['_extend_router_dict_apic'])
