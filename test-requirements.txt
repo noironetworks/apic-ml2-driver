@@ -26,5 +26,5 @@ os-testr>=0.1.0
 tempest-lib>=0.8.0
 ddt>=0.7.0
 pylint==1.4.4 # GNU GPL v2
-pyOpenSSL>=0.13.0,<=0.15.1
+pyOpenSSL>=0.13.0,<=16.2.0
 reno>=0.1.1 # Apache2
