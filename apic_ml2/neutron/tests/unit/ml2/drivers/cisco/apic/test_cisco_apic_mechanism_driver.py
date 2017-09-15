@@ -3857,7 +3857,7 @@ class ApicML2IntegratedTestCaseDvs(ApicML2IntegratedTestBase):
         self.driver.agent_type = ofcst.AGENT_TYPE_OPFLEX_OVS
         self.driver._dvs_notifier = mock.MagicMock()
         self.driver.dvs_notifier.bind_port_call = mock.Mock(
-            return_value=BOOKED_PORT_VALUE)
+            return_value={'key': BOOKED_PORT_VALUE})
 
     def _verify_dvs_notifier(self, notifier, port, host):
             # can't use getattr() with mock, so use eval instead

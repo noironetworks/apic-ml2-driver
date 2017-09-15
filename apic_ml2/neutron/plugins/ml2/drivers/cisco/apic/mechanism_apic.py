@@ -67,7 +67,7 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import nova_client
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import patch  # noqa
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import rpc as t_rpc
 
-DVS_AGENT_KLASS = 'vmware_dvs.api.dvs_agent_rpc_api.DVSClientAPI'
+DVS_AGENT_KLASS = 'networking_vsphere.common.dvs_agent_rpc_api.DVSClientAPI'
 LOG = logging.getLogger(__name__)
 n_db.AUTO_DELETE_PORT_OWNERS.append(acst.DEVICE_OWNER_SNAT_PORT)
 _apic_driver_instance = None
@@ -400,16 +400,16 @@ class APICMechanismDriver(api.MechanismDriver,
             currentcopy = copy.copy(context.current)
             currentcopy['portgroup_name'] = (
                 vif_details['dvs_port_group_name'])
-            booked_port_key = None
+            booked_port_info = None
             if self.dvs_notifier:
-                booked_port_key = self.dvs_notifier.bind_port_call(
+                booked_port_info = self.dvs_notifier.bind_port_call(
                     currentcopy,
                     context.network.network_segments,
                     context.network.current,
                     context.host
                 )
-            if booked_port_key:
-                vif_details['dvs_port_key'] = booked_port_key
+            if booked_port_info:
+                vif_details['dvs_port_key'] = booked_port_info['key']
 
             context.set_binding(segment[api.ID],
                                 acst.VIF_TYPE_DVS, vif_details)
