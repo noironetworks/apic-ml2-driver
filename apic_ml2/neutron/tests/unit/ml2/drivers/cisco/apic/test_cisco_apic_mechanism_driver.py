@@ -330,7 +330,7 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
             self.mgr.ensure_path_created_for_port.assert_called_once_with(
                 self._tenant(neutron_tenant='onetenant'),
                 net['id'], 'h1', mock.ANY, transaction=mock.ANY,
-                app_profile_name=self._app_profile(
+                bd_name=None, app_profile_name=self._app_profile(
                     neutron_tenant='onetenant'))
 
     def test_port_on_shared_opflex_network(self):
@@ -1582,7 +1582,7 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
         self.driver.update_port_postcommit(port_ctx)
         mgr.ensure_path_created_for_port.assert_called_once_with(
             self._tenant(), mocked.APIC_NETWORK, HOST_ID1,
-            ENCAP, transaction='transaction',
+            ENCAP, transaction='transaction', bd_name=None,
             app_profile_name=self._app_profile())
 
     def test_update_host(self):
@@ -1706,7 +1706,7 @@ l3extRsPathL3OutAtt": {"attributes": {"ifInstT": "sub-interface", "encap": \
         # Path creation gets called with the network tenant id
         mgr.ensure_path_created_for_port.assert_called_once_with(
             self._tenant(), mocked.APIC_NETWORK, HOST_ID1,
-            ENCAP, transaction='transaction',
+            ENCAP, transaction='transaction', bd_name=None,
             app_profile_name=self._app_profile())
 
     def test_update_port_nobound_postcommit(self):
@@ -4302,6 +4302,32 @@ class TestApicML2IntegratedPhysicalNode(ApicML2IntegratedTestBase):
             context.get_admin_context().session, network_id,
             filter_dynamic=True)
 
+    def test_phys_port_on_shared_public_opflex_network(self):
+        old_net_dict = self.driver.apic_manager.ext_net_dict
+        self.driver.apic_manager.ext_net_dict = self.external_network_dict
+        self.driver.apic_optimized_dhcp_lease_time = 100
+        self._register_agent('h1', agent_cfg=AGENT_CONF_OPFLEX)
+        net = self.create_network(
+            name=mocked.APIC_NETWORK_HOST_SNAT + '-name',
+            tenant_id='onetenant', expected_res_status=201, shared=True,
+            is_admin_context=True, **{'router:external': 'True'})['network']
+        sub = self.create_subnet(
+            network_id=net['id'], cidr='192.168.12.0/24',
+            ip_version=4, is_admin_context=True)
+        with self.port(subnet=sub, tenant_id='onetenant') as p1:
+            p1 = p1['port']
+            self.assertEqual(net['id'], p1['network_id'])
+            # Bind port to trigger path binding
+            self._bind_port_to_host(p1['id'], 'fw-app-01')
+            self.driver._add_ip_mapping_details = mock.Mock()
+            # Called on the network's tenant
+            self.mgr.ensure_path_created_for_port.assert_called_once_with(
+                'common', 'EXT-epg-network-host-snat-name_' + net['id'][:4],
+                'fw-app-01', mock.ANY, transaction=mock.ANY,
+                bd_name='EXT-bd-network-host-snat-name_' + net['id'][:4],
+                app_profile_name=self._app_profile(neutron_tenant='onetenant'))
+        self.driver.apic_manager.ext_net_dict = old_net_dict
+
     def test_physical_bind(self):
         tenant1 = self._tenant(neutron_tenant='onetenant')
         app_prof1 = self._app_profile(neutron_tenant='onetenant')
@@ -4331,7 +4357,7 @@ class TestApicML2IntegratedPhysicalNode(ApicML2IntegratedTestBase):
         self.assertEqual(1, len(self._query_dynamic_seg(net1['id'])))
         self.mgr.ensure_path_created_for_port.assert_called_once_with(
             tenant1, net1['id'], 'fw-app-01', bseg_p1['segmentation_id'],
-            app_profile_name=app_prof1, transaction=mock.ANY)
+            bd_name=None, app_profile_name=app_prof1, transaction=mock.ANY)
         self.mgr.ensure_path_created_for_port.reset_mock()
 
         # bind another physical node to same network, then delete that port
@@ -4342,7 +4368,7 @@ class TestApicML2IntegratedPhysicalNode(ApicML2IntegratedTestBase):
             self.assertEqual(1, len(self._query_dynamic_seg(net1['id'])))
             self.mgr.ensure_path_created_for_port.assert_called_once_with(
                 tenant1, net1['id'], 'lb-app-01', bseg_p1['segmentation_id'],
-                app_profile_name=app_prof1, transaction=mock.ANY)
+                bd_name=None, app_profile_name=app_prof1, transaction=mock.ANY)
 
             self.delete_port(p1_1['id'], tenant_id=p1_1['tenant_id'])
             self.assertEqual(1, len(self._query_dynamic_seg(net1['id'])))
@@ -4385,7 +4411,7 @@ class TestApicML2IntegratedPhysicalNode(ApicML2IntegratedTestBase):
         self.assertEqual(self.expected_bound_driver, bdriver)
         self.mgr.ensure_path_created_for_port.assert_called_once_with(
             tenant1, net1['id'], 'fw-app-01', bseg_p1['segmentation_id'],
-            app_profile_name=app_prof1, transaction=mock.ANY)
+            app_profile_name=app_prof1, bd_name=None, transaction=mock.ANY)
         self.mgr.ensure_path_created_for_port.reset_mock()
 
         # bind port from another network to first physical node
@@ -4398,7 +4424,7 @@ class TestApicML2IntegratedPhysicalNode(ApicML2IntegratedTestBase):
         self.assertEqual(1, len(self._query_dynamic_seg(net2['id'])))
         self.mgr.ensure_path_created_for_port.assert_called_once_with(
             tenant1, net2['id'], 'fw-app-01', bseg_p2['segmentation_id'],
-            app_profile_name=app_prof1, transaction=mock.ANY)
+            bd_name=None, app_profile_name=app_prof1, transaction=mock.ANY)
 
         # delete the ports
         self.delete_port(p1['id'], tenant_id=p1['tenant_id'])
@@ -5224,7 +5250,7 @@ class TestCiscoApicMechDriverNoFabricL3(TestApicML2IntegratedPhysicalNode):
         self.assertEqual(1, len(self._query_dynamic_seg(net['id'])))
         self.mgr.ensure_path_created_for_port.assert_called_once_with(
             tenant1, net['id'], 'lb-app-01', bseg_p1['segmentation_id'],
-            app_profile_name=app_prof1, transaction=mock.ANY)
+            bd_name=None, app_profile_name=app_prof1, transaction=mock.ANY)
 
         self.l3_plugin.remove_router_interface(ctx,
                                                router['id'],
@@ -5263,6 +5289,9 @@ class TestCiscoApicMechDriverNoFabricL3(TestApicML2IntegratedPhysicalNode):
             self.assertIsNone(details.get('floating_ip'))
             self.assertIsNone(details.get('host_snat_ips'))
             self.driver._get_tenant_vrf.assert_called_with(net['tenant_id'])
+
+    def test_phys_port_on_shared_public_opflex_network(self):
+        pass
 
 
 class TestExtensionAttributes(ApicML2IntegratedTestBase):
