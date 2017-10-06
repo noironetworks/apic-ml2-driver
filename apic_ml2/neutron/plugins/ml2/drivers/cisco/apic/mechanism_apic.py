@@ -345,35 +345,41 @@ class APICMechanismDriver(api.MechanismDriver,
            AgentMechanismDriverBase class, but is modified
            to support multiple L2 agent types (DVS and OpFlex).
         """
-        LOG.debug("Attempting to bind port %(port)s on "
-                  "network %(network)s",
-                  {'port': context.current['id'],
-                   'network': context.network.current['id']})
-        vnic_type = context.current.get(portbindings.VNIC_TYPE,
-                                        portbindings.VNIC_NORMAL)
-        if vnic_type not in [portbindings.VNIC_NORMAL]:
+        port = context.current
+        LOG.debug("Attempting to bind port %(port)s on network %(net)s",
+                  {'port': port['id'],
+                   'net': context.network.current['id']})
+
+        # Check the VNIC type.
+        vnic_type = port.get(portbindings.VNIC_TYPE, portbindings.VNIC_NORMAL)
+        if vnic_type not in [portbindings.VNIC_NORMAL,
+                             portbindings.VNIC_DIRECT]:
             LOG.debug("Refusing to bind due to unsupported vnic_type: %s",
                       vnic_type)
             return
 
-        # Attempt to bind ports for DVS agents for nova-compute daemons
-        # first. This allows having network agents (dhcp, metadata)
-        # that typically run on a network node using an OpFlex agent to
-        # co-exist with nova-compute daemons for ESX, which host DVS agents.
-        if context.current['device_owner'].startswith('compute:'):
-            agent_list = context.host_agents(acst.AGENT_TYPE_DVS)
-            if self._agent_bind_port(context, agent_list, self._bind_dvs_port):
+        if vnic_type in [portbindings.VNIC_NORMAL]:
+            if port['device_owner'].startswith('compute:'):
+                # For compute ports, try to bind DVS agent first.
+                agent_list = context.host_agents(acst.AGENT_TYPE_DVS)
+                if self._agent_bind_port(context, agent_list,
+                                         self._bind_dvs_port):
+                    return
+
+            # It either wasn't a DVS binding, or there wasn't a DVS
+            # agent on the binding host (could be the case in a hybrid
+            # environment supporting KVM and ESX compute). Go try for
+            # OpFlex agents.
+            agent_list = context.host_agents(ofcst.AGENT_TYPE_OPFLEX_OVS)
+            if self._agent_bind_port(context, agent_list,
+                                     self._bind_opflex_port):
                 return
 
-        # It either wasn't a DVS binding, or there wasn't a DVS
-        # agent on the binding host (could be the case in a hybrid
-        # environment supporting KVM and ESX compute). Go try for
-        # OpFlex agents.
-        agent_list = context.host_agents(ofcst.AGENT_TYPE_OPFLEX_OVS)
-        if self._agent_bind_port(context, agent_list, self._bind_opflex_port):
-            return
-
-        # Try hierarchical binding for physical nodes
+        # If we reached here, it means that either there is no active opflex
+        # agent running on the host, or the agent on the host is not
+        # configured for this physical network. Treat the host as a physical
+        # node (i.e. has no OpFlex agent running) and try binding
+        # hierarchically if the network-type is OpFlex.
         self._bind_physical_node(context)
 
     def _bind_dvs_port(self, context, segment, agent):
@@ -1060,11 +1066,13 @@ class APICMechanismDriver(api.MechanismDriver,
         epg_name = self.name_mapper.endpoint_group(context, network['id'])
         # Get tenant details from port context
         tenant_id = self._get_network_aci_tenant(context.network.current)
+        bd_name = None
         if self._is_nat_enabled_on_ext_net(context.network.current):
             # PTG name is different
             l3out_name = self.name_mapper.l3_out(
                 context, network['id'], openstack_owner=network['tenant_id'])
             epg_name = self._get_ext_epg_for_ext_net(l3out_name)
+            bd_name = self._get_ext_bd_for_ext_net(l3out_name)
         # Get segmentation id
         if not context.bottom_bound_segment:
             LOG.debug("Port %s is not bound to a segment", port)
@@ -1080,7 +1088,7 @@ class APICMechanismDriver(api.MechanismDriver,
             self.apic_manager.ensure_path_created_for_port(
                 tenant_id, epg_name, host, seg,
                 app_profile_name=self._get_network_app_profile(
-                    context.network.current), transaction=trs)
+                    context.network.current), bd_name=bd_name, transaction=trs)
 
     def _get_intf_port_subnet(self, context, port):
         subnets = [x['subnet_id'] for x in port['fixed_ips']]
@@ -1586,6 +1594,13 @@ class APICMechanismDriver(api.MechanismDriver,
             atenant_id = self._get_network_aci_tenant(context.network.current)
             network_id = context.network.current['id']
             epg_name = self.name_mapper.endpoint_group(context, network_id)
+            if self._is_nat_enabled_on_ext_net(context.network.current):
+                # PTG name is different
+                network = context.network.current
+                l3out_name = self.name_mapper.l3_out(
+                    context, network['id'],
+                    openstack_owner=network['tenant_id'])
+                epg_name = self._get_ext_epg_for_ext_net(l3out_name)
             self._delete_port_path(
                 context, atenant_id, epg_name,
                 self._get_network_app_profile(context.network.current),
