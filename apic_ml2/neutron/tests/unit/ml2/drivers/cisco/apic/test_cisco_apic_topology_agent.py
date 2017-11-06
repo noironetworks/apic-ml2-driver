@@ -184,7 +184,7 @@ class TestCiscoApicTopologyAgent(base.BaseTestCase,
             expected = [(mocked.SERVICE_HOST, mocked.SERVICE_HOST_IFACE,
                          mocked.SERVICE_HOST_MAC, mocked.APIC_EXT_SWITCH,
                          mocked.APIC_EXT_MODULE, mocked.APIC_EXT_PORT,
-                         mocked.SERVICE_PEER_PORT_DESC)]
+                         '2', mocked.SERVICE_PEER_PORT_DESC)]
             self.assertEqual(expected,
                              peers[mocked.SERVICE_HOST_IFACE])
 
@@ -192,7 +192,7 @@ class TestCiscoApicTopologyAgent(base.BaseTestCase,
             self.agent.peers = {}
             expected = (mocked.SERVICE_HOST, mocked.SERVICE_HOST_IFACE,
                         mocked.SERVICE_HOST_MAC, mocked.APIC_EXT_SWITCH,
-                        mocked.APIC_EXT_MODULE, mocked.APIC_EXT_PORT,
+                        mocked.APIC_EXT_MODULE, mocked.APIC_EXT_PORT, '2',
                         mocked.SERVICE_PEER_PORT_DESC)
             peers = {mocked.SERVICE_HOST_IFACE: [expected]}
             context = mock.Mock()
@@ -207,7 +207,7 @@ class TestCiscoApicTopologyAgent(base.BaseTestCase,
         def test_check_for_new_peers_with_peers(self):
             expected = (mocked.SERVICE_HOST, mocked.SERVICE_HOST_IFACE,
                         mocked.SERVICE_HOST_MAC, mocked.APIC_EXT_SWITCH,
-                        mocked.APIC_EXT_MODULE, mocked.APIC_EXT_PORT,
+                        mocked.APIC_EXT_MODULE, mocked.APIC_EXT_PORT, '2',
                         mocked.SERVICE_PEER_PORT_DESC)
             peers = {mocked.SERVICE_HOST_IFACE: [expected]}
             self.agent.peers = {mocked.SERVICE_HOST_IFACE:

@@ -40,13 +40,13 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (mechanism_apic as
                                                              ma)
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import rpc as arpc
 
-ACI_CHASSIS_DESCR_FORMAT = 'topology/pod-1/node-(\d+)'
+ACI_CHASSIS_DESCR_FORMAT = 'topology/pod-(\d+)/node-(\d+)'
 ACI_PORT_DESCR_FORMATS = [
-    'topology/pod-1/node-(\d+)/sys/conng/path-\[eth(\d+)/(\d+(\/\d+)*)\]',
-    'topology/pod-1/paths-(\d+)/pathep-\[eth(\d+)/(\d+(\/\d+)*)\]',
+    'topology/pod-(\d+)/node-(\d+)/sys/conng/path-\[eth(\d+)/(\d+(\/\d+)*)\]',
+    'topology/pod-(\d+)/paths-(\d+)/pathep-\[eth(\d+)/(\d+(\/\d+)*)\]',
 ]
 ACI_PORT_LOCAL_FORMAT = 'Eth(\d+)/(\d+(\/\d+)*)'
-ACI_VPCPORT_DESCR_FORMAT = ('topology/pod-1/protpaths-(\d+)-(\d+)/pathep-'
+ACI_VPCPORT_DESCR_FORMAT = ('topology/pod-(\d+)/protpaths-(\d+)-(\d+)/pathep-'
                             '\[(.*)\]')
 
 AGENT_FORCE_UPDATE_COUNT = 5
@@ -193,7 +193,7 @@ class ApicTopologyAgent(manager.Manager):
                         curr_peers[interface] != peer):
                     LOG.debug('reporting peer removal: %s', peer)
                     self.service_agent.update_link(
-                        context, peer[0], peer[1], None, 0, 0, 0, '')
+                        context, peer[0], peer[1], None, 0, 0, 0, 0, '')
                 if (interface not in curr_peers or
                         curr_peers[interface] != peer or
                         force_send):
@@ -206,7 +206,7 @@ class ApicTopologyAgent(manager.Manager):
             for peer in curr_peers.values():
                 LOG.debug('reporting peer removal: %s', peer)
                 self.service_agent.update_link(
-                    context, peer[0], peer[1], None, 0, 0, 0, '')
+                    context, peer[0], peer[1], None, 0, 0, 0, 0, '')
 
         except Exception:
             LOG.exception(_LE("APIC service agent: exception in LLDP parsing"))
@@ -233,23 +233,23 @@ class ApicTopologyAgent(manager.Manager):
                     match = regexp.match(value)
                     if match:
                         mac = self._get_mac(interface)
-                        switch, module, port = match.group(1, 2, 3)
+                        pod_id, switch, module, port = match.group(1, 2, 3, 4)
                         peer = (self.host, interface, mac,
-                                switch, module, port, port_desc)
+                                switch, module, port, pod_id, port_desc)
                         if interface not in peers:
                             peers[interface] = []
                         peers[interface].append(peer)
                 match = self.vpcport_desc_re.match(value)
                 if match:
                     mac = self._get_mac(interface)
-                    switch1, switch2, bundle = match.group(1, 2, 3)
+                    pod_id, switch1, switch2, bundle = match.group(1, 2, 3, 4)
                     switch, module, port = None, None, None
                     if (bundle is not None and
                             'chassis.descr' in interfaces[interface]):
                         value = interfaces[interface]['chassis.descr']
                         match = self.chassis_desc_re.match(value)
                         if match:
-                            switch = match.group(1)
+                            switch = match.group(2)
                         if (switch is not None and
                                 'port.local' in interfaces[interface]):
                             value = interfaces[interface]['port.local']
@@ -259,7 +259,8 @@ class ApicTopologyAgent(manager.Manager):
                             if module is not None and port is not None:
                                 vpcmodule = VPCMODULE_NAME % (module, port)
                                 peer = (self.host, interface, mac,
-                                        switch, vpcmodule, bundle, port_desc)
+                                        switch, vpcmodule, bundle,
+                                        pod_id, port_desc)
                                 if interface not in peers:
                                     peers[interface] = []
                                 peers[interface].append(peer)
