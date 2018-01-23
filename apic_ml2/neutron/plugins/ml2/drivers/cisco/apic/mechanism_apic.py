@@ -904,8 +904,13 @@ class APICMechanismDriver(api.MechanismDriver,
                                               net['id'])
             epg_tenant = self.apic_manager.apic.fvTenant.name(
                 str(self._get_network_aci_tenant(network)))
-            l3out_name = self.name_mapper.l3_out(
-                context, net['id'], openstack_owner=net['tenant_id'])
+            net_info = self.apic_manager.ext_net_dict.get(network['name'])
+            if self._is_pre_existing(net_info):
+                l3out_name = self.name_mapper.pre_existing(context,
+                                                           network['name'])
+            else:
+                l3out_name = self.name_mapper.l3_out(
+                    context, net['id'], openstack_owner=net['tenant_id'])
             f['nat_epg_name'] = self._get_ext_epg_for_ext_net(l3out_name)
             f['nat_epg_app_profile'] = str(
                 self._get_network_app_profile(network))
@@ -1616,17 +1621,21 @@ class APICMechanismDriver(api.MechanismDriver,
             cidr = netaddr.IPNetwork(subnet['cidr'])
             gateway_ip = '%s/%s' % (subnet['gateway_ip'], str(cidr.prefixlen))
 
+            net_info = self.apic_manager.ext_net_dict.get(network['name'])
             if not network.get('router:external'):
                 # Convert to APIC IDs
                 bd_id = self.name_mapper.bridge_domain(
                     context, network_id, openstack_owner=network['tenant_id'])
                 return tenant_id, bd_id, gateway_ip
-            elif (self._is_nat_enabled_on_ext_net(network) and
-                    not self._is_edge_nat(
-                        self.apic_manager.ext_net_dict[network['name']])):
-                l3out_name = self.name_mapper.l3_out(
-                    context, network['id'],
-                    openstack_owner=network['tenant_id'])
+            elif (self._is_nat_enabled_on_ext_net(network) and not
+                    self._is_edge_nat(net_info)):
+                if self._is_pre_existing(net_info):
+                    l3out_name = self.name_mapper.pre_existing(context,
+                                                               network['name'])
+                else:
+                    l3out_name = self.name_mapper.l3_out(
+                        context, network['id'],
+                        openstack_owner=network['tenant_id'])
                 bd_id = self._get_ext_bd_for_ext_net(l3out_name)
                 return tenant_id, bd_id, gateway_ip
 
@@ -2620,8 +2629,10 @@ class APICMechanismDriver(api.MechanismDriver,
                 # create EPG, BD for external network and
                 # connect to external VRF
                 if not self._is_edge_nat(net_info):
-                    ext_bd_name = self._get_ext_bd_for_ext_net(l3out_name)
-                    ext_epg_name = self._get_ext_epg_for_ext_net(l3out_name)
+                    ext_bd_name = self._get_ext_bd_for_ext_net(l3out_name_pre
+                                                               or l3out_name)
+                    ext_epg_name = self._get_ext_epg_for_ext_net(l3out_name_pre
+                                                                 or l3out_name)
                     app_profile_name = self._get_network_app_profile(network)
                     self.apic_manager.ensure_bd_created_on_apic(
                         tenant_id, ext_bd_name, ctx_owner=external_vrf_tenant,
