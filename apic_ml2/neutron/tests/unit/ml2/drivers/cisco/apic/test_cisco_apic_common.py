@@ -325,6 +325,8 @@ class ConfigMixin(object):
                 'vlan_range': '1700:1710'
             },
         }
+
+    def import_keystone_conf(self):
         cfg.CONF.import_group('keystone_authtoken',
                               'keystonemiddleware.auth_token')
         cfg.CONF.set_override('auth_uri', 'http://127.0.0.1:5000/v2.0/',

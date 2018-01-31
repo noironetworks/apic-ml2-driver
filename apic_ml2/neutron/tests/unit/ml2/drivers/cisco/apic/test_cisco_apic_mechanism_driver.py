@@ -126,6 +126,7 @@ class ApicML2IntegratedTestBase(test_plugin.NeutronDbPluginV2TestCase,
     def setUp(self, service_plugins=None, ml2_opts=None):
         mocked.ControllerMixin.set_up_mocks(self)
         mocked.ConfigMixin.set_up_mocks(self, ml2_opts=ml2_opts)
+        self.import_keystone_conf()
         self.override_conf('integrated_topology_service', True,
                            'ml2_cisco_apic')
         self.override_conf('per_tenant_context', False,
@@ -1494,6 +1495,7 @@ class TestCiscoApicMechDriver(testlib_api.SqlTestCase,
         super(TestCiscoApicMechDriver, self).setUp()
         mocked.ControllerMixin.set_up_mocks(self)
         mocked.ConfigMixin.set_up_mocks(self)
+        self.import_keystone_conf()
         self.mock_apic_manager_login_responses()
         self.driver = md.APICMechanismDriver()
         self.driver.synchronizer = None
@@ -4653,6 +4655,7 @@ class TestCiscoApicMechDriverHostSNAT(ApicML2IntegratedTestBase):
         super(TestCiscoApicMechDriverHostSNAT, self).setUp()
         mocked.ControllerMixin.set_up_mocks(self)
         mocked.ConfigMixin.set_up_mocks(self)
+        self.import_keystone_conf()
         self.mock_apic_manager_login_responses()
         self.driver = md.APICMechanismDriver()
         self.driver.synchronizer = None
