@@ -2732,8 +2732,10 @@ class APICMechanismDriver(api.MechanismDriver,
         if (self._is_nat_enabled_on_ext_net(network) and
                 not self._is_edge_nat(net_info)):
             with self.apic_manager.apic.transaction() as trs:
-                ext_bd_name = self._get_ext_bd_for_ext_net(l3out_name)
-                ext_epg_name = self._get_ext_epg_for_ext_net(l3out_name)
+                ext_bd_name = self._get_ext_bd_for_ext_net(l3out_name_pre or
+                                                           l3out_name)
+                ext_epg_name = self._get_ext_epg_for_ext_net(l3out_name_pre or
+                                                             l3out_name)
                 app_profile_name = self._get_network_app_profile(network)
 
                 self.apic_manager.delete_bd_on_apic(
