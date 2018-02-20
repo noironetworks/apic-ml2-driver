@@ -15,17 +15,28 @@ from neutron.notifiers import nova as n_nova
 from novaclient import exceptions as nova_exceptions
 from oslo_log import log as logging
 
+
 LOG = logging.getLogger(__name__)
+
+
+client = None
+
+
+def _get_client():
+    global client
+    if client is None:
+        client = n_nova.Notifier().nclient
+    return client
 
 
 class NovaClient(object):
 
     def __init__(self):
-        self.nclient = n_nova.Notifier().nclient
+        self.client = n_nova.Notifier().nclient
 
     def get_server(self, server_id):
         try:
-            return self.nclient.servers.get(server_id)
+            return self.client.servers.get(server_id)
         except nova_exceptions.NotFound:
             LOG.warning(_LW("Nova returned NotFound for server: %s"),
                         server_id)
