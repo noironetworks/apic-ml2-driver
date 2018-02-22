@@ -60,6 +60,7 @@ from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import (
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_model
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import apic_sync
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import attestation
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import cache
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config  # noqa
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import constants as acst
 from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import exceptions as aexc
@@ -250,6 +251,17 @@ class APICMechanismDriver(api.MechanismDriver,
         keystone_authtoken = None
         session = None
         if client:
+            keystoneclientv3 = None
+            if cfg.CONF.apic_ml2_auth:
+                # REVISIT: The following is a bit contrived to
+                # to avoid having to change any code in the
+                # aim drivers. We just want to reuse the
+                # _get_keystone_client() implementation here, but the
+                # original implemenation is not very reusable and hence we
+                # are having to use it in the following way.
+                ncache = cache.ProjectNameCache()
+                ncache._get_keystone_client()
+                keystoneclientv3 = ncache.keystone
             keystone_authtoken = cfg.CONF.keystone_authtoken
             pass_params = (
                 apic_mapper.APICNameMapper.get_key_password_params_ext(
@@ -265,9 +277,10 @@ class APICMechanismDriver(api.MechanismDriver,
             apic_config.scope_names = False
         APICMechanismDriver.apic_manager = apic_manager.APICManager(
             apic_model.ApicDbModel(), logging, network_config, apic_config,
-            keyclient_param, keystone_authtoken, apic_system_id,
+            apic_system_id=apic_system_id,
             default_apic_model=('apic_ml2.neutron.plugins.ml2.drivers.'
-                                'cisco.apic.apic_model'), keysession=session)
+                                'cisco.apic.apic_model'),
+            keystoneclientv3=keystoneclientv3)
         return APICMechanismDriver.apic_manager
 
     @staticmethod
