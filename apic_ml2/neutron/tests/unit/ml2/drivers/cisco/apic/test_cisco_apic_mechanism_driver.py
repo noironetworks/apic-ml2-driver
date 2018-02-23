@@ -2937,11 +2937,13 @@ tt':
         self.assertFalse(mgr.ensure_static_route_created.called)
         self.assertFalse(mgr.ensure_external_epg_created.called)
 
-        bd_name = "EXT-bd-%s" % self._scoped_name(mocked.APIC_NETWORK_PRE)
+        bd_name = "EXT-bd-%s" % self._scoped_name(net_ctx.current['name'],
+                                                  preexisting=True)
         l3out = self._scoped_name(net_ctx.current['name'], preexisting=True)
         mgr.ensure_epg_created.assert_called_once_with(
             self._tenant(),
-            "EXT-epg-%s" % self._scoped_name(mocked.APIC_NETWORK_PRE),
+            "EXT-epg-%s" % self._scoped_name(net_ctx.current['name'],
+                                             preexisting=True),
             bd_name=bd_name, app_profile_name=self._app_profile(),
             transaction=mock.ANY)
         mgr.ensure_bd_created_on_apic.assert_called_once_with(
