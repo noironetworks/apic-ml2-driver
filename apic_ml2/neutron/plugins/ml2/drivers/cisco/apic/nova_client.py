@@ -32,7 +32,7 @@ def _get_client():
 class NovaClient(object):
 
     def __init__(self):
-        self.client = n_nova.Notifier().nclient
+        self.client = _get_client()
 
     def get_server(self, server_id):
         try:
