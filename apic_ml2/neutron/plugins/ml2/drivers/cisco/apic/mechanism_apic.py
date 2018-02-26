@@ -18,10 +18,14 @@ import re
 
 from apicapi import apic_manager
 from apicapi import apic_mapper
+from keystoneclient import auth as ksc_auth
 from keystoneclient.auth.identity.generic import password as keypassword
 from keystoneclient import client as keyclient
 from keystoneclient import session as keysession
+from keystoneclient.v3 import client as ksc_client
+
 import netaddr
+from neutron._i18n import _LW
 from neutron.agent.linux import dhcp
 from neutron.agent import securitygroups_rpc
 from neutron.api.v2 import attributes
@@ -71,6 +75,15 @@ DVS_AGENT_KLASS = 'networking_vsphere.common.dvs_agent_rpc_api.DVSClientAPI'
 LOG = logging.getLogger(__name__)
 n_db.AUTO_DELETE_PORT_OWNERS.append(acst.DEVICE_OWNER_SNAT_PORT)
 _apic_driver_instance = None
+
+# REVISIT: We use keystone to get the name of the keystone
+# project owning each neutron resource, which by default, requires
+# admin. If we keep this, we should probably move it to a separate
+# config module. But we should also investigate whether admin is even
+# needed, or if neutron's credentials could somehow be used.
+AUTH_GROUP = 'apic_aim_auth'
+keysession.Session.register_conf_options(cfg.CONF, AUTH_GROUP)
+ksc_auth.register_conf_options(cfg.CONF, AUTH_GROUP)
 
 
 # REVISIT(ivar): Since our database class is in Neutron, we need to monkey
@@ -236,6 +249,24 @@ class APICMechanismDriver(api.MechanismDriver,
                           ha_ip_db.HAIPOwnerDbMixin):
 
     apic_manager = None
+    _keystone = None
+
+    @staticmethod
+    def _get_keystone_client():
+        if APICMechanismDriver._keystone:
+            return APICMechanismDriver._keystone
+        LOG.debug("Getting keystone client")
+        auth = ksc_auth.load_from_conf_options(cfg.CONF, AUTH_GROUP)
+        LOG.debug("Got auth: %s", auth)
+        if not auth:
+            LOG.warning(_LW('No auth_plugin configured in %s'),
+                        AUTH_GROUP)
+        session = keysession.Session.load_from_conf_options(
+            cfg.CONF, AUTH_GROUP, auth=auth)
+        LOG.debug("Got session: %s", session)
+        APICMechanismDriver._keystone = ksc_client.Client(session=session)
+        LOG.debug("Got keystone client: %s", APICMechanismDriver._keystone)
+        return APICMechanismDriver._keystone
 
     @staticmethod
     def get_apic_manager(client=True):
@@ -249,7 +280,10 @@ class APICMechanismDriver(api.MechanismDriver,
         keyclient_param = keyclient if client else None
         keystone_authtoken = None
         session = None
+        keystoneclientv3 = None
         if client:
+            if cfg.CONF.apic_aim_auth['auth_plugin']:
+                keystoneclientv3 = APICMechanismDriver._get_keystone_client()
             keystone_authtoken = cfg.CONF.keystone_authtoken
             pass_params = (
                 apic_mapper.APICNameMapper.get_key_password_params_ext(
@@ -265,9 +299,12 @@ class APICMechanismDriver(api.MechanismDriver,
             apic_config.scope_names = False
         APICMechanismDriver.apic_manager = apic_manager.APICManager(
             apic_model.ApicDbModel(), logging, network_config, apic_config,
-            keyclient_param, keystone_authtoken, apic_system_id,
+            keyclient=keyclient_param, keystone_authtoken=keystone_authtoken,
+            apic_system_id=apic_system_id,
             default_apic_model=('apic_ml2.neutron.plugins.ml2.drivers.'
-                                'cisco.apic.apic_model'), keysession=session)
+                                'cisco.apic.apic_model'),
+            keysession=session,
+            keystoneclientv3=keystoneclientv3)
         return APICMechanismDriver.apic_manager
 
     @staticmethod
