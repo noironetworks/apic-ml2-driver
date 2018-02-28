@@ -189,12 +189,12 @@ class ApicTopologyServiceNotifierApi(object):
 
     def update_link(self, context, host, interface, mac, switch, module, port,
                     pod_id='1', port_description=''):
-        cctxt = self.client.prepare(version='1.2', fanout=True)
+        cctxt = self.client.prepare(version='1.2', fanout=False)
         cctxt.cast(context, 'update_link', host=host, interface=interface,
                    mac=mac, switch=switch, module=module, port=port,
                    pod_id=pod_id, port_description=port_description)
 
     def delete_link(self, context, host, interface):
-        cctxt = self.client.prepare(version='1.2', fanout=True)
+        cctxt = self.client.prepare(version='1.2', fanout=False)
         cctxt.cast(context, 'delete_link', host=host, interface=interface,
                    mac=None, switch=0, module=0, port=0)
