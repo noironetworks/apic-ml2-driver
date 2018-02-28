@@ -33,10 +33,12 @@ from neutron.common import constants as n_constants
 from neutron.common import exceptions as n_exc
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
+from neutron.callbacks import resources
 from neutron import context as nctx
 from neutron.db import db_base_plugin_v2 as n_db
 from neutron.db.models import allowed_address_pair as n_addr_pair_db
 from neutron.db import models_v2
+from neutron.db import provisioning_blocks
 from neutron.extensions import portbindings
 from neutron import manager
 from neutron.plugins.common import constants
@@ -85,6 +87,8 @@ AUTH_GROUP = 'apic_aim_auth'
 keysession.Session.register_conf_options(cfg.CONF, AUTH_GROUP)
 ksc_auth.register_conf_options(cfg.CONF, AUTH_GROUP)
 
+SUPPORTED_VNIC_TYPES = [portbindings.VNIC_NORMAL,
+                        portbindings.VNIC_DIRECT]
 
 # REVISIT(ivar): Since our database class is in Neutron, we need to monkey
 # patch this class in order to add required features. This will have to be
@@ -390,8 +394,7 @@ class APICMechanismDriver(api.MechanismDriver,
 
         # Check the VNIC type.
         vnic_type = port.get(portbindings.VNIC_TYPE, portbindings.VNIC_NORMAL)
-        if vnic_type not in [portbindings.VNIC_NORMAL,
-                             portbindings.VNIC_DIRECT]:
+        if vnic_type not in SUPPORTED_VNIC_TYPES:
             LOG.debug("Refusing to bind due to unsupported vnic_type: %s",
                       vnic_type)
             return
@@ -1703,6 +1706,30 @@ class APICMechanismDriver(api.MechanismDriver,
             elif self._is_edge_nat(
                 self.apic_manager.ext_net_dict.get(network['name'])):
                 raise VMsDisallowedOnExtNetworkIfEdgeNat(net=network['name'])
+        self._insert_provisioning_block(context)
+
+    def _insert_provisioning_block(self, context):
+        # we insert a status barrier to prevent the port from transitioning
+        # to active until the agent reports back that the wiring is done
+        port = context.current
+        if (not context.host or
+                port['status'] == n_constants.PORT_STATUS_ACTIVE):
+            # no point in putting in a block if the status is already ACTIVE
+            return
+
+        # Check the VNIC type.
+        vnic_type = port.get(portbindings.VNIC_TYPE,
+                             portbindings.VNIC_NORMAL)
+        if vnic_type not in SUPPORTED_VNIC_TYPES:
+            LOG.debug("No provisioning_block due to unsupported vnic_type: %s",
+                      vnic_type)
+            return
+
+        if (context.host_agents(ofcst.AGENT_TYPE_OPFLEX_OVS) or
+                context.host_agents(acst.AGENT_TYPE_DVS)):
+            provisioning_blocks.add_provisioning_component(
+                context._plugin_context, port['id'], resources.PORT,
+                provisioning_blocks.L2_AGENT_ENTITY)
 
     def create_port_postcommit(self, context):
         self._perform_port_operations(context)
