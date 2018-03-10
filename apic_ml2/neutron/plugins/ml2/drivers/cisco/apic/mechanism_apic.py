@@ -1045,17 +1045,20 @@ class APICMechanismDriver(api.MechanismDriver,
             context,
             filters={'id': [ip['subnet_id'] for ip in port['fixed_ips']]})
         for subnet in details['subnets']:
-            dhcp_ips = set()
-            for port in context._plugin.get_ports(
+            dhcp_ports = {}
+            subnet_dhcp_ips = set()
+            for dhcp_port in context._plugin.get_ports(
                     context, filters={
                         'network_id': [subnet['network_id']],
                         'device_owner': [n_constants.DEVICE_OWNER_DHCP]}):
-                dhcp_ips |= set([x['ip_address'] for x in port['fixed_ips']
-                                 if x['subnet_id'] == subnet['id']])
-            dhcp_ips = list(dhcp_ips)
+                dhcp_ips = set([x['ip_address'] for x in dhcp_port['fixed_ips']
+                                if x['subnet_id'] == subnet['id']])
+                dhcp_ports.setdefault(dhcp_port['mac_address'], list(dhcp_ips))
+                subnet_dhcp_ips |= dhcp_ips
+            subnet_dhcp_ips = list(subnet_dhcp_ips)
             if not subnet['dns_nameservers']:
                 # Use DHCP namespace port IP
-                subnet['dns_nameservers'] = dhcp_ips
+                subnet['dns_nameservers'] = subnet_dhcp_ips
             # Ser Default route if needed
             metadata = default = False
             if subnet['ip_version'] == 4:
@@ -1069,11 +1072,20 @@ class APICMechanismDriver(api.MechanismDriver,
                     subnet['host_routes'].append(
                         {'destination': '0.0.0.0/0',
                          'nexthop': subnet['gateway_ip']})
-                if not metadata and dhcp_ips and not self.enable_metadata_opt:
-                    subnet['host_routes'].append(
-                        {'destination': dhcp.METADATA_DEFAULT_CIDR,
-                         'nexthop': dhcp_ips[0]})
-            subnet['dhcp_server_ips'] = dhcp_ips
+                # REVISIT: We need to decide if we should provide
+                # host-routes for all of the DHCP agents. For now
+                # use the first DHCP agent in our list for the
+                # metadata host-route next-hop IPs
+                if not metadata and dhcp_ports and (
+                    not self.enable_metadata_opt or
+                    (self.enable_metadata_opt and not default)):
+                    for ip in dhcp_ports[dhcp_ports.keys()[0]]:
+                        subnet['host_routes'].append(
+                            {'destination': dhcp.METADATA_DEFAULT_CIDR,
+                             'nexthop': ip})
+            subnet['dhcp_server_ips'] = subnet_dhcp_ips
+            if dhcp_ports:
+                subnet['dhcp_server_ports'] = dhcp_ports
 
     # RPC Method
     def ip_address_owner_update(self, context, **kwargs):
