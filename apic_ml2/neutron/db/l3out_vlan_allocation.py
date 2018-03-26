@@ -63,10 +63,6 @@ class NoVlanAvailable(exc.ResourceExhausted):
 # vlan IDs from the pool
 class L3outVlanAlloc(helpers.SegmentTypeDriver):
 
-    def __init__(self):
-        super(L3outVlanAlloc, self).__init__(L3OutVlanAllocation)
-        self.session = db_api.get_session()
-
     def _parse_vlan_ranges(self, ext_net_dict):
         self.l3out_vlan_ranges = {}
         for l3out_network in ext_net_dict.keys():
@@ -88,11 +84,12 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
         LOG.info(_LI("L3out VLAN ranges: %s"), self.l3out_vlan_ranges)
 
     def sync_vlan_allocations(self, ext_net_dict):
+        session = db_api.get_session()
         self._parse_vlan_ranges(ext_net_dict)
-        with self.session.begin(subtransactions=True):
+        with session.begin(subtransactions=True):
             # get existing allocations for all L3 out networks
             allocations = dict()
-            allocs = (self.session.query(L3OutVlanAllocation).
+            allocs = (session.query(L3OutVlanAllocation).
                       with_lockmode('update'))
             for alloc in allocs:
                 if alloc.l3out_network not in allocations:
@@ -124,7 +121,7 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
                                           {'vlan_id': alloc.vlan_id,
                                            'l3out_network':
                                            l3out_network})
-                                self.session.delete(alloc)
+                                session.delete(alloc)
                     del allocations[l3out_network]
 
                 # add missing allocatable vlans to table
@@ -133,7 +130,7 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
                                                 vrf='',
                                                 vlan_id=vlan_id,
                                                 allocated=False)
-                    self.session.add(alloc)
+                    session.add(alloc)
 
             # remove from table unallocated vlans for any unconfigured
             # l3out networks
@@ -145,15 +142,16 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
                                   {'vlan_id': alloc.vlan_id,
                                    'l3out_network':
                                    alloc.l3out_network})
-                        self.session.delete(alloc)
+                        session.delete(alloc)
 
     def get_type(self):
         return p_const.TYPE_VLAN
 
     def reserve_vlan(self, l3out_network, vrf, vrf_tenant=None):
         vrf_db = L3outVlanAlloc._get_vrf_name_db(vrf, vrf_tenant)
-        with self.session.begin(subtransactions=True):
-            query = (self.session.query(L3OutVlanAllocation).
+        session = db_api.get_session()
+        with session.begin(subtransactions=True):
+            query = (session.query(L3OutVlanAllocation).
                      filter_by(l3out_network=l3out_network,
                                vrf=vrf_db))
             count = query.update({"allocated": True})
@@ -173,12 +171,12 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
             filters = {}
             filters['l3out_network'] = l3out_network
             alloc = self.allocate_partially_specified_segment(
-                self.session, **filters)
+                session, **filters)
             if not alloc:
                 raise NoVlanAvailable(l3out_network=l3out_network)
 
             filters['vlan_id'] = alloc.vlan_id
-            query = (self.session.query(L3OutVlanAllocation).
+            query = (session.query(L3OutVlanAllocation).
                      filter_by(allocated=True, **filters))
             count = query.update({"vrf": vrf_db})
             if count:
@@ -198,8 +196,9 @@ class L3outVlanAlloc(helpers.SegmentTypeDriver):
 
     def release_vlan(self, l3out_network, vrf, vrf_tenant=None):
         vrf_db = L3outVlanAlloc._get_vrf_name_db(vrf, vrf_tenant)
-        with self.session.begin(subtransactions=True):
-            query = (self.session.query(L3OutVlanAllocation).
+        session = db_api.get_session()
+        with session.begin(subtransactions=True):
+            query = (session.query(L3OutVlanAllocation).
                      filter_by(l3out_network=l3out_network,
                                vrf=vrf_db))
             count = query.update({"allocated": False})
