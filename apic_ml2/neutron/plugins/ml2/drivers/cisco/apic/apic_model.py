@@ -67,39 +67,39 @@ class ApicDbModel(object):
 
     """DB Model to manage all APIC DB interactions."""
 
-    def __init__(self):
-        self.session = db_api.get_session()
-
     def get_session(self, session=None):
         return session or db_api.get_session()
 
     def get_contract_for_router(self, router_id):
         """Returns the specified router's contract."""
-        return self.session.query(RouterContract).filter_by(
+        return self.get_session().query(RouterContract).filter_by(
             router_id=router_id).first()
 
     def write_contract_for_router(self, project_id, router_id):
         """Stores a new contract for the given tenant."""
         contract = RouterContract(project_id=project_id,
                                   router_id=router_id)
-        with self.session.begin(subtransactions=True):
-            self.session.add(contract)
+        session = self.get_session()
+        with session.begin(subtransactions=True):
+            session.add(contract)
         return contract
 
     def update_contract_for_router(self, project_id, router_id):
-        with self.session.begin(subtransactions=True):
-            contract = self.session.query(RouterContract).filter_by(
+        session = self.get_session()
+        with session.begin(subtransactions=True):
+            contract = session.query(RouterContract).filter_by(
                 router_id=router_id).with_lockmode('update').first()
             if contract:
                 contract.project_id = project_id
-                self.session.merge(contract)
+                session.merge(contract)
             else:
                 self.write_contract_for_router(project_id, router_id)
 
     def delete_contract_for_router(self, router_id):
-        with self.session.begin(subtransactions=True):
+        session = self.get_session()
+        with session.begin(subtransactions=True):
             try:
-                self.session.query(RouterContract).filter_by(
+                session.query(RouterContract).filter_by(
                     router_id=router_id).delete()
             except orm.exc.NoResultFound:
                 return
@@ -107,49 +107,60 @@ class ApicDbModel(object):
     def add_hostlink(self, host, ifname, ifmac, swid, module, port):
         link = HostLink(host=host, ifname=ifname, ifmac=ifmac,
                         swid=swid, module=module, port=port)
-        with self.session.begin(subtransactions=True):
-            self.session.merge(link)
+        session = self.get_session()
+        with session.begin(subtransactions=True):
+            session.merge(link)
 
     def get_hostlinks(self):
-        return self.session.query(HostLink).all()
+        session = self.get_session()
+        return session.query(HostLink).all()
 
     def get_hostlink(self, host, ifname):
-        return self.session.query(HostLink).filter_by(
+        session = self.get_session()
+        return session.query(HostLink).filter_by(
             host=host, ifname=ifname).first()
 
     def get_hostlinks_for_host(self, host):
-        return self.session.query(HostLink).filter_by(
+        session = self.get_session()
+        return session.query(HostLink).filter_by(
             host=host).all()
 
     def get_hostlinks_for_host_switchport(self, host, swid, module, port):
-        return self.session.query(HostLink).filter_by(
+        session = self.get_session()
+        return session.query(HostLink).filter_by(
             host=host, swid=swid, module=module, port=port).all()
 
     def get_hostlinks_for_switchport(self, swid, module, port):
-        return self.session.query(HostLink).filter_by(
+        session = self.get_session()
+        return session.query(HostLink).filter_by(
             swid=swid, module=module, port=port).all()
 
     def delete_hostlink(self, host, ifname):
-        with self.session.begin(subtransactions=True):
+        session = self.get_session()
+        with session.begin(subtransactions=True):
             try:
-                self.session.query(HostLink).filter_by(host=host,
-                                                       ifname=ifname).delete()
+                session.query(HostLink).filter_by(host=host,
+                                                  ifname=ifname).delete()
             except orm.exc.NoResultFound:
                 return
 
     def get_switches(self):
-        return self.session.query(HostLink.swid).distinct()
+        session = self.get_session()
+        return session.query(HostLink.swid).distinct()
 
     def get_modules_for_switch(self, swid):
-        return self.session.query(
+        session = self.get_session()
+        return session.query(
             HostLink.module).filter_by(swid=swid).distinct()
 
     def get_ports_for_switch_module(self, swid, module):
-        return self.session.query(
+        session = self.get_session()
+        return session.query(
             HostLink.port).filter_by(swid=swid, module=module).distinct()
 
     def get_switch_and_port_for_host(self, host):
-        return self.session.query(
+        session = self.get_session()
+        return session.query(
             HostLink.swid, HostLink.module, HostLink.port).filter_by(
                 host=host).distinct()
 
@@ -157,7 +168,8 @@ class ApicDbModel(object):
         pb = models_ml2.PortBinding
         po = models_v2.Port
         ns = segments_db.NetworkSegment
-        return self.session.query(
+        session = self.get_session()
+        return session.query(
             po.project_id, ns.network_id, ns.segmentation_id).filter(
             po.id == pb.port_id).filter(pb.host == host).filter(
                 po.network_id == ns.network_id).distinct()

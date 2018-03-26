@@ -884,7 +884,8 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
                 self.assertEqual(['192.168.0.4'], own_p1)
 
                 # Verify number of entries is exactly 2
-                entries = ha_handler.ha_ip_handler.session.query(
+                session = db_api.get_session()
+                entries = session.query(
                     ha.HAIPAddressToPortAssocation).all()
                 self.assertEqual(2, len(entries))
 
