@@ -13,14 +13,33 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import sys
+
 import sqlalchemy as sa
 from sqlalchemy import orm
 
+from neutron import context as nctx
 from neutron.db import api as db_api
 from neutron.db import models_v2
 from neutron.db import segments_db
 from neutron.plugins.ml2 import models as models_ml2
 from neutron_lib.db import model_base
+
+
+def get_current_session():
+    i = 1
+    not_found = True
+    try:
+        while not_found:
+            for val in sys._getframe(i).f_locals.itervalues():
+                if isinstance(val, nctx.Context):
+                    ctx = val
+                    not_found = False
+                    break
+            i = i + 1
+        return ctx.session
+    except Exception:
+        return
 
 
 class RouterContract(model_base.BASEV2, model_base.HasProject):
@@ -68,18 +87,18 @@ class ApicDbModel(object):
     """DB Model to manage all APIC DB interactions."""
 
     def get_session(self, session=None):
-        return session or db_api.get_session()
+        return session or get_current_session() or db_api.get_session()
 
     def get_contract_for_router(self, router_id):
         """Returns the specified router's contract."""
         return self.get_session().query(RouterContract).filter_by(
             router_id=router_id).first()
 
-    def write_contract_for_router(self, project_id, router_id):
+    def write_contract_for_router(self, project_id, router_id, session=None):
         """Stores a new contract for the given tenant."""
         contract = RouterContract(project_id=project_id,
                                   router_id=router_id)
-        session = self.get_session()
+        session = self.get_session(session)
         with session.begin(subtransactions=True):
             session.add(contract)
         return contract
@@ -93,7 +112,7 @@ class ApicDbModel(object):
                 contract.project_id = project_id
                 session.merge(contract)
             else:
-                self.write_contract_for_router(project_id, router_id)
+                self.write_contract_for_router(project_id, router_id, session)
 
     def delete_contract_for_router(self, router_id):
         session = self.get_session()
