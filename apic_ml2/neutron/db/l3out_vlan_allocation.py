@@ -63,6 +63,9 @@ class NoVlanAvailable(exc.ResourceExhausted):
 # vlan IDs from the pool
 class L3outVlanAlloc(helpers.SegmentTypeDriver):
 
+    def __init__(self):
+        super(L3outVlanAlloc, self).__init__(L3OutVlanAllocation)
+
     def _parse_vlan_ranges(self, ext_net_dict):
         self.l3out_vlan_ranges = {}
         for l3out_network in ext_net_dict.keys():
