@@ -1077,8 +1077,7 @@ class APICMechanismDriver(api.MechanismDriver,
                 # use the first DHCP agent in our list for the
                 # metadata host-route next-hop IPs
                 if not metadata and dhcp_ports and (
-                    not self.enable_metadata_opt or
-                    (self.enable_metadata_opt and not default)):
+                        not self.enable_metadata_opt):
                     for ip in dhcp_ports[dhcp_ports.keys()[0]]:
                         subnet['host_routes'].append(
                             {'destination': dhcp.METADATA_DEFAULT_CIDR,
