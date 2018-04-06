@@ -14,7 +14,9 @@
 #    under the License.
 
 from oslo_config import cfg
+from oslo_log import log as logging
 
+LOG = logging.getLogger(__name__)
 
 # oslo_config limits ${var} expansion to global variables
 # That is why apic_system_id as a global variable
@@ -110,12 +112,34 @@ apic_opts = [
 cfg.CONF.register_opts(apic_opts, "ml2_cisco_apic")
 
 
+def _parse_files(conf_files):
+    try:
+        multi_parser = cfg.MultiConfigParser()
+        multi_parser.read(conf_files)
+        return multi_parser.parsed
+    except AttributeError:
+        # Oslo 6.0.0+
+        sections = {}
+        for filename in conf_files:
+            parser = cfg.ConfigParser(filename, sections)
+            try:
+                parser.parse()
+            except IOError:
+                LOG.warning('IOError failure on %(file)s: %(exc)s',
+                            {'file': filename,
+                             'exc': '(file missing or permission issue?)'})
+                continue
+            except Exception as e:
+                LOG.warning('Failed to parse file %(file)s: %(exc)s',
+                            {'file': filename, 'exc': e})
+        return [sections]
+
+
 def _get_specific_config(prefix):
     """retrieve config in the format [<prefix>:<value>]."""
     conf_dict = {}
-    multi_parser = cfg.MultiConfigParser()
-    multi_parser.read(cfg.CONF.config_file)
-    for parsed_file in multi_parser.parsed:
+    parsed_files = _parse_files(cfg.CONF.config_file)
+    for parsed_file in parsed_files:
         for parsed_item in parsed_file.keys():
             if parsed_item.startswith(prefix):
                 switch, switch_id = parsed_item.split(':')
