@@ -16,9 +16,9 @@
 import netaddr
 import os
 
-from oslo_config import cfg
 from oslo_log import log as logging
 
+from apic_ml2.neutron.plugins.ml2.drivers.cisco.apic import config
 
 LOG = logging.getLogger(__name__)
 
@@ -90,13 +90,7 @@ class ConfigFileSource(NetworkConstraintsSource):
             self.last_refresh_time = mod_time
 
     def _parse_file(self):
-        cfg_parser = cfg.MultiConfigParser()
-        try:
-            cfg_parser.read([self.config_file])
-        except Exception as e:
-            LOG.warning('Failed to parse file %(file)s: %(exc)s',
-                        {'file': self.config_file, 'exc': e})
-            return
+        parsed = config._parse_files([self.config_file])
 
         def sanitize_scope(scope):
             if scope:
@@ -117,7 +111,7 @@ class ConfigFileSource(NetworkConstraintsSource):
         def_scope = None
         constraints = {}
         LOG.debug('Parsing network constraints file %s', self.config_file)
-        for cfg_file in cfg_parser.parsed:
+        for cfg_file in parsed:
             for section_name in cfg_file.keys():
                 if section_name == 'DEFAULT':
                     def_scope = sanitize_scope(
