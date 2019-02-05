@@ -3,7 +3,7 @@
 # process, which may cause wedges in the gate later.
 
 -e git+https://github.com/noironetworks/apicapi.git@master#egg=apicapi
--e git+https://github.com/noironetworks/python-opflex-agent.git@master#egg=neutron_opflex_agent
+-e git+https://github.com/noironetworks/python-opflex-agent.git@stable/newton#egg=neutron_opflex_agent
 
 # These are needed until the 2.3 Routes is excluded in upstream dependencies
 Routes!=2.0,!=2.1,!=2.3,>=1.12.3;python_version=='2.7' # MIT
