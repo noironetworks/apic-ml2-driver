@@ -47,33 +47,25 @@ class HAIPAddressToPortAssocation(model_base.BASEV2):
 class PortForHAIPAddress(object):
 
     def _get_ha_ipaddress(self, port_id, ipaddress, session=None):
-        ip = None
         session = session or db_api.get_session()
-        with session.begin(subtransactions=True):
-            ip = session.query(HAIPAddressToPortAssocation).filter_by(
-                port_id=port_id, ha_ip_address=ipaddress).first()
-        return ip
+        return session.query(HAIPAddressToPortAssocation).filter_by(
+            port_id=port_id, ha_ip_address=ipaddress).first()
 
     def get_port_for_ha_ipaddress(self, ipaddress, network_id,
                                   session=None):
         """Returns the Neutron Port ID for the HA IP Addresss."""
-        port_ha_ip = None
         session = session or db_api.get_session()
-        with session.begin(subtransactions=True):
-            port_ha_ip = session.query(HAIPAddressToPortAssocation).join(
-                models_v2.Port).filter(
-                    HAIPAddressToPortAssocation.ha_ip_address ==
-                    ipaddress).filter(
-                        models_v2.Port.network_id == network_id).first()
+        port_ha_ip = session.query(HAIPAddressToPortAssocation).join(
+            models_v2.Port).filter(
+                HAIPAddressToPortAssocation.ha_ip_address == ipaddress).filter(
+                    models_v2.Port.network_id == network_id).first()
         return port_ha_ip
 
     def get_ha_ipaddresses_for_port(self, port_id):
         """Returns the HA IP Addressses associated with a Port."""
-        objs = []
         session = db_api.get_session()
-        with session.begin(subtransactions=True):
-            objs = session.query(HAIPAddressToPortAssocation).filter_by(
-                port_id=port_id).all()
+        objs = session.query(HAIPAddressToPortAssocation).filter_by(
+            port_id=port_id).all()
         return sorted([x['ha_ip_address'] for x in objs])
 
     def set_port_id_for_ha_ipaddress(self, port_id, ipaddress, session=None):
@@ -107,11 +99,8 @@ class PortForHAIPAddress(object):
                 return
 
     def get_ha_port_associations(self):
-        associations = []
         session = db_api.get_session()
-        with session.begin(subtransactions=True):
-            associations = session.query(HAIPAddressToPortAssocation).all()
-        return associations
+        return session.query(HAIPAddressToPortAssocation).all()
 
 
 class HAIPOwnerDbMixin(object):
