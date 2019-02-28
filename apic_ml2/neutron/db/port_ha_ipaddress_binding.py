@@ -61,9 +61,9 @@ class PortForHAIPAddress(object):
                     models_v2.Port.network_id == network_id).first()
         return port_ha_ip
 
-    def get_ha_ipaddresses_for_port(self, port_id):
+    def get_ha_ipaddresses_for_port(self, port_id, session=None):
         """Returns the HA IP Addressses associated with a Port."""
-        session = db_api.get_session()
+        session = session or db_api.get_session()
         objs = session.query(HAIPAddressToPortAssocation).filter_by(
             port_id=port_id).all()
         return sorted([x['ha_ip_address'] for x in objs])
