@@ -32,6 +32,7 @@ from neutron import context
 from neutron.db import api as db_api
 from neutron.db import db_base_plugin_v2  # noqa
 from neutron.db import models_v2  # noqa
+from neutron.db import provisioning_blocks
 from neutron.extensions import portbindings
 from neutron import manager
 from neutron.plugins.ml2 import db as ml2_db
@@ -1249,6 +1250,39 @@ class ApicML2IntegratedTestCase(ApicML2IntegratedTestBase):
         self.assertEqual(1, len(snat_ports))
         self.assertEqual(1, len(snat_ports_2))
         self.assertNotEqual(snat_ports[0]['id'], snat_ports_2[0]['id'])
+
+    def test_dhcp_provisioning_blocks_inserted_on_update(self):
+        ctx = context.get_admin_context()
+        plugin = self.plugin
+
+        def _fake_dhcp_agent():
+            agent = mock.Mock()
+            plugin = self.plugin
+            return mock.patch.object(
+                plugin, 'get_dhcp_agents_hosting_networks',
+                return_value=[agent]).start()
+
+        dhcp_agt_mock = _fake_dhcp_agent()
+        update_dict = {'binding:host_id': 'newhost'}
+
+        def _host_agents(self, agent_type):
+            if agent_type == ofcst.AGENT_TYPE_OPFLEX_OVS:
+                fake_agent = {"alive": False}
+                return [fake_agent]
+
+        orig_host_agents = getattr(driver_context.PortContext, "host_agents")
+        setattr(driver_context.PortContext, "host_agents", _host_agents)
+
+        with self.port() as port:
+            with mock.patch.object(provisioning_blocks,
+                                   'add_provisioning_component') as ap:
+                port['port'].update(update_dict)
+                plugin.update_port(ctx, port['port']['id'], port)
+                ap.assert_called()
+
+        setattr(driver_context.PortContext, "host_agents", orig_host_agents)
+        dhcp_agt_mock.stop()
+
 
 
 class TestCiscoApicML2SubnetScope(ApicML2IntegratedTestCase):
